@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GeneCanvas</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="win" id="win">
+  <div class="menubar" id="menubar"></div>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="doctabs" id="doctabs"></div>
+  <div class="main">
+    <aside class="side" id="side"></aside>
+    <section class="view" id="view"></section>
+  </div>
+  <div class="viewtabs" id="viewtabs"></div>
+  <div class="status" id="status"></div>
+</div>
+<div class="modal-bg" id="modal" hidden><div class="dlg" id="dlg"></div></div>
+<div class="menu-pop" id="menupop" hidden></div>
+<div class="ctx" id="ctx" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<input type="file" id="fileinput" hidden accept=".gb,.gbk,.genbank,.gbff,.ape,.fa,.fasta,.fna,.txt,.seq,.dna">
+<script src="dna.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
