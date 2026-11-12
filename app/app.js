@@ -364,6 +364,8 @@ svg .prim { cursor: pointer; }
       ] },
       { label: 'Features', items: [
         { label: 'Add Feature…', key: 'Ctrl+K', dis: !has, act: () => dlgFeature(null) },
+        { label: 'Import Features from Another File…', dis: !has, act: () => dlgImport('features') },
+        '-',
         { label: 'Detect Common Features', dis: !has, act: detectCommon },
         { label: 'Show Features Table', dis: !has, act: () => setView('feat') },
         '-',
@@ -371,6 +373,8 @@ svg .prim { cursor: pointer; }
       ] },
       { label: 'Primers', items: [
         { label: 'Add Primer…', dis: !has, act: () => dlgPrimer(null) },
+        { label: 'Import Primers…', dis: !has, act: () => dlgImport('primers') },
+        { label: 'Primer Sets…', dis: !has, act: dlgPrimerSets },
         { label: 'Primer from Selection (Top Strand)', dis: !sl, act: () => primerFromSel(1) },
         { label: 'Primer from Selection (Bottom Strand)', dis: !sl, act: () => primerFromSel(-1) },
         '-',
@@ -399,6 +403,7 @@ svg .prim { cursor: pointer; }
       ] },
       { label: 'Analyze', items: [
         { label: 'Choose Enzymes…', dis: !has, act: () => dlgEnzymeChooser() },
+        { label: 'Enzyme Sets…', dis: !has, act: dlgEnzymeSets },
         { label: 'Enzyme Database…', act: dlgEnzymeDB },
         { label: 'Feature Database…', act: dlgFeatureDB },
         '-',
@@ -2932,7 +2937,7 @@ svg .prim { cursor: pointer; }
   // ================================================================ stored settings
   // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
   const SETTINGS_KEY = 'genecanvas.settings';
-  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {} };
+  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [] };
   let SET = { ...DEFAULT_SETTINGS };
 
   async function loadSettings() {
@@ -2944,7 +2949,17 @@ svg .prim { cursor: pointer; }
     SET = { ...DEFAULT_SETTINGS, ...(raw || {}) };
     SET.enzymeSets = SET.enzymeSets || {};
     SET.ladders = SET.ladders || {};
+    SET.primerSets = SET.primerSets || {};
+    SET.myFeatures = SET.myFeatures || [];
+    SET.recentFiles = SET.recentFiles || [];
     return SET;
+  }
+  // Keeps the last 30 files so the import dialog can offer them again.
+  function recordRecent(doc) {
+    if (!doc || isGel(doc)) return;
+    const entry = { name: doc.name, path: doc.path || null, length: (doc.seq || '').length, when: Date.now() };
+    SET.recentFiles = [entry, ...SET.recentFiles.filter(r => (r.path && entry.path) ? r.path !== entry.path : r.name !== entry.name)].slice(0, 30);
+    saveSettings();
   }
   async function saveSettings() {
     try {
@@ -2965,6 +2980,254 @@ svg .prim { cursor: pointer; }
       'Type IIS (BsaI, BsmBI, BbsI, SapI)': CLONE.TYPE2S.slice(),
       'Blunt cutters': cutters.filter(e => e.overhang === 0).map(e => e.name)
     };
+  }
+
+  // ================================================================ importing from other files
+  // Reads a file chosen anywhere (an open tab, the recent list, or the file browser)
+  // and hands back a parsed record without opening it as a document.
+  async function readSource(src) {
+    if (src.doc) return { name: src.doc.name, seq: src.doc.seq, circular: src.doc.circular, features: src.doc.features, primers: src.doc.primers };
+    if (src.path) {
+      if (!(host && host.readFile)) throw new Error('Opening a file by path needs the desktop app. Use Browse instead.');
+      const r = await host.readFile(src.path);
+      if (!r || !r.ok) throw new Error((r && r.error) || 'The file could not be read.');
+      const bin = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+      return parseAnySource(r.name, /\.(dna|ab1)$/i.test(r.name) ? bin.buffer : new TextDecoder().decode(bin));
+    }
+    if (src.file) {
+      const buf = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error('The file could not be read.'));
+        if (/\.(dna|ab1)$/i.test(src.file.name)) fr.readAsArrayBuffer(src.file); else fr.readAsText(src.file);
+      });
+      return parseAnySource(src.file.name, buf);
+    }
+    throw new Error('Nothing chosen.');
+  }
+  function parseAnySource(name, data) {
+    if (/\.dna$/i.test(name)) return DNA.parseDnaBinary(data instanceof ArrayBuffer ? data : new TextEncoder().encode(data).buffer, name);
+    return DNA.parseAny(typeof data === 'string' ? data : new TextDecoder().decode(data), name);
+  }
+
+  // The list of places to import from: open tabs first, then recent files, then Browse.
+  function sourceListHTML(selected) {
+    const open = S.docs.filter(x => !isGel(x) && x !== D());
+    const recent = SET.recentFiles.filter(r => r.path || !open.some(o => o.name === r.name)).slice(0, 30);
+    let h = '';
+    if (open.length) h += `<div class="imgroup">Open now</div>` + open.map(x => `<label class="imitem"><input type="radio" name="imsrc" value="doc:${x.id}" ${selected === 'doc:' + x.id ? 'checked' : ''}><span class="imn">${esc(x.name)}</span><span class="ims">${fmt(x.seq.length)} bp · ${x.circular ? 'circular' : 'linear'}</span></label>`).join('');
+    if (recent.length) h += `<div class="imgroup">Recent</div>` + recent.map((r, i) => `<label class="imitem${r.path ? '' : ' dis'}" title="${esc(r.path || 'This one was not opened from a file, so it cannot be read again')}"><input type="radio" name="imsrc" value="rec:${i}" ${r.path ? '' : 'disabled'} ${selected === 'rec:' + i ? 'checked' : ''}><span class="imn">${esc(r.name)}</span><span class="ims">${r.length ? fmt(r.length) + ' bp' : ''}${r.path ? '' : ' · not on disk'}</span></label>`).join('');
+    if (!h) h = '<div class="hint">No other file is open yet. Use Browse to find one.</div>';
+    return h;
+  }
+  function pickedSource(box) {
+    const el = box.querySelector('input[name=imsrc]:checked');
+    if (!el) return null;
+    const v = el.value;
+    if (v.startsWith('doc:')) return { doc: S.docs.find(x => String(x.id) === v.slice(4)) };
+    const recent = SET.recentFiles.filter(r => r.path || !S.docs.some(o => o.name === r.name)).slice(0, 30);
+    return { path: (recent[+v.slice(4)] || {}).path };
+  }
+
+  // Places a feature by finding its own sequence in this document, which is what makes
+  // an import survive a different numbering, a rotated origin or a flipped strand.
+  function placeByMatch(target, fseq, prot) {
+    const hits = DNA.searchDNA(target.seq, target.circular, fseq);
+    if (hits.length) return { hits, via: 'DNA' };
+    if (prot && prot.length >= 5) {
+      const ph = DNA.searchProtein(target.seq, target.circular, prot);
+      if (ph.length) return { hits: ph, via: 'protein' };
+    }
+    return { hits: [], via: null };
+  }
+
+  function dlgImport(what) {
+    const d = D();
+    const isFeat = what === 'features';
+    let loaded = null, picks = new Set(), mode = 'match';
+    const status = (msg, err) => { const e = $('#imStat'); if (e) { e.textContent = msg; e.className = err ? 'err' : 'hint'; } };
+    const showList = () => {
+      if (!loaded) { $('#imList').innerHTML = ''; return; }
+      const items = isFeat ? loaded.features : loaded.primers;
+      if (!items.length) { $('#imList').innerHTML = `<div class="hint">“${esc(loaded.name)}” has no ${isFeat ? 'features' : 'primers'}.</div>`; return; }
+      picks = new Set(items.map((_, i) => i));
+      $('#imList').innerHTML = `<div class="ecbar"><button class="btn" id="imAll">Check all</button><button class="btn" id="imNone">Uncheck all</button>
+          ${isFeat ? `<label><input type="radio" name="immode" value="match" checked> Place by matching sequence</label><label><input type="radio" name="immode" value="coord"> Keep the original positions</label>` : ''}
+          <span class="sp" style="flex:1"></span><span class="note">${items.length} found</span></div>
+        <div class="tscroll" style="max-height:34vh"><table class="grid"><thead><tr><th style="width:26px"></th><th>Name</th>${isFeat ? '<th>Type</th><th>Length</th><th>In this sequence</th>' : '<th>Sequence</th><th>Length</th><th>Tm</th>'}</tr></thead><tbody>
+          ${items.map((it, i) => {
+            if (!isFeat) return `<tr><td><input type="checkbox" data-i="${i}" checked></td><td>${esc(it.name)}</td><td class="mono wrap">${esc(it.seq)}</td><td>${it.seq.length}</td><td>${DNA.tm(it.seq).toFixed(1)} °C</td></tr>`;
+            const n = loaded.seq.length, fs = DNA.sub(loaded.seq, it.start, it.end);
+            const prot = it.type === 'CDS' && fs.length >= 15 ? DNA.translate(it.strand === -1 ? DNA.rc(fs) : fs).replace(/\*+$/, '') : '';
+            const r = placeByMatch(d, it.strand === -1 ? DNA.rc(fs) : fs, prot);
+            const where = r.hits.length ? `${r.hits.length} place${r.hits.length > 1 ? 's' : ''} (${r.via})` : '<span style="color:var(--danger)">not found</span>';
+            return `<tr><td><input type="checkbox" data-i="${i}" checked></td><td>${esc(it.name)}</td><td>${esc(it.type)}</td><td>${fmt(DNA.rlen(it, n))} bp</td><td>${where}</td></tr>`;
+          }).join('')}
+        </tbody></table></div>`;
+    };
+    const load = async src => {
+      status('Reading…');
+      try { loaded = await readSource(src); } catch (e) { loaded = null; status(e.message, true); showList(); return; }
+      status(`${loaded.name} — ${fmt(loaded.seq.length)} bp, ${loaded.features.length} features, ${loaded.primers.length} primers`);
+      showList();
+    };
+    dialog({
+      title: isFeat ? 'Import Features' : 'Import Primers', wide: true,
+      body: `<div class="form">
+        <label>From</label><div><div class="imlist" id="imSrc">${sourceListHTML('')}</div>
+          <div class="row2" style="margin-top:6px"><button class="btn" id="imBrowse" type="button">Browse…</button><button class="btn" id="imLoad" type="button">Read this file</button>
+          ${!isFeat && Object.keys(SET.primerSets).length ? `<span style="margin-left:8px">or a saved set</span><select id="imSet"><option value="">— choose —</option>${Object.keys(SET.primerSets).sort().map(k => `<option>${esc(k)}</option>`).join('')}</select><button class="btn" id="imSetLoad" type="button">Load set</button>` : ''}</div>
+          <div class="hint" id="imStat">Choose a file above, or browse for one.</div></div>
+        <div class="full" id="imList"></div></div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Import', primary: true, act: () => {
+          if (!loaded) return showErr('Read a file first.');
+          const items = isFeat ? loaded.features : loaded.primers;
+          const chosen = [...document.querySelectorAll('#imList input[data-i]:checked')].map(i => items[+i.dataset.i]);
+          if (!chosen.length) return showErr('Check at least one.');
+          if (!isFeat) {
+            for (const pr of chosen) d.primers.push({ id: uid(), name: pr.name, seq: pr.seq, notes: pr.notes || `Imported from ${loaded.name}` });
+            commit(d, `Imported ${chosen.length} primer${chosen.length > 1 ? 's' : ''} from ${loaded.name}`);
+            renderAll(true); toast(`Imported ${chosen.length} primer${chosen.length > 1 ? 's' : ''}`);
+            return;
+          }
+          const byCoord = (document.querySelector('input[name=immode]:checked') || {}).value === 'coord';
+          let added = 0, missed = 0;
+          const n = d.seq.length, sn = loaded.seq.length;
+          for (const f of chosen) {
+            if (byCoord) {
+              if (f.start >= n) { missed++; continue; }
+              d.features.push({ id: uid(), name: f.name, type: f.type, start: f.start, end: Math.min(f.end, n), strand: f.strand, color: f.color || TYPE_COL[f.type] || '#c9ced6', notes: f.notes || `Imported from ${loaded.name}`, matchProtein: !!f.matchProtein });
+              added++; continue;
+            }
+            const fs = DNA.sub(loaded.seq, f.start, f.end);
+            const fwd = f.strand === -1 ? DNA.rc(fs) : fs;
+            const prot = f.type === 'CDS' && fs.length >= 15 ? DNA.translate(fwd).replace(/\*+$/, '') : '';
+            const r = placeByMatch(d, fwd, prot);
+            if (!r.hits.length) { missed++; continue; }
+            for (const h of r.hits) {
+              const strand = f.strand === 0 ? 0 : (f.strand === -1 ? -h.strand : h.strand);
+              if (d.features.some(x => x.start === h.start && x.end === h.end && x.name === f.name)) continue;
+              d.features.push({ id: uid(), name: f.name, type: f.type, start: h.start, end: h.end, strand, color: f.color || TYPE_COL[f.type] || '#c9ced6', notes: f.notes || `Imported from ${loaded.name} (matched on ${r.via})`, matchProtein: r.via === 'protein' });
+              added++;
+            }
+          }
+          if (!added) return showErr('None of the chosen features could be placed in this sequence.');
+          commit(d, `Imported ${added} feature${added > 1 ? 's' : ''} from ${loaded.name}`);
+          renderAll(true);
+          toast(`Imported ${added} feature${added > 1 ? 's' : ''}${missed ? `, ${missed} could not be placed` : ''}`);
+        }
+      }],
+      onOpen: box => {
+        box.querySelector('#imSrc').addEventListener('change', () => { const s2 = pickedSource(box); if (s2) load(s2); });
+        box.querySelector('#imLoad').onclick = () => { const s2 = pickedSource(box); if (s2) load(s2); else status('Choose a file first.', true); };
+        box.querySelector('#imBrowse').onclick = () => {
+          if (host && host.openFiles) { host.openFiles().then(files => { if (files && files[0]) { const f = files[0]; const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); try { loaded = parseAnySource(f.name, /\.(dna|ab1)$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin)); status(`${loaded.name} — ${fmt(loaded.seq.length)} bp, ${loaded.features.length} features, ${loaded.primers.length} primers`); showList(); } catch (e) { status(e.message, true); } } }); return; }
+          const inp = document.createElement('input');
+          inp.type = 'file'; inp.accept = '.gb,.gbk,.genbank,.gbff,.fa,.fasta,.seq,.txt,.dna';
+          inp.onchange = () => { if (inp.files[0]) load({ file: inp.files[0] }); };
+          inp.click();
+        };
+        const setSel = box.querySelector('#imSetLoad');
+        if (setSel) setSel.onclick = () => {
+          const name = val('imSet'); if (!name) { status('Choose a saved set.', true); return; }
+          loaded = { name: 'set “' + name + '”', seq: '', features: [], primers: SET.primerSets[name].map(p => ({ ...p })) };
+          status(`${SET.primerSets[name].length} primers in the set “${name}”`);
+          showList();
+        };
+        box.querySelector('#imList').addEventListener('click', e => {
+          if (e.target.id === 'imAll') box.querySelectorAll('#imList input[data-i]').forEach(i => i.checked = true);
+          else if (e.target.id === 'imNone') box.querySelectorAll('#imList input[data-i]').forEach(i => i.checked = false);
+        });
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- primer sets
+  function dlgPrimerSets() {
+    const d = D();
+    const render = () => {
+      const names = Object.keys(SET.primerSets).sort();
+      $('#psList').innerHTML = names.length
+        ? `<table class="grid"><thead><tr><th>Set</th><th>Primers</th><th></th></tr></thead><tbody>${names.map(k => `<tr><td><b>${esc(k)}</b></td><td class="wrap">${SET.primerSets[k].map(p => esc(p.name)).join(', ')}</td><td><button class="ib" data-add="${esc(k)}">Add to this file</button><button class="ib" data-ren="${esc(k)}">Rename</button><button class="ib dng" data-del="${esc(k)}">Delete</button></td></tr>`).join('')}</tbody></table>`
+        : '<div class="hint">No primer sets saved yet. Save the primers of this file as a set to reuse them elsewhere.</div>';
+    };
+    dialog({
+      title: 'Primer Sets', wide: true,
+      body: `<div class="form">
+        <label>This file</label><div class="row2"><span class="note">${d.primers.length} primer${d.primers.length === 1 ? '' : 's'}</span><button class="btn" id="psSave" type="button" ${d.primers.length ? '' : 'disabled'}>Save them as a set…</button></div>
+        <div class="full" id="psList"></div>
+        <div class="full hint">Sets are stored with the program, not with the file, so they are offered for every sequence you open.</div></div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#psSave').onclick = () => promptName('Save primer set', 'Name', d.name + ' primers', async name => {
+          SET.primerSets[name] = d.primers.map(p => ({ name: p.name, seq: p.seq, notes: p.notes || '' }));
+          await saveSettings(); render(); toast(`Saved “${name}” with ${d.primers.length} primers`);
+        });
+        box.querySelector('#psList').addEventListener('click', e => {
+          const add = e.target.closest('[data-add]');
+          if (add) {
+            const list = SET.primerSets[add.dataset.add] || [];
+            for (const p of list) d.primers.push({ id: uid(), name: p.name, seq: p.seq, notes: p.notes || '' });
+            commit(d, `Added ${list.length} primers from the set “${add.dataset.add}”`);
+            renderAll(true); closeDialog(); toast(`Added ${list.length} primer${list.length === 1 ? '' : 's'}`);
+            return;
+          }
+          const ren = e.target.closest('[data-ren]');
+          if (ren) {
+            const old = ren.dataset.ren;
+            promptName('Rename primer set', 'New name', old, async name => {
+              if (name !== old) { SET.primerSets[name] = SET.primerSets[old]; delete SET.primerSets[old]; await saveSettings(); render(); }
+            });
+            return;
+          }
+          const del = e.target.closest('[data-del]');
+          if (del) { delete SET.primerSets[del.dataset.del]; saveSettings().then(render); }
+        });
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- enzyme set manager
+  function dlgEnzymeSets() {
+    const d = D();
+    const render = () => {
+      const names = Object.keys(SET.enzymeSets).sort();
+      $('#esList').innerHTML = names.length
+        ? `<table class="grid"><thead><tr><th>Set</th><th>Enzymes</th><th></th></tr></thead><tbody>${names.map(k => `<tr><td><b>${esc(k)}</b></td><td class="wrap">${SET.enzymeSets[k].length} — ${esc(SET.enzymeSets[k].slice(0, 12).join(', '))}${SET.enzymeSets[k].length > 12 ? ' …' : ''}</td><td><button class="ib" data-use="${esc(k)}">Use</button><button class="ib" data-upd="${esc(k)}">Replace with current</button><button class="ib" data-ren="${esc(k)}">Rename</button><button class="ib dng" data-del="${esc(k)}">Delete</button></td></tr>`).join('')}</tbody></table>`
+        : '<div class="hint">No enzyme sets saved yet.</div>';
+    };
+    dialog({
+      title: 'Enzyme Sets', wide: true,
+      body: `<div class="form">
+        <label>This file</label><div class="row2"><span class="note">${d.chosen.length} chosen</span><button class="btn" id="esSave" type="button" ${d.chosen.length ? '' : 'disabled'}>Save them as a set…</button><button class="btn" id="esPick" type="button">Choose enzymes…</button></div>
+        <div class="full" id="esList"></div>
+        <div class="full hint">Sets are stored with the program, not with the file.</div></div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#esSave').onclick = () => promptName('Save enzyme set', 'Name', '', async name => {
+          SET.enzymeSets[name] = d.chosen.slice(); await saveSettings(); render(); toast(`Saved “${name}” with ${d.chosen.length} enzymes`);
+        });
+        box.querySelector('#esPick').onclick = () => { closeDialog(); dlgEnzymeChooser(); };
+        box.querySelector('#esList').addEventListener('click', e => {
+          const use = e.target.closest('[data-use]');
+          if (use) { d.chosen = SET.enzymeSets[use.dataset.use].slice(); d.opts.enzMode = 'chosen'; renderAll(true); closeDialog(); toast(`Using the set “${use.dataset.use}”`); return; }
+          const upd = e.target.closest('[data-upd]');
+          if (upd) { SET.enzymeSets[upd.dataset.upd] = d.chosen.slice(); saveSettings().then(() => { render(); toast(`“${upd.dataset.upd}” now holds ${d.chosen.length} enzymes`); }); return; }
+          const ren = e.target.closest('[data-ren]');
+          if (ren) {
+            const old = ren.dataset.ren;
+            promptName('Rename enzyme set', 'New name', old, async name => {
+              if (name !== old) { SET.enzymeSets[name] = SET.enzymeSets[old]; delete SET.enzymeSets[old]; await saveSettings(); render(); }
+            });
+            return;
+          }
+          const del = e.target.closest('[data-del]');
+          if (del) { delete SET.enzymeSets[del.dataset.del]; saveSettings().then(render); }
+        });
+      }
+    });
   }
 
   // ================================================================ enzyme chooser
@@ -3561,6 +3824,7 @@ svg .prim { cursor: pointer; }
   // ================================================================ files
   function addDoc(src) {
     const d = makeDoc(src);
+    recordRecent(d);
     S.docs.push(d); S.active = S.docs.length - 1;
     if (S.view === 'hist') S.view = 'map';
     renderAll();

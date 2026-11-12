@@ -87,6 +87,13 @@ ipcMain.handle('open-files', async () => {
   return r.filePaths.map(readForRenderer);
 });
 
+ipcMain.handle('read-file', async (_e, { path: target }) => {
+  try {
+    if (!fs.existsSync(target)) return { ok: false, error: 'The file is no longer there.' };
+    return { ok: true, name: path.basename(target), path: target, data: fs.readFileSync(target).toString('base64') };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
 ipcMain.handle('save-file', async (_e, { path: p, defaultName, content, filters }) => {
   let target = p;
   if (!target) {
