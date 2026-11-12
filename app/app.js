@@ -1,7 +1,7 @@
 /* GeneCanvas — application UI */
 (function () {
   'use strict';
-  const DNA = window.DNA;
+  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER;
   const host = window.gcHost || null; // provided by the Electron preload; null in a plain browser
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -14,6 +14,29 @@
     enhancer: '#a3d56f', sig_peptide: '#f2a3c9', LTR: '#a8a8de', regulatory: '#9fd6b4', intron: '#d8d8d8', exon: '#f6d98a',
     "5'UTR": '#cfe3a5', "3'UTR": '#cfe3a5', mobile_element: '#d9b38c', misc_RNA: '#b4d4f0', ncRNA: '#b4d4f0', ORF: '#b9bfc8'
   };
+  // Rules for the map SVG. Kept here so exported and printed copies can carry them;
+  // a stylesheet loaded from a file cannot be read back at runtime.
+  const SVG_CSS = `
+svg .bb { fill: none; stroke: var(--bb); stroke-width: 1.2; }
+svg .tick { stroke: var(--faint); stroke-width: 1; }
+svg .tickl { fill: var(--faint); font: 10px var(--f-ui); }
+svg .feat { stroke: rgba(0, 0, 0, .38); stroke-width: .8; cursor: pointer; }
+svg .feat:hover { stroke: #000; stroke-width: 1.6; }
+svg .ftxt { fill: #111; font: 600 11px var(--f-ui); pointer-events: none; }
+svg .lbl { font: 11px var(--f-ui); fill: var(--ink); cursor: pointer; }
+svg .lbl.e { fill: #3a3f4b; }
+svg .lbl.e.u { font-weight: 600; }
+svg .lbl.f { font-weight: 600; }
+svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
+svg .lead { fill: none; stroke: #9aa2af; stroke-width: .8; }
+svg .ecut { stroke: #48505e; stroke-width: 1; }
+svg .ctr1 { font: 700 17px var(--f-ui); fill: var(--ink); }
+svg .ctr2 { font: 13px var(--f-ui); fill: var(--muted); }
+svg .selarea { fill: var(--sel); stroke: var(--selline); stroke-width: .8; pointer-events: none; }
+svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
+svg .orf { stroke: none; cursor: pointer; }
+svg .prim { cursor: pointer; }
+`;
   const FEATURE_TYPES = Object.keys(TYPE_COL).filter(t => t !== 'ORF');
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
 
@@ -37,7 +60,7 @@
         return { id: uid(), name: f.name || f.type, type: f.type || 'misc_feature', start: Math.max(0, Math.min(n, f.start)), end: Math.max(0, Math.min(n, f.end)), strand: f.strand === undefined ? 1 : f.strand, color, notes: f.notes || '' };
       }),
       primers: (src.primers || []).map(p => ({ id: uid(), name: p.name, seq: DNA.clean(p.seq), notes: p.notes || '' })),
-      opts: defaultOpts(!!src.circular), chosen: [], sel: { start: 0, end: 0 }, anchor: 0,
+      opts: defaultOpts(!!src.circular), chosen: [], sel: { start: 0, end: 0 }, anchor: 0, alignments: [], designed: [],
       hist: [], hi: -1, ver: 0, cache: null, dirty: false, path: src.path || null
     };
     commit(d, src.histLabel || 'Opened ' + d.name, { initial: true });
@@ -257,6 +280,11 @@
     seq: '<path d="M4 7h16M4 12h16M4 17h10"/>',
     tbl: '<rect x="3" y="5" width="18" height="14"/><path d="M3 10h18M9 5v14"/>',
     hist: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
+    align: '<path d="M4 7h16M4 12h11M4 17h14"/><path d="M19 10v4"/>',
+    ncbi: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/>',
+    clone: '<circle cx="7" cy="8" r="3.4"/><circle cx="17" cy="16" r="3.4"/><path d="M9.6 10.4 14.4 14"/>',
+    design: '<path d="M4 16h8"/><path d="m9 13 3 3-3 3"/><path d="M4 7h16"/><circle cx="17" cy="7" r="2"/>',
+    print: '<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="7" rx="1"/><path d="M7 14h10v6H7z"/>',
     zoomin: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 6 6M8 10.5h5M10.5 8v5"/>',
     zoomout: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 6 6M8 10.5h5"/>'
   };
@@ -269,12 +297,17 @@
       { label: 'File', items: [
         { label: 'New DNA File…', key: 'Ctrl+N', act: dlgNew },
         { label: 'Open…', key: 'Ctrl+O', act: openFiles },
+        { label: 'Open from NCBI…', key: 'Ctrl+D', act: dlgNCBI },
+        { label: 'Open Sequencing Trace (.ab1)…', dis: !has, act: openTraces },
         { label: 'Open Example Plasmid', act: () => addDoc(DNA.buildDemo()) },
         '-',
         { label: 'Save', key: 'Ctrl+S', dis: !has, act: () => saveDoc(false) },
         { label: 'Save As…', key: 'Ctrl+Shift+S', dis: !has, act: () => saveDoc(true) },
         { label: 'Export FASTA…', dis: !has, act: exportFasta },
         { label: 'Export Map Image (SVG)…', dis: !has, act: exportSVG },
+        '-',
+        { label: 'Print…', key: 'Ctrl+P', dis: !has, act: dlgPrint },
+        { label: 'Export PDF…', dis: !has, act: () => dlgPrint(true) },
         '-',
         { label: 'Close File', key: 'Ctrl+W', dis: !has, act: () => closeDoc(S.active) },
         ...(host ? ['-', { label: 'Exit', act: () => host.quit() }] : [])
@@ -332,6 +365,23 @@
         { label: 'Primer from Selection (Bottom Strand)', dis: !sl, act: () => primerFromSel(-1) },
         '-',
         { label: 'Show Primers Table', dis: !has, act: () => setView('primer') }
+      ] },
+      { label: 'Cloning', items: [
+        { label: 'Restriction Cloning…', dis: S.docs.length < 1, act: dlgRestrictionClone },
+        { label: 'Gibson / Overlap Assembly…', dis: S.docs.length < 1, act: dlgGibson },
+        { label: 'Gateway BP / LR…', dis: S.docs.length < 2, act: dlgGateway },
+        '-',
+        { label: 'Insert Fragment from Clipboard…', dis: !has, act: dlgInsert },
+        { label: 'Show att Sites in This Sequence', dis: !has, act: showAttSites }
+      ] },
+      { label: 'Tools', items: [
+        { label: 'Design PCR Primers…', dis: !has, act: dlgDesignPCR },
+        { label: 'Design Sequencing Primers…', dis: !has, act: dlgDesignWalk },
+        { label: 'Design Mutagenesis Primers…', dis: !has || !sl, act: dlgDesignMut },
+        '-',
+        { label: 'Align Sequencing Traces…', dis: !has, act: openTraces },
+        { label: 'Show Alignments', dis: !has, act: () => setView('align') },
+        { label: 'Remove All Alignments', dis: !has || !d.alignments.length, act: () => { d.alignments = []; toast('Alignments removed'); renderAll(); } }
       ] },
       { label: 'Actions', items: [
         { label: 'Restriction Digest & Gel…', dis: !has, act: dlgDigest },
@@ -420,7 +470,7 @@
     const d = D(), has = !!d;
     const b = (k, label, act, o = {}) => `<button class="tb${o.on ? ' on' : ''}" data-a="${act}" title="${esc(o.title || label)}" ${o.dis ? 'disabled' : ''}>${icon(k)}<span>${label}</span></button>`;
     $('#toolbar').innerHTML = [
-      b('new', 'New', 'new'), b('open', 'Open', 'open'), b('save', 'Save', 'save', { dis: !has }),
+      b('new', 'New', 'new'), b('open', 'Open', 'open'), b('ncbi', 'NCBI', 'ncbi', { title: 'Download a sequence from NCBI' }), b('save', 'Save', 'save', { dis: !has }), b('print', 'Print', 'print', { dis: !has }),
       '<div class="tbsep"></div>',
       b('undo', 'Undo', 'undo', { dis: !has || d.hi <= 0 }), b('redo', 'Redo', 'redo', { dis: !has || d.hi >= d.hist.length - 1 }),
       '<div class="tbsep"></div>',
@@ -433,6 +483,10 @@
       b('enz', 'Enzymes', 'enz', { dis: !has, title: 'Choose enzymes' }),
       b('gel', 'Digest', 'gel', { dis: !has, title: 'Restriction digest and simulated gel' }),
       '<div class="tbsep"></div>',
+      b('clone', 'Clone', 'clone', { dis: !has, title: 'Restriction cloning' }),
+      b('design', 'Primers', 'design', { dis: !has, title: 'Design PCR primers' }),
+      b('align', 'Trace', 'align', { dis: !has, title: 'Align a sequencing trace' }),
+      '<div class="tbsep"></div>',
       b('tr', 'Translate', 'tr', { dis: !has || !selLen(d) }),
       b('rc', 'Rev Comp', 'rc', { dis: !has }),
       b('origin', 'Origin', 'origin', { dis: !has || !d.circular, title: 'Set origin at cursor' }),
@@ -444,13 +498,14 @@
     new: () => dlgNew(), open: () => openFiles(), save: () => saveDoc(false), undo, redo, find: () => openFind(),
     circ: () => setOpt('mapMode', 'circular', true), lin: () => setOpt('mapMode', 'linear', true),
     feat: () => dlgFeature(null), primer: () => (selLen(D()) ? primerFromSel(1) : dlgPrimer(null)), enz: () => setView('enz'), gel: () => dlgDigest(),
-    tr: () => dlgTranslate(), rc: () => revCompSel(), origin: () => setOrigin(), side: () => { S.sideHidden = !S.sideHidden; renderAll(); }
+    tr: () => dlgTranslate(), rc: () => revCompSel(), origin: () => setOrigin(), side: () => { S.sideHidden = !S.sideHidden; renderAll(); },
+    ncbi: () => dlgNCBI(), print: () => dlgPrint(), clone: () => dlgRestrictionClone(), design: () => dlgDesignPCR(), align: () => openTraces()
   };
 
   function renderDocTabs() {
     $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''}" data-i="${i}" title="${esc(d.name)} — ${fmt(d.seq.length)} bp"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
   }
-  const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['hist', 'History', 'hist']];
+  const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['hist', 'History', 'hist']];
   function renderViewTabs() {
     const vt = $('#viewtabs');
     vt.classList.toggle('noside', S.sideHidden || !(S.view === 'map' || S.view === 'seq'));
@@ -523,6 +578,7 @@
     else if (S.view === 'enz') renderEnzymes();
     else if (S.view === 'feat') renderFeatures();
     else if (S.view === 'primer') renderPrimers();
+    else if (S.view === 'align') renderAlign();
     else if (S.view === 'hist') renderHistory();
   }
 
@@ -1240,13 +1296,18 @@
   let dlgKeyHandler = null;
   function dialog({ title, body, buttons, wide, onOpen }) {
     closeMenu(); closeCtx();
-    const m = $('#modal'), box = $('#dlg');
+    const m = $('#modal');
+    // Start from a fresh node so listeners added by a previous dialog cannot fire on this one.
+    const prev = $('#dlg'), box = prev.cloneNode(false);
+    prev.parentNode.replaceChild(box, prev);
     box.className = 'dlg' + (wide ? ' wide' : '');
     box.innerHTML = `<div class="hd">${esc(title)}</div><div class="bd">${body}</div><div class="ft">${buttons.map((b, i) => `<button class="btn${b.primary ? ' pri' : ''}${b.danger ? ' dng' : ''}" data-b="${i}">${esc(b.label)}</button>`).join('')}</div>`;
     m.hidden = false;
     box.querySelector('.ft').onclick = e => {
       const b = e.target.closest('[data-b]'); if (!b) return;
       const r = buttons[+b.dataset.b].act ? buttons[+b.dataset.b].act() : true;
+      // An async handler keeps the dialog open and closes it itself when it is done.
+      if (r && typeof r.then === 'function') return;
       if (r !== false) closeDialog();
     };
     dlgKeyHandler = e => {
@@ -1257,7 +1318,13 @@
     };
     box.addEventListener('keydown', dlgKeyHandler);
     if (onOpen) onOpen(box);
-    const first = box.querySelector('.bd input, .bd textarea, .bd select'); if (first) setTimeout(() => { first.focus(); if (first.select) first.select(); }, 0);
+    // Focus something inside the dialog, otherwise Escape and Enter never reach it.
+    box.tabIndex = -1;
+    const first = box.querySelector('.bd input, .bd textarea, .bd select');
+    setTimeout(() => {
+      if (first) { first.focus(); if (first.select) first.select(); }
+      else box.focus();
+    }, 0);
   }
   function closeDialog() { const box = $('#dlg'); if (dlgKeyHandler) box.removeEventListener('keydown', dlgKeyHandler); $('#modal').hidden = true; box.innerHTML = ''; }
   const val = id => document.getElementById(id).value;
@@ -1460,7 +1527,7 @@
   }
 
   function dlgShortcuts() {
-    const rows = [['Ctrl+N', 'New DNA file'], ['Ctrl+O', 'Open file'], ['Ctrl+S / Ctrl+Shift+S', 'Save / Save As'], ['Ctrl+W', 'Close file'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+C / Ctrl+V', 'Copy / Paste bases'], ['Ctrl+A', 'Select all'], ['Ctrl+F', 'Find DNA or protein'], ['Ctrl+G', 'Go to position'], ['Ctrl+K', 'Add feature from selection'], ['Ctrl+1 … Ctrl+6', 'Map, Sequence, Enzymes, Features, Primers, History'], ['Ctrl + / Ctrl − / Ctrl+0', 'Zoom the map'], ['A C G T N', 'Type bases in the Sequence view'], ['Shift+click, Shift+arrows', 'Extend the selection'], ['Double-click a feature', 'Edit the feature'], ['Right-click', 'Context menu']];
+    const rows = [['Ctrl+N', 'New DNA file'], ['Ctrl+O', 'Open file'], ['Ctrl+S / Ctrl+Shift+S', 'Save / Save As'], ['Ctrl+W', 'Close file'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+C / Ctrl+V', 'Copy / Paste bases'], ['Ctrl+A', 'Select all'], ['Ctrl+F', 'Find DNA or protein'], ['Ctrl+G', 'Go to position'], ['Ctrl+K', 'Add feature from selection'], ['Ctrl+1 … Ctrl+7', 'Map, Sequence, Enzymes, Features, Primers, Alignment, History'], ['Ctrl+D', 'Open from NCBI'], ['Ctrl+P', 'Print'], ['Ctrl + / Ctrl − / Ctrl+0', 'Zoom the map'], ['A C G T N', 'Type bases in the Sequence view'], ['Shift+click, Shift+arrows', 'Extend the selection'], ['Double-click a feature', 'Edit the feature'], ['Right-click', 'Context menu']];
     dialog({ title: 'Keyboard Shortcuts', body: `<table class="grid"><tbody>${rows.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td></tr>`).join('')}</tbody></table>`, buttons: [{ label: 'Close', primary: true }] });
   }
   function dlgAbout() {
@@ -1469,6 +1536,600 @@
       body: `<p><b>GeneCanvas</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>A desktop editor for plasmids and DNA sequences: maps, sequence editing, restriction analysis, features, primers and simulated gels.</p><p class="hint">Opens GenBank (.gb, .gbk), FASTA and .dna files. Saves GenBank and FASTA. The example plasmid is a synthetic sequence made for demonstration.</p>`,
       buttons: [{ label: 'Close', primary: true }]
     });
+  }
+
+  // ================================================================ NCBI download
+  // Electron wraps a main-process error; show only the part written for the reader.
+  function hostErr(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, ''); }
+  async function ncbiSearch(db, term) {
+    if (host && host.ncbiSearch) return host.ncbiSearch({ db, term, retmax: 25 }).catch(e => { throw new Error(hostErr(e)); });
+    const base = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
+    const r = await fetch(`${base}esearch.fcgi?db=${db}&term=${encodeURIComponent(term)}&retmax=25&retmode=json&tool=GeneCanvas`);
+    const ids = ((await r.json()).esearchresult || {}).idlist || [];
+    if (!ids.length) return { ids: [], items: [] };
+    const s = await (await fetch(`${base}esummary.fcgi?db=${db}&id=${ids.join(',')}&retmode=json&tool=GeneCanvas`)).json();
+    const res = s.result || {};
+    return { ids, items: (res.uids || []).map(u => ({ uid: u, accession: res[u].caption || u, title: res[u].title || '', slen: res[u].slen || 0, topology: res[u].topology || '', organism: res[u].organism || '' })) };
+  }
+  async function ncbiFetch(db, id) {
+    if (host && host.ncbiFetch) return host.ncbiFetch({ db, id }).catch(e => { throw new Error(hostErr(e)); });
+    const r = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=${db}&id=${encodeURIComponent(id)}&rettype=gbwithparts&retmode=text&tool=GeneCanvas`);
+    if (!r.ok) throw new Error(`NCBI returned HTTP ${r.status}.`);
+    return r.text();
+  }
+  function dlgNCBI() {
+    let items = [], busy = false;
+    const setStatus = (msg, isErr) => { const e = $('#ncstat'); if (e) { e.textContent = msg; e.className = isErr ? 'err' : 'hint'; } };
+    const download = async id => {
+      if (busy) return; busy = true;
+      const auto = $('#ncauto') && $('#ncauto').checked;
+      setStatus(`Downloading ${id} from NCBI…`);
+      try {
+        const text = await ncbiFetch(val('ncdb'), id);
+        const src = DNA.parseAny(text, id + '.gb');
+        src.histLabel = `Downloaded ${id} from NCBI`;
+        let detected = 0;
+        // Many database records carry no annotation beyond the source line.
+        if (auto) {
+          for (const f of DNA.detectCommon(src.seq, src.circular, src.features)) {
+            src.features.push({ ...f, color: TYPE_COL[f.type] || '#c9ced6', notes: 'Detected automatically' });
+            detected++;
+          }
+        }
+        closeDialog();
+        addDoc(src);
+        toast(`${src.name} — ${fmt(src.seq.length)} bp, ${src.features.length} features${detected ? ` (${detected} detected)` : ''}`);
+      } catch (err) { setStatus(err.message, true); }
+      busy = false;
+    };
+    const renderList = () => {
+      $('#ncres').innerHTML = !items.length ? '' : `<table class="grid"><thead><tr><th>Accession</th><th>Description</th><th>Length</th><th>Form</th><th></th></tr></thead><tbody>${items.map(i => `<tr data-id="${esc(i.accession)}"><td><b>${esc(i.accession)}</b></td><td class="wrap">${esc(i.title)}</td><td>${fmt(i.slen)} bp</td><td>${esc(i.topology || '')}</td><td><button class="ib" data-get="${esc(i.accession)}">Open</button></td></tr>`).join('')}</tbody></table>`;
+    };
+    dialog({
+      title: 'Open from NCBI', wide: true,
+      body: `<div class="form">
+        <label for="ncdb">Database</label><select id="ncdb"><option value="nuccore">Nucleotide (GenBank)</option><option value="nucleotide">Nucleotide (alias)</option></select>
+        <label for="ncq">Accession</label><input type="text" id="ncq" placeholder="e.g. L09137, NM_000546, U49845, or a search like: pUC19 complete" spellcheck="false">
+        <label></label><label><input type="checkbox" id="ncauto" checked> Detect common features after downloading</label>
+        <div class="full hint" id="ncstat">Type an accession number and choose Download, or type words and choose Search.</div>
+        <div class="full" id="ncres"></div></div>`,
+      buttons: [{ label: 'Close' }, {
+        label: 'Search', act: async () => {
+          const term = val('ncq').trim(); if (!term) return setStatus('Enter an accession number or search words.', true);
+          setStatus('Searching NCBI…'); items = [];
+          try { const r = await ncbiSearch(val('ncdb'), term); items = r.items; renderList(); setStatus(items.length ? `${items.length} records found. Choose Open on one of them.` : 'Nothing matched that search.', !items.length); }
+          catch (err) { setStatus(err.message, true); }
+          return false;
+        }
+      }, {
+        label: 'Download', primary: true, act: () => {
+          const term = val('ncq').trim(); if (!term) { setStatus('Enter an accession number.', true); return false; }
+          download(term); return false;
+        }
+      }],
+      onOpen: box => {
+        box.querySelector('#ncres').addEventListener('click', e => { const b = e.target.closest('[data-get]'); if (b) download(b.dataset.get); });
+      }
+    });
+  }
+
+  // ================================================================ sequencing traces
+  function openTraces() {
+    const d = D(); if (!d) { toast('Open the reference sequence first.'); return; }
+    if (host && host.openFiles) { host.openFiles().then(files => { for (const f of files || []) { const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); addTrace(f.name, bin.buffer); } }); return; }
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.multiple = true; inp.accept = '.ab1,.fa,.fasta,.seq,.txt';
+    inp.onchange = () => { for (const f of inp.files) { const r = new FileReader(); r.onload = () => addTrace(f.name, r.result); r.readAsArrayBuffer(f); } };
+    inp.click();
+  }
+  function addTrace(name, buf) {
+    const d = D(); if (!d) return;
+    try {
+      const read = TRACE.parseRead(buf, name);
+      const al = TRACE.align(d, read);
+      al.id = uid();
+      al.colQi = [];
+      let qi = 0;
+      for (let k = 0; k < al.readAln.length; k++) { al.colQi.push(al.readAln[k] === '-' ? -1 : qi++); }
+      d.alignments.push(al);
+      S.alignSel = al.id;
+      setView('align');
+      toast(`${read.name}: ${al.identity.toFixed(1)}% identity over ${fmt(al.refAln.length)} bases, ${al.diffs.length} difference${al.diffs.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      dialog({ title: 'Could Not Align Trace', body: `<p>${esc(name)}</p><p class="err">${esc(err.message)}</p><p class="hint">Traces are matched to the open sequence on both strands after trimming low-quality ends. A read from a different construct will not align.</p>`, buttons: [{ label: 'OK', primary: true }] });
+    }
+  }
+
+  const TRACE_COL = { A: '#1a9850', C: '#2563c9', G: '#1c2230', T: '#c43c3c', N: '#8d95a3' };
+  function chromaSVG(al, c0, c1, h) {
+    const r = al.read;
+    if (!r.hasTrace) return '';
+    const W = (c1 - c0) * CW;
+    // only use peaks the trace arrays actually reach, so missing data draws nothing
+    let tlen = Infinity;
+    for (const b of 'ACGT') tlen = Math.min(tlen, (r.traces[b] || []).length);
+    const cols = [];
+    for (let k = c0; k < c1; k++) {
+      const qi = al.colQi[k];
+      if (qi < 0) { cols.push(null); continue; }
+      const raw = al.toRaw(qi);
+      cols.push(raw >= 0 && raw < r.peaks.length && r.peaks[raw] < tlen ? raw : null);
+    }
+    const present = cols.filter(c => c !== null);
+    if (present.length < 2) return '';
+    // average spacing between peaks sets how much trace one column shows
+    let step = 12;
+    for (let i = 1; i < present.length; i++) { const dd = Math.abs(r.peaks[present[i]] - r.peaks[present[i - 1]]); if (dd > 0 && dd < 60) { step = dd; break; } }
+    let max = 1;
+    for (const raw of present) for (const b of 'ACGT') { const t = r.traces[b]; if (t && t[r.peaks[raw]] > max) max = t[r.peaks[raw]]; }
+    max *= 1.15;
+    const paths = {};
+    for (const b of 'ACGT') paths[b] = [];
+    const SAMP = 6;
+    for (let i = 0; i < cols.length; i++) {
+      const raw = cols[i]; if (raw === null) continue;
+      const peak = r.peaks[raw];
+      for (const b of 'ACGT') {
+        const chan = al.strand === 1 ? b : DNA.COMP[b];
+        const t = r.traces[chan]; if (!t) continue;
+        for (let s = 0; s <= SAMP; s++) {
+          const frac = s / SAMP - 0.5;
+          const pos = Math.round(peak + (al.strand === 1 ? frac : -frac) * step);
+          const v = pos >= 0 && pos < t.length ? t[pos] : 0;
+          const x = (i + 0.5 + frac) * CW;
+          const y = h - Math.max(0, Math.min(1, v / max)) * (h - 2) - 1;
+          paths[b].push(`${x.toFixed(1)},${y.toFixed(1)}`);
+        }
+      }
+    }
+    const lines = Object.entries(paths).filter(([, p]) => p.length > 1)
+      .map(([b, p]) => `<polyline points="${p.join(' ')}" fill="none" stroke="${TRACE_COL[b]}" stroke-width="1" opacity=".85"/>`).join('');
+    return `<svg class="chroma" width="${W}" height="${h}" viewBox="0 0 ${W} ${h}">${lines}</svg>`;
+  }
+
+  function renderAlign() {
+    const d = D(), v = $('#view');
+    if (!d.alignments.length) {
+      v.innerHTML = `<div class="empty"><h2>No sequencing traces</h2><p>Open one or more .ab1 files to align them against <b>${esc(d.name)}</b>. Low-quality ends are trimmed, both strands are tried, and differences from the reference are listed.</p><div class="btns"><button class="btn pri" data-a="addtrace">Add Trace Files…</button></div></div>`;
+      v.querySelector('[data-a]').onclick = openTraces;
+      return;
+    }
+    if (!d.alignments.some(a => a.id === S.alignSel)) S.alignSel = d.alignments[0].id;
+    const al = d.alignments.find(a => a.id === S.alignSel);
+    const sum = TRACE.summarize(d.alignments);
+    v.innerHTML = `<div class="panel">
+      <div class="ptools">
+        <select id="alsel">${d.alignments.map(a => `<option value="${a.id}" ${a.id === S.alignSel ? 'selected' : ''}>${esc(a.read.name)} (${a.identity.toFixed(1)}%)</option>`).join('')}</select>
+        <button class="btn" id="aladd">Add Trace…</button><button class="btn dng" id="aldel">Remove</button>
+        <span class="note">${esc(al.read.name)} · ${al.strand > 0 ? 'forward' : 'reverse'} strand · covers ${fmt(al.refStart + 1)}–${fmt(al.refEnd)} · ${al.identity.toFixed(1)}% identity · ${al.diffs.length} difference${al.diffs.length === 1 ? '' : 's'}${al.trim.trimmed ? ` · trimmed ${al.trim.start} + ${al.read.seq.length - al.trim.end} low-quality bases` : ''}${al.read.hasTrace ? '' : ' · no chromatogram in this file'}</span>
+      </div>
+      ${sum.length ? `<div class="ptools" style="background:var(--win)"><span class="note">Differences: ${sum.map(s => `<a href="#" data-go="${s.pos}" class="difflink">${fmt(s.pos + 1)} ${s.type === 'mis' ? esc(s.ref + '→' + s.read) : (s.type === 'del' ? 'deleted ' + esc(s.ref) : 'inserted ' + esc(s.read))}${s.reads.length > 1 ? ` (${s.reads.length} reads)` : ''}</a>`).join(' · ')}</span></div>` : `<div class="ptools" style="background:var(--win)"><span class="note">No differences from the reference in any aligned read.</span></div>`}
+      <div class="tscroll" id="alrows"></div></div>`;
+    buildAlignRows(al);
+    $('#alsel').onchange = e => { S.alignSel = +e.target.value; renderView(); };
+    $('#aladd').onclick = openTraces;
+    $('#aldel').onclick = () => { d.alignments = d.alignments.filter(a => a.id !== S.alignSel); renderAll(); };
+    v.querySelectorAll('.difflink').forEach(a => a.onclick = e => {
+      e.preventDefault();
+      const p = +a.dataset.go;
+      setSel(p, p + 1, { anchor: p });
+      const el = $('#alrows').querySelector(`[data-ref="${p}"]`);
+      if (el) el.scrollIntoView({ block: 'center' });
+    });
+  }
+
+  function buildAlignRows(al) {
+    const d = D(), n = d.seq.length, host2 = $('#alrows');
+    const G = 94, per = Math.max(20, Math.floor((host2.clientWidth - G - 26) / CW / 10) * 10);
+    const hasT = al.read.hasTrace;
+    const chH = hasT ? 54 : 0;
+    const out = [];
+    // reference coordinate at each alignment column
+    const refPos = new Array(al.refAln.length);
+    let rp = al.refStart;
+    for (let k = 0; k < al.refAln.length; k++) { refPos[k] = rp % n; if (al.refAln[k] !== '-') rp++; }
+    for (let c0 = 0; c0 < al.refAln.length; c0 += per) {
+      const c1 = Math.min(al.refAln.length, c0 + per);
+      const ref = al.refAln.slice(c0, c1), read = al.readAln.slice(c0, c1);
+      let readHtml = '', qualHtml = '';
+      for (let k = c0; k < c1; k++) {
+        const r = al.refAln[k], s = al.readAln[k];
+        const cls = s === '-' ? 'd' : (r === '-' ? 'i' : (r === s ? '' : 'm'));
+        readHtml += cls ? `<span class="${cls}">${s}</span>` : s;
+        const qi = al.colQi[k];
+        if (qi >= 0 && al.read.quals.length) {
+          const qv = al.read.quals[al.toRaw(qi)] || 0;
+          const o = Math.max(0.08, Math.min(1, qv / 45));
+          qualHtml += `<div class="qb" style="left:${(k - c0) * CW}px;width:${CW - 0.5}px;height:${(2 + o * 6).toFixed(1)}px;opacity:${(0.25 + o * 0.6).toFixed(2)}"></div>`;
+        }
+      }
+      const y0 = 4;
+      out.push(`<div class="arow" style="height:${y0 + 54 + chH}px">
+        <div class="num" style="top:${y0 + 1}px">${fmt(refPos[c0] + 1)}</div>
+        <div class="lbl2" style="top:${y0}px">ref</div>
+        <div class="nt" style="left:${G}px;top:${y0}px">${ref}</div>
+        <div class="lbl2" style="top:${y0 + 18}px">read</div>
+        <div class="nt rd" style="left:${G}px;top:${y0 + 18}px">${readHtml}</div>
+        <div class="quals" style="left:${G}px;top:${y0 + 36}px">${qualHtml}</div>
+        ${hasT ? `<div class="chw" style="left:${G}px;top:${y0 + 46}px">${chromaSVG(al, c0, c1, chH)}</div>` : ''}
+        ${Array.from({ length: c1 - c0 }, (_, i) => al.refAln[c0 + i] !== '-' && al.readAln[c0 + i] !== al.refAln[c0 + i] ? `<div class="mk" data-ref="${refPos[c0 + i]}" style="left:${G + i * CW}px;top:${y0}px"></div>` : '').join('')}
+      </div>`);
+    }
+    host2.innerHTML = out.join('');
+    host2.onclick = e => {
+      const row = e.target.closest('.arow'); if (!row) return;
+      const rect = row.getBoundingClientRect();
+      const i = Math.floor((e.clientX - rect.left - G) / CW);
+      const idx = [...host2.children].indexOf(row) * per + i;
+      if (idx >= 0 && idx < refPos.length) { const p = refPos[idx]; setSel(p, p + 1, { anchor: p }); }
+    };
+  }
+
+  // ================================================================ cloning dialogs
+  function docOptions(sel) { return S.docs.map((x, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(x.name)} (${fmt(x.seq.length)} bp, ${x.circular ? 'circular' : 'linear'})</option>`).join(''); }
+  function cutters(doc) {
+    const sites = DNA.findSites(doc.seq, doc.circular);
+    return DNA.ENZYMES.filter(e => (sites[e.name] || []).some(s => s.cut != null)).map(e => ({ name: e.name, n: sites[e.name].length })).sort((a, b) => a.n - b.n || a.name.localeCompare(b.name));
+  }
+  function fragLabel(f) { return `${fmt(f.size)} bp · ${esc(f.lenz)} / ${esc(f.renz)} · ends ${esc(CLONE.endLabel(f.left))} … ${esc(CLONE.endLabel(f.right))}`; }
+
+  function dlgRestrictionClone() {
+    if (!S.docs.length) return;
+    let vi = S.active, ii = S.docs.length > 1 ? (S.active + 1) % S.docs.length : S.active;
+    let vEnz = [], iEnz = [], products = [];
+    const enzBox = (id, doc, chosen) => `<div class="enz-pick" id="${id}" style="max-height:110px">${cutters(doc).map(e => `<label><input type="checkbox" value="${e.name}" ${chosen.includes(e.name) ? 'checked' : ''}> ${e.name} <span style="color:var(--faint)">(${e.n})</span></label>`).join('') || '<span class="hint">No enzyme from the list cuts this sequence.</span>'}</div>`;
+    const guess = doc => { const c = cutters(doc).filter(e => e.n === 1 && DNA.ENZ_BY_NAME[e.name].core >= 6); return c.slice(0, 2).map(e => e.name); };
+    const fragsOf = (doc, enz) => enz.length ? CLONE.cut(doc, DNA.findSites(doc.seq, doc.circular), enz) : [];
+    // The enzyme lists are rebuilt only when the document changes, so ticking a box keeps its place.
+    const refreshEnz = () => {
+      $('#vbox').innerHTML = enzBox('venz', S.docs[vi], vEnz);
+      $('#ibox').innerHTML = enzBox('ienz', S.docs[ii], iEnz);
+    };
+    const refresh = () => {
+      const V = S.docs[vi], I = S.docs[ii];
+      const vf = fragsOf(V, vEnz), inf = fragsOf(I, iEnz);
+      const usable = f => f.left.type !== 'o' && f.right.type !== 'o';
+      // Largest first: the vector backbone is almost always the big fragment.
+      const bySize = (a, b) => b.size - a.size;
+      const vlist = vf.filter(usable).sort(bySize), ilist = inf.filter(usable).sort(bySize);
+      $('#vfr').innerHTML = vlist.length ? vlist.map((f, k) => `<label><input type="radio" name="vf" value="${k}" ${k === 0 ? 'checked' : ''}> ${fragLabel(f)}</label>`).join('') : `<span class="hint">${vEnz.length ? 'These enzymes do not produce a fragment with two cut ends.' : 'Choose the enzymes that cut the vector.'}</span>`;
+      $('#ifr').innerHTML = ilist.length ? ilist.map((f, k) => `<label><input type="radio" name="if" value="${k}" ${k === 0 ? 'checked' : ''}> ${fragLabel(f)}</label>`).join('') : `<span class="hint">${iEnz.length ? 'These enzymes do not produce a fragment with two cut ends.' : 'Choose the enzymes that cut the insert.'}</span>`;
+      $('#rcres').innerHTML = '';
+      products = [];
+      refresh.vlist = vlist; refresh.ilist = ilist;
+    };
+    const simulate = () => {
+      const vk = +(document.querySelector('input[name=vf]:checked') || {}).value;
+      const ik = +(document.querySelector('input[name=if]:checked') || {}).value;
+      const V = refresh.vlist[vk], I = refresh.ilist[ik];
+      if (!V || !I) { $('#rcres').innerHTML = '<div class="err">Choose one vector fragment and one insert fragment.</div>'; return; }
+      products = CLONE.ligate([V, I], { name: `${S.docs[vi].name}-${S.docs[ii].name}` });
+      if (!products.length) {
+        $('#rcres').innerHTML = `<div class="err">These two fragments cannot be joined. The vector ends are ${esc(CLONE.endLabel(V.left))} and ${esc(CLONE.endLabel(V.right))}; the insert ends are ${esc(CLONE.endLabel(I.left))} and ${esc(CLONE.endLabel(I.right))}. Ligation needs matching overhangs at both joins.</div>`;
+        return;
+      }
+      $('#rcres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Orientation</th><th>Junctions</th><th></th></tr></thead><tbody>${products.map((p, k) => `<tr><td>${k + 1}</td><td><b>${fmt(p.size)} bp</b></td><td>${p.chain[1].rev ? 'insert reversed' : 'insert forward'}</td><td class="wrap">${esc(p.junctions.join(' · '))}</td><td><button class="ib" data-mk="${k}">Create</button></td></tr>`).join('')}</tbody></table><div class="hint">Features on both fragments are carried into the product.</div>`;
+    };
+    vEnz = guess(S.docs[vi]); iEnz = guess(S.docs[ii]);
+    dialog({
+      title: 'Restriction Cloning', wide: true,
+      body: `<div class="form">
+        <label for="vdoc">Vector</label><select id="vdoc">${docOptions(vi)}</select>
+        <label>Cut with</label><div id="vbox"></div>
+        <label>Fragment</label><div class="fraglist" id="vfr"></div>
+        <div class="full" style="border-top:1px solid var(--border-soft);margin:4px 0"></div>
+        <label for="idoc">Insert from</label><select id="idoc">${docOptions(ii)}</select>
+        <label>Cut with</label><div id="ibox"></div>
+        <label>Fragment</label><div class="fraglist" id="ifr"></div>
+        <div class="full" id="rcres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Simulate Ligation', primary: true, act: () => { simulate(); return false; } }],
+      onOpen: box => {
+        refreshEnz(); refresh();
+        box.addEventListener('change', e => {
+          if (e.target.id === 'vdoc') { vi = +e.target.value; vEnz = guess(S.docs[vi]); refreshEnz(); refresh(); }
+          else if (e.target.id === 'idoc') { ii = +e.target.value; iEnz = guess(S.docs[ii]); refreshEnz(); refresh(); }
+          else if (e.target.closest('#venz')) { vEnz = [...box.querySelectorAll('#venz input:checked')].map(i => i.value); refresh(); }
+          else if (e.target.closest('#ienz')) { iEnz = [...box.querySelectorAll('#ienz input:checked')].map(i => i.value); refresh(); }
+        });
+        box.addEventListener('click', e => {
+          const b = e.target.closest('[data-mk]'); if (!b) return;
+          const p = products[+b.dataset.mk];
+          closeDialog();
+          addDoc({ ...p.doc, histLabel: `Ligated ${S.docs[vi].name} with ${S.docs[ii].name}` });
+          toast(`Created ${fmt(p.size)} bp construct`);
+        });
+      }
+    });
+  }
+
+  function dlgGibson() {
+    let picked = S.docs.map((_, i) => i === S.active), results = [];
+    const pieceOf = i => {
+      const d = S.docs[i];
+      const useSel = d.circular && selLen(d) > 0 && i === S.active;
+      const seq = useSel ? selSeq(d) : (d.circular ? d.seq : d.seq);
+      return { name: d.name + (useSel ? ' (selection)' : ''), seq, doc: d, start: useSel ? d.sel.start : 0, end: useSel ? d.sel.end : d.seq.length };
+    };
+    const simulate = () => {
+      const idx = picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
+      if (idx.length < 2) { $('#gbres').innerHTML = '<div class="err">Choose at least two pieces.</div>'; return; }
+      if (idx.length > 6) { $('#gbres').innerHTML = '<div class="err">Choose at most six pieces.</div>'; return; }
+      const min = Math.max(10, Math.min(80, parseInt(val('gbov'), 10) || 20));
+      const pieces = idx.map(pieceOf);
+      results = CLONE.gibson(pieces, { minOverlap: min, name: 'Assembled construct' });
+      if (!results.length) {
+        $('#gbres').innerHTML = `<div class="err">These pieces do not share ends of at least ${min} bp, so they cannot be assembled. Gibson assembly needs each piece to end in the same sequence that the next piece begins with — usually added as primer tails.</div>`;
+        return;
+      }
+      $('#gbres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Junction overlaps</th><th></th></tr></thead><tbody>${results.map((r, k) => `<tr><td>${k + 1}</td><td><b>${fmt(r.size)} bp</b></td><td class="wrap">${r.junctions.map(j => `${esc(j.from)} → ${esc(j.to)}: ${j.len} bp`).join(' · ')}</td><td><button class="ib" data-mk="${k}">Create</button></td></tr>`).join('')}</tbody></table>`;
+    };
+    dialog({
+      title: 'Gibson / Overlap Assembly', wide: true,
+      body: `<div class="form">
+        <label>Pieces</label><div class="enz-pick" id="gbp" style="columns:1;max-height:150px">${S.docs.map((d, i) => `<label><input type="checkbox" value="${i}" ${picked[i] ? 'checked' : ''}> ${esc(d.name)} — ${fmt(d.seq.length)} bp${d.circular ? ' (circular; the current selection is used if there is one)' : ''}</label>`).join('')}</div>
+        <label for="gbov">Minimum overlap</label><div class="row2"><input type="number" id="gbov" value="20" min="10" max="80" style="width:80px"> bp</div>
+        <div class="full hint">Each piece must end in the same sequence that the next piece starts with. Pieces are tried in every order and orientation.</div>
+        <div class="full" id="gbres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Simulate Assembly', primary: true, act: () => { simulate(); return false; } }],
+      onOpen: box => {
+        box.querySelector('#gbp').addEventListener('change', () => { picked = S.docs.map((_, i) => !!box.querySelector(`#gbp input[value="${i}"]`).checked); });
+        box.addEventListener('click', e => {
+          const b = e.target.closest('[data-mk]'); if (!b) return;
+          const r = results[+b.dataset.mk];
+          closeDialog(); addDoc({ ...r.doc, histLabel: 'Assembled from ' + r.junctions.length + ' pieces' });
+          toast(`Created ${fmt(r.size)} bp construct`);
+        });
+      }
+    });
+  }
+
+  function dlgGateway() {
+    if (S.docs.length < 2) { toast('Open both the entry clone and the destination vector first.'); return; }
+    const sizes = S.docs.map(d => d.seq.length);
+    let di = sizes.indexOf(Math.min(...sizes)), ai = S.docs.findIndex((_, i) => i !== di);
+    let res = null;
+    const describe = i => {
+      const d = S.docs[i], sites = CLONE.findAtt(d.seq, d.circular);
+      return sites.length ? sites.map(s => `${esc(s.label)} at ${fmt(s.pos + 1)}`).join(', ') : 'no att sites found';
+    };
+    const refresh = () => {
+      $('#gwd').innerHTML = describe(di);
+      $('#gwa').innerHTML = describe(ai);
+      $('#gwres').innerHTML = '';
+      res = null;
+    };
+    const simulate = () => {
+      if (di === ai) { $('#gwres').innerHTML = '<div class="err">Choose two different sequences.</div>'; return; }
+      try {
+        res = CLONE.gateway(S.docs[di], S.docs[ai], { name: `${S.docs[ai].name}-${S.docs[di].name}`, byName: 'By-product' });
+        const warn = res.junctions.filter(j => !j.startsWith('attB')).length;
+        $('#gwres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Features</th><th></th></tr></thead><tbody>
+          <tr><td><b>Recombination product</b></td><td>${fmt(res.product.seq.length)} bp</td><td>${res.product.features.length}</td><td><button class="ib" data-mk="p">Create</button></td></tr>
+          <tr><td>By-product</td><td>${fmt(res.byproduct.seq.length)} bp</td><td>${res.byproduct.features.length}</td><td><button class="ib" data-mk="b">Create</button></td></tr>
+          </tbody></table><div class="hint">Transferred segment: ${fmt(res.insertSize)} bp. Junctions read as ${esc(res.junctions.join(' and '))}.${warn ? ' A junction that is not a full attB site usually means the att sites are not the standard ones.' : ''}</div>`;
+      } catch (err) { $('#gwres').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+    };
+    dialog({
+      title: 'Gateway Recombination', wide: true,
+      body: `<div class="form">
+        <label for="gwdon">Insert donor</label><select id="gwdon">${docOptions(di)}</select>
+        <label></label><div class="hint" id="gwd" style="margin:0"></div>
+        <label for="gwacc">Backbone</label><select id="gwacc">${docOptions(ai)}</select>
+        <label></label><div class="hint" id="gwa" style="margin:0"></div>
+        <div class="full hint">The stretch between the donor’s att1 and att2 sites replaces the stretch between the backbone’s own att sites. For an LR reaction the donor is the entry clone and the backbone is the destination vector; for BP, the donor carries the attB-flanked insert and the backbone is the donor vector.</div>
+        <div class="full" id="gwres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Simulate Reaction', primary: true, act: () => { simulate(); return false; } }],
+      onOpen: box => {
+        refresh();
+        box.addEventListener('change', e => {
+          if (e.target.id === 'gwdon') di = +e.target.value;
+          else if (e.target.id === 'gwacc') ai = +e.target.value;
+          else return;
+          refresh();
+        });
+        box.addEventListener('click', e => {
+          const b = e.target.closest('[data-mk]'); if (!b || !res) return;
+          const p = b.dataset.mk === 'p' ? res.product : res.byproduct;
+          closeDialog(); addDoc({ ...p, histLabel: 'Gateway recombination' });
+          toast(`Created ${fmt(p.seq.length)} bp construct`);
+        });
+      }
+    });
+  }
+
+  function showAttSites() {
+    const d = D(), sites = CLONE.findAtt(d.seq, d.circular);
+    if (!sites.length) { toast('No att sites found in this sequence.'); return; }
+    for (const s of sites) {
+      if (d.features.some(f => f.start === s.pos && f.name.startsWith('att'))) continue;
+      d.features.push({ id: uid(), name: s.kind, type: 'protein_bind', start: s.pos, end: (s.pos + 7) % d.seq.length, strand: s.strand, color: '#69c4c6', notes: 'Recombination core detected by GeneCanvas' });
+    }
+    commit(d, `Marked ${sites.length} att site${sites.length > 1 ? 's' : ''}`); renderAll(true);
+    toast(sites.map(s => s.label).join(', '));
+  }
+
+  // ================================================================ primer design dialogs
+  function primerRow(p, label) {
+    return `<tr><td><b>${label}</b></td><td class="mono wrap">${esc(p.full || p.seq)}</td><td>${(p.full || p.seq).length}</td><td>${p.tm.toFixed(1)} °C</td><td>${p.gc.toFixed(0)}%</td><td class="wrap">${p.warnings && p.warnings.length ? `<span style="color:var(--danger)">${esc(p.warnings.join('; '))}</span>` : 'no warnings'}</td></tr>`;
+  }
+  function addDesigned(names) {
+    const d = D();
+    for (const p of names) d.primers.push({ id: uid(), name: p.name, seq: p.seq, notes: p.notes || '' });
+    commit(d, `Added ${names.length} designed primer${names.length > 1 ? 's' : ''}`);
+    renderAll(true); toast(`Added ${names.length} primer${names.length > 1 ? 's' : ''}`);
+  }
+  function dlgDesignPCR() {
+    const d = D(), n = d.seq.length;
+    const hasSel = selLen(d) > 0;
+    let pairs = [];
+    const run = () => {
+      const a = parseInt(val('pdfrom'), 10) - 1, b = parseInt(val('pdto'), 10);
+      if (!(a >= 0 && a < n && b >= 1 && b <= n)) { $('#pdres').innerHTML = '<div class="err">Enter a target range inside the sequence.</div>'; return; }
+      try {
+        pairs = PRIMER.designPair(d, a, b, {
+          optTm: +val('pdtm'), minTm: +val('pdtm') - 3, maxTm: +val('pdtm') + 3,
+          minLen: +val('pdmin'), maxLen: +val('pdmax'),
+          fwdTail: val('pdftail'), revTail: val('pdrtail'), limit: 5
+        });
+      } catch (err) { $('#pdres').innerHTML = `<div class="err">${esc(err.message)}</div>`; return; }
+      $('#pdres').innerHTML = pairs.map((p, k) => `<div class="pcard"><div class="pch"><b>Pair ${k + 1}</b> — product ${fmt(p.amplicon)} bp (${fmt(p.ampliconStart + 1)}–${fmt(p.ampliconEnd)}), ΔTm ${p.dTm.toFixed(1)} °C${p.pairWarnings.length ? ` · <span style="color:var(--danger)">${esc(p.pairWarnings.join('; '))}</span>` : ''}<button class="btn" data-add="${k}">Add to Primers</button></div>
+        <table class="grid"><thead><tr><th></th><th>Sequence 5′→3′</th><th>Length</th><th>Tm</th><th>GC</th><th>Notes</th></tr></thead><tbody>${primerRow(p.fwd, 'Forward')}${primerRow(p.rev, 'Reverse')}</tbody></table></div>`).join('');
+    };
+    dialog({
+      title: 'Design PCR Primers', wide: true,
+      body: `<div class="form">
+        <label for="pdfrom">Amplify from</label><div class="row2"><input type="number" id="pdfrom" value="${hasSel ? d.sel.start + 1 : 1}" min="1" max="${n}"> to <input type="number" id="pdto" value="${hasSel ? (d.sel.end || n) : Math.min(n, 1000)}" min="1" max="${n}"> (1-based)</div>
+        <label for="pdtm">Target Tm</label><div class="row2"><input type="number" id="pdtm" value="60" min="45" max="75" style="width:70px"> °C &nbsp; length <input type="number" id="pdmin" value="18" min="15" max="40" style="width:60px"> – <input type="number" id="pdmax" value="30" min="15" max="45" style="width:60px"> nt</div>
+        <label for="pdftail">Forward 5′ tail</label><input type="text" id="pdftail" placeholder="optional, e.g. GCGAATTC for an EcoRI site" spellcheck="false">
+        <label for="pdrtail">Reverse 5′ tail</label><input type="text" id="pdrtail" placeholder="optional" spellcheck="false">
+        <div class="full hint">Tm uses the nearest-neighbour model at 50 mM Na⁺ and 250 nM primer, and is calculated on the annealing part only, not on any tail. Each primer’s 3′ end is checked for a second match in the template.</div>
+        <div class="full" id="pdres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Design', primary: true, act: () => { run(); return false; } }],
+      onOpen: box => {
+        run();
+        box.addEventListener('click', e => {
+          const b = e.target.closest('[data-add]'); if (!b) return;
+          const p = pairs[+b.dataset.add];
+          closeDialog();
+          addDesigned([
+            { name: `${d.name}-F`, seq: p.fwd.full, notes: `Tm ${p.fwd.tm.toFixed(1)} °C, designed by GeneCanvas` },
+            { name: `${d.name}-R`, seq: p.rev.full, notes: `Tm ${p.rev.tm.toFixed(1)} °C, designed by GeneCanvas` }
+          ]);
+        });
+      }
+    });
+  }
+  function dlgDesignWalk() {
+    const d = D();
+    let list = [];
+    const run = () => {
+      list = PRIMER.designWalk(d, { spacing: Math.max(150, +val('pwsp') || 500), bothStrands: $('#pwboth').checked });
+      $('#pwres').innerHTML = list.length ? `<table class="grid"><thead><tr><th>Name</th><th>Sequence 5′→3′</th><th>Position</th><th>Strand</th><th>Tm</th><th>Notes</th></tr></thead><tbody>${list.map(p => `<tr><td>${esc(p.name)}</td><td class="mono">${esc(p.seq)}</td><td>${fmt(p.start + 1)}</td><td>${p.strand > 0 ? '→' : '←'}</td><td>${p.tm.toFixed(1)} °C</td><td class="wrap">${p.warnings.length ? `<span style="color:var(--danger)">${esc(p.warnings.join('; '))}</span>` : 'no warnings'}</td></tr>`).join('')}</tbody></table>` : '<div class="err">No primers could be placed. Try a larger spacing.</div>';
+    };
+    dialog({
+      title: 'Design Sequencing Primers', wide: true,
+      body: `<div class="form">
+        <label for="pwsp">Read length</label><div class="row2"><input type="number" id="pwsp" value="500" min="150" max="1200" style="width:80px"> bp of usable sequence per read</div>
+        <label></label><label><input type="checkbox" id="pwboth" checked> Also design reverse-strand primers</label>
+        <div class="full hint">Primers are spaced so that consecutive reads overlap, with the first 60 bases of each read treated as unreadable.</div>
+        <div class="full" id="pwres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Add All to Primers', act: () => { if (list.length) addDesigned(list.map(p => ({ name: p.name, seq: p.seq, notes: `Sequencing primer, Tm ${p.tm.toFixed(1)} °C` }))); } }, { label: 'Design', primary: true, act: () => { run(); return false; } }],
+      onOpen: () => run()
+    });
+  }
+  function dlgDesignMut() {
+    const d = D(); if (!selLen(d)) { toast('Select the bases to change first.'); return; }
+    const a = d.sel.start, b = d.sel.end;
+    let r = null;
+    const run = () => {
+      r = PRIMER.designMutagenesis(d, a, b, val('mtnew'));
+      const old = DNA.sub(d.seq, a, b);
+      $('#mtres').innerHTML = `<table class="grid"><thead><tr><th></th><th>Sequence 5′→3′</th><th>Length</th><th>Tm</th><th>GC</th></tr></thead><tbody>
+        <tr><td><b>Forward</b></td><td class="mono wrap">${esc(r.fwd.seq)}</td><td>${r.fwd.len}</td><td>${r.fwd.tm.toFixed(1)} °C</td><td>${r.fwd.gc.toFixed(0)}%</td></tr>
+        <tr><td><b>Reverse</b></td><td class="mono wrap">${esc(r.rev.seq)}</td><td>${r.rev.len}</td><td>${r.rev.tm.toFixed(1)} °C</td><td>${r.rev.gc.toFixed(0)}%</td></tr>
+        </tbody></table><div class="hint">Replaces ${fmt(r.removed)} bp (${esc(old.slice(0, 30))}${old.length > 30 ? '…' : ''}) with ${r.insert.length ? esc(r.insert) : 'nothing'}, with ${r.armLen} bp of matching sequence on each side.</div>`;
+    };
+    dialog({
+      title: 'Design Mutagenesis Primers', wide: true,
+      body: `<div class="form">
+        <label>Replace</label><div>${fmt(a + 1)}–${fmt(b)} (${fmt(selLen(d))} bp)</div>
+        <label for="mtnew">With</label><input type="text" id="mtnew" placeholder="new bases, or leave empty to delete" spellcheck="false">
+        <div class="full" id="mtres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Add to Primers', act: () => { if (r) addDesigned([{ name: 'Mut-F', seq: r.fwd.seq, notes: 'Mutagenesis primer' }, { name: 'Mut-R', seq: r.rev.seq, notes: 'Mutagenesis primer' }]); } }, { label: 'Design', primary: true, act: () => { run(); return false; } }],
+      onOpen: box => { run(); $('#mtnew').addEventListener('input', run); }
+    });
+  }
+
+  // ================================================================ printing
+  function buildPrintHTML(d, opts) {
+    const A = analyze(d), n = d.seq.length;
+    const parts = [];
+    const css = `@page{margin:14mm}
+      body{font:11pt/1.4 "Segoe UI",Arial,sans-serif;color:#111;margin:0}
+      h1{font-size:17pt;margin:0 0 2pt}h2{font-size:12pt;margin:16pt 0 4pt;border-bottom:1px solid #bbb;padding-bottom:2pt}
+      .sub{color:#555;font-size:9.5pt;margin-bottom:10pt}
+      table{border-collapse:collapse;width:100%;font-size:9pt;margin-top:4pt}
+      th{text-align:left;border-bottom:1px solid #999;padding:2pt 4pt}
+      td{border-bottom:1px solid #e3e3e3;padding:2pt 4pt;vertical-align:top}
+      .mono{font-family:Consolas,"DejaVu Sans Mono",monospace}
+      .seqblock{font-family:Consolas,"DejaVu Sans Mono",monospace;font-size:9.2pt;line-height:1.5;white-space:pre}
+      svg{max-width:100%;height:auto}
+      .page{page-break-after:always}
+      .page:last-child{page-break-after:auto}
+      ${opts.map ? mapCSS() : ''}`;
+    parts.push(`<h1>${esc(d.name)}</h1><div class="sub">${fmt(n)} bp · ${d.circular ? 'circular' : 'linear'} · GC ${DNA.gcPct(d.seq).toFixed(1)}% · ${d.features.length} features · printed ${new Date().toLocaleDateString()}</div>`);
+    if (opts.map) {
+      const svg = $('#mapwrap svg');
+      let markup = '';
+      if (svg) markup = svg.outerHTML.replace(/<g id="sellayer">[\s\S]*?<\/g>/, '');
+      else markup = (d.opts.mapMode === 'circular' ? drawCircular(d, A, 760, 760) : drawLinear(d, A, 760)).replace(/<g id="sellayer">[\s\S]*?<\/g>/, '');
+      markup = markup.replace(/style="fill:var\(--canvas\)"/g, 'fill="#ffffff"');
+      parts.push(`<div class="page"><h2>Map</h2>${markup}</div>`);
+    }
+    if (opts.features && d.features.length) {
+      const fs = d.features.slice().sort((a, b) => a.start - b.start);
+      parts.push(`<h2>Features</h2><table><thead><tr><th>Name</th><th>Type</th><th>Location</th><th>Length</th><th>Direction</th></tr></thead><tbody>${fs.map(f => `<tr><td>${esc(f.name)}</td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)}..${fmt(f.end)}</td><td>${fmt(DNA.rlen(f, n))} bp</td><td>${f.strand === 1 ? 'forward' : f.strand === -1 ? 'reverse' : '—'}</td></tr>`).join('')}</tbody></table>`);
+    }
+    if (opts.primers && d.primers.length) {
+      parts.push(`<h2>Primers</h2><table><thead><tr><th>Name</th><th>Sequence 5′→3′</th><th>Length</th><th>Tm</th><th>Binds</th></tr></thead><tbody>${d.primers.map(p => { const b = A.psites[p.id] || []; return `<tr><td>${esc(p.name)}</td><td class="mono">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}`).join(', ') : 'no site'}</td></tr>`; }).join('')}</tbody></table>`);
+    }
+    if (opts.enzymes) {
+      const list = shownEnz(d, A);
+      if (list.length) parts.push(`<h2>Restriction sites</h2><table><thead><tr><th>Enzyme</th><th>Site</th><th># Sites</th><th>Cuts after</th></tr></thead><tbody>${list.map(e => `<tr><td>${esc(e.name)}</td><td class="mono">${esc(DNA.ENZ_BY_NAME[e.name].site)}</td><td>${e.sites.length}</td><td>${e.sites.map(s => fmt(s.cut)).join(', ')}</td></tr>`).join('')}</tbody></table>`);
+    }
+    if (opts.sequence) {
+      const per = 60, lines = [];
+      for (let i = 0; i < n; i += per) {
+        let row = String(i + 1).padStart(7) + ' ';
+        for (let j = i; j < Math.min(i + per, n); j += 10) row += d.seq.slice(j, Math.min(j + 10, n)) + ' ';
+        lines.push(esc(row.trimEnd()));
+      }
+      parts.push(`<h2>Sequence</h2><div class="seqblock">${lines.join('\n')}</div>`);
+    }
+    if (opts.alignments && d.alignments.length) {
+      parts.push(`<h2>Sequencing alignments</h2><table><thead><tr><th>Read</th><th>Strand</th><th>Covers</th><th>Identity</th><th>Differences</th></tr></thead><tbody>${d.alignments.map(a => `<tr><td>${esc(a.read.name)}</td><td>${a.strand > 0 ? 'forward' : 'reverse'}</td><td>${fmt(a.refStart + 1)}..${fmt(a.refEnd)}</td><td>${a.identity.toFixed(1)}%</td><td>${a.diffs.length ? esc(a.diffs.map(x => `${fmt(x.pos + 1)} ${x.type === 'mis' ? x.ref + '→' + x.read : x.type}`).join(', ')) : 'none'}</td></tr>`).join('')}</tbody></table>`);
+    }
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(d.name)}</title><style>${css}</style></head><body>${parts.join('')}</body></html>`;
+  }
+  function dlgPrint(pdf) {
+    const d = D();
+    const cb = (id, label, on) => `<label><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${label}</label>`;
+    dialog({
+      title: pdf ? 'Export PDF' : 'Print',
+      body: `<div class="form"><label>Include</label><div>
+        ${cb('prmap', 'Map', true)}${cb('prfeat', 'Feature table', true)}${cb('prprim', 'Primer table', d.primers.length > 0)}
+        ${cb('prenz', 'Restriction sites', false)}${cb('prseq', 'Full sequence', false)}${cb('pralign', 'Sequencing alignments', d.alignments.length > 0)}</div>
+        <div class="full hint">The map is printed as it is currently shown, so switch between the circular and linear map before printing.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: pdf ? 'Save PDF…' : 'Print…', primary: true, act: () => {
+          const opts = { map: $('#prmap').checked, features: $('#prfeat').checked, primers: $('#prprim').checked, enzymes: $('#prenz').checked, sequence: $('#prseq').checked, alignments: $('#pralign').checked };
+          if (!Object.values(opts).some(Boolean)) return showErr('Choose at least one section.');
+          const html = buildPrintHTML(d, opts);
+          closeDialog();
+          doPrint(html, pdf, d);
+          return false;
+        }
+      }]
+    });
+  }
+  async function doPrint(html, pdf, d) {
+    try {
+      if (host && host.printHtml) {
+        if (pdf) {
+          const p = await host.pdfHtml({ html, defaultName: d.name.replace(/[\\/:*?"<>|]/g, '_') + '.pdf', landscape: false });
+          if (p) toast('Saved ' + p.split(/[\\/]/).pop());
+        } else {
+          const r = await host.printHtml(html);
+          if (r && !r.ok && r.reason && r.reason !== 'cancelled') toast('Printing failed: ' + r.reason);
+        }
+        return;
+      }
+      const w = window.open('', '_blank');
+      if (!w) { toast('Allow pop-up windows to print.'); return; }
+      w.document.write(html); w.document.close();
+      w.onload = () => { w.focus(); w.print(); };
+    } catch (err) { toast('Printing failed: ' + err.message); }
   }
 
   // ================================================================ files
@@ -1492,7 +2153,20 @@
     if (S.active >= S.docs.length) S.active = S.docs.length - 1;
     renderAll();
   }
+  function isTraceFile(name, data) {
+    if (/\.ab1$/i.test(name)) return true;
+    if (data instanceof ArrayBuffer && data.byteLength > 4) {
+      const dv = new DataView(data);
+      return String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) === 'ABIF';
+    }
+    return false;
+  }
   function loadContent(name, data, path) {
+    if (isTraceFile(name, data)) {
+      if (!D()) { dialog({ title: 'Open the Reference First', body: `<p>${esc(name)} is a sequencing trace. Open the sequence it should be compared against before adding traces.</p>`, buttons: [{ label: 'OK', primary: true }] }); return; }
+      addTrace(name, data);
+      return;
+    }
     try {
       let src;
       if (/\.dna$/i.test(name)) src = DNA.parseDnaBinary(data instanceof ArrayBuffer ? data : new TextEncoder().encode(data).buffer, name);
@@ -1510,7 +2184,7 @@
       const files = await host.openFiles();
       for (const f of files || []) {
         const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0));
-        loadContent(f.name, /\.dna$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin), f.path);
+        loadContent(f.name, /\.(dna|ab1)$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin), f.path);
       }
       return;
     }
@@ -1523,7 +2197,7 @@
   function readFileObj(f) {
     const r = new FileReader();
     r.onload = () => loadContent(f.name, r.result, f.path || null);
-    if (/\.dna$/i.test(f.name)) r.readAsArrayBuffer(f); else r.readAsText(f);
+    if (/\.(dna|ab1)$/i.test(f.name)) r.readAsArrayBuffer(f); else r.readAsText(f);
   }
   function primerSitesFor(d) { const A = analyze(d); return p => A.psites[p.id] || []; }
   async function saveDoc(asNew) {
@@ -1542,11 +2216,15 @@
     if (host && host.saveFile) { const r = await host.saveFile({ path: null, defaultName: fname, content, filters: [{ name: 'FASTA', extensions: ['fasta', 'fa'] }] }); if (r) toast('Exported ' + r.split(/[\\/]/).pop()); }
     else downloadText(fname, content);
   }
+  // The map's SVG is styled by class, so any copy of it has to carry those rules with it.
+  function mapCSS() {
+    return `:root{--canvas:#fff;--bb:#2f3644;--faint:#8d95a3;--ink:#1c2230;--muted:#5e6776;--accent:#2563c9;--sel:rgba(0,0,0,0);--selline:transparent}\n${SVG_CSS}`;
+  }
   async function exportSVG() {
     const d = D();
     if (S.view !== 'map') { S.view = 'map'; renderAll(); }
     const svg = $('#mapwrap svg'); if (!svg) return;
-    const css = `<style>${[...document.styleSheets].flatMap(s => { try { return [...s.cssRules].map(r => r.cssText).filter(t => t.startsWith('svg')); } catch (e) { return []; } }).join('\n')} :root{--canvas:#fff;--bb:#2f3644;--faint:#8d95a3;--ink:#1c2230;--muted:#5e6776;--accent:#2563c9;--sel:rgba(0,0,0,0);--selline:transparent}</style>`;
+    const css = `<style>${mapCSS()}</style>`;
     const content = svg.outerHTML.replace(/<g id="sellayer">[\s\S]*?<\/g>/, '').replace('<defs>', css + '<defs>');
     const fname = d.name.replace(/[\\/:*?"<>|]/g, '_') + '-map.svg';
     if (host && host.saveFile) { const r = await host.saveFile({ path: null, defaultName: fname, content, filters: [{ name: 'SVG image', extensions: ['svg'] }] }); if (r) toast('Exported ' + r.split(/[\\/]/).pop()); }
@@ -1594,7 +2272,8 @@
     const k = e.key.toLowerCase();
     const map = {
       n: dlgNew, o: openFiles, s: () => saveDoc(e.shiftKey), w: () => D() && closeDoc(S.active), f: openFind, g: () => D() && dlgGoto(), k: () => D() && dlgFeature(null),
-      '1': () => setView('map'), '2': () => setView('seq'), '3': () => setView('enz'), '4': () => setView('feat'), '5': () => setView('primer'), '6': () => setView('hist'),
+      d: dlgNCBI, p: () => D() && dlgPrint(),
+      '1': () => setView('map'), '2': () => setView('seq'), '3': () => setView('enz'), '4': () => setView('feat'), '5': () => setView('primer'), '6': () => setView('align'), '7': () => setView('hist'),
       '=': () => zoom(1.25), '+': () => zoom(1.25), '-': () => zoom(0.8), '0': () => { S.zoom = 1; renderView(); }
     };
     if (!inField) {
@@ -1623,7 +2302,7 @@
 
   // host integration (Electron)
   if (host) {
-    if (host.onOpenFile) host.onOpenFile(f => { const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); loadContent(f.name, /\.dna$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin), f.path); });
+    if (host.onOpenFile) host.onOpenFile(f => { const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); loadContent(f.name, /\.(dna|ab1)$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin), f.path); });
     if (host.onCloseRequest) host.onCloseRequest(() => {
       const dirty = S.docs.filter(d => d.dirty);
       if (!dirty.length) { host.confirmClose(); return; }
@@ -1633,6 +2312,9 @@
 
   // ================================================================ start
   function start() {
+    const st = document.createElement('style');
+    st.textContent = SVG_CSS;
+    document.head.appendChild(st);
     measureCW();
     renderMenuBar();
     addDoc(DNA.buildDemo());
@@ -1641,5 +2323,14 @@
     if (host && host.ready) host.ready();
   }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(start); else start();
-  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll };
+  // Test and automation hook: run a menu command by its labels.
+  function menuAct(menuLabel, itemLabel) {
+    const m = menus().find(x => x.label === menuLabel);
+    if (!m) throw new Error('No menu ' + menuLabel);
+    const it = m.items.find(x => x !== '-' && x.label === itemLabel);
+    if (!it) throw new Error('No item ' + itemLabel + ' in ' + menuLabel);
+    if (it.dis) throw new Error('Disabled: ' + itemLabel);
+    return it.act();
+  }
+  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML };
 })();

@@ -8,5 +8,9 @@ contextBridge.exposeInMainWorld('gcHost', {
   onOpenFile: cb => ipcRenderer.on('open-file', (_e, f) => cb(f)),
   onCloseRequest: cb => ipcRenderer.on('close-request', () => cb()),
   confirmClose: () => ipcRenderer.send('confirm-close'),
-  quit: () => ipcRenderer.send('quit')
+  quit: () => ipcRenderer.send('quit'),
+  ncbiSearch: opts => ipcRenderer.invoke('ncbi-search', opts),
+  ncbiFetch: opts => ipcRenderer.invoke('ncbi-fetch', opts),
+  printHtml: html => ipcRenderer.invoke('print-html', { html }),
+  pdfHtml: opts => ipcRenderer.invoke('pdf-html', opts)
 });

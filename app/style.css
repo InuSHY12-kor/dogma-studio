@@ -104,25 +104,6 @@ button { cursor: pointer; }
 .mapwrap svg { display: block; }
 .map-zoom { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 4px; }
 .map-zoom button { width: 28px; height: 26px; border: 1px solid var(--border); background: var(--win); border-radius: 4px; }
-svg .bb { fill: none; stroke: var(--bb); stroke-width: 1.2; }
-svg .tick { stroke: var(--faint); stroke-width: 1; }
-svg .tickl { fill: var(--faint); font: 10px var(--f-ui); }
-svg .feat { stroke: rgba(0, 0, 0, .38); stroke-width: .8; cursor: pointer; }
-svg .feat:hover { stroke: #000; stroke-width: 1.6; }
-svg .ftxt { fill: #111; font: 600 11px var(--f-ui); pointer-events: none; }
-svg .lbl { font: 11px var(--f-ui); fill: var(--ink); cursor: pointer; }
-svg .lbl.e { fill: #3a3f4b; }
-svg .lbl.e.u { font-weight: 600; }
-svg .lbl.f { font-weight: 600; }
-svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
-svg .lead { fill: none; stroke: #9aa2af; stroke-width: .8; }
-svg .ecut { stroke: #48505e; stroke-width: 1; }
-svg .ctr1 { font: 700 17px var(--f-ui); fill: var(--ink); }
-svg .ctr2 { font: 13px var(--f-ui); fill: var(--muted); }
-svg .selarea { fill: var(--sel); stroke: var(--selline); stroke-width: .8; pointer-events: none; }
-svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
-svg .orf { stroke: none; cursor: pointer; }
-svg .prim { cursor: pointer; }
 
 /* ---------- Sequence view ---------- */
 .findbar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border-soft); background: var(--chrome); flex: none; flex-wrap: wrap; }
@@ -228,3 +209,29 @@ table.grid .ib.dng { color: var(--danger); }
   .tb span { display: none; }
   .tb { min-width: 34px; }
 }
+
+/* ---------- Alignment view ---------- */
+.arow { position: relative; border-bottom: 1px solid #eef0f3; }
+.arow .num { position: absolute; left: 0; width: 52px; text-align: right; color: var(--faint); font: 11px/17px var(--f-mono); }
+.arow .lbl2 { position: absolute; left: 58px; width: 32px; color: var(--faint); font: 10px/17px var(--f-ui); }
+.arow .nt { position: absolute; white-space: pre; font: 13px/17px var(--f-mono); color: #6b7380; }
+.arow .nt.rd { color: var(--ink); }
+.arow .nt.rd .m { background: #ffd9d6; color: var(--danger); font-weight: 700; }
+.arow .nt.rd .d { background: #e3e6eb; color: var(--faint); }
+.arow .nt.rd .i { background: #d8f0d8; color: #1a7f37; font-weight: 700; }
+.arow .quals { position: absolute; height: 9px; }
+.arow .qb { position: absolute; bottom: 0; background: #9fb8dd; border-radius: 1px 1px 0 0; }
+.arow .chw { position: absolute; }
+.arow .mk { position: absolute; width: 2px; height: 36px; background: var(--danger); opacity: .5; }
+svg.chroma { display: block; }
+.difflink { color: var(--accent); text-decoration: none; }
+.difflink:hover { text-decoration: underline; }
+
+/* ---------- Cloning & design dialogs ---------- */
+.fraglist { display: flex; flex-direction: column; gap: 2px; max-height: 110px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 3px; padding: 5px 6px; font-size: 12px; }
+.fraglist label { display: flex; gap: 6px; align-items: baseline; }
+.pcard { border: 1px solid var(--border-soft); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+.pch { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 8px; background: var(--chrome); font-size: 12px; }
+.pch .btn { margin-left: auto; }
+.form .row2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.form .row2 input[type=number], .form .row2 input[type=text] { width: 80px; flex: none; }
