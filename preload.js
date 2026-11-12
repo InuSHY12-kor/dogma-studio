@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('gcHost', {
   quit: () => ipcRenderer.send('quit'),
   ncbiSearch: opts => ipcRenderer.invoke('ncbi-search', opts),
   ncbiFetch: opts => ipcRenderer.invoke('ncbi-fetch', opts),
+  loadSettings: () => ipcRenderer.invoke('load-settings'),
+  saveSettings: data => ipcRenderer.invoke('save-settings', data),
   printHtml: html => ipcRenderer.invoke('print-html', { html }),
   pdfHtml: opts => ipcRenderer.invoke('pdf-html', opts)
 });

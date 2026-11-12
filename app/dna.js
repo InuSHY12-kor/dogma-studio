@@ -39,76 +39,203 @@
   // name site topCut bottomCut  (cut offsets measured from the left end of the site on the top strand)
   const ENZ_RAW = `AatII GACGTC 5 1
 AccI GTMKAC 2 4
+AciI CCGC 1 3
+AclI AACGTT 2 4
 AflII CTTAAG 1 5
+AflIII ACRYGT 1 5
 AgeI ACCGGT 1 5
 AhdI GACNNNNNGTC 6 5
 AleI CACNNNNGTG 5 5
 AluI AGCT 2 2
+AlwNI CAGNNNCTG 6 3
 ApaI GGGCCC 5 1
 ApaLI GTGCAC 1 5
+ApeKI GCWGC 1 4
 AscI GGCGCGCC 2 6
+AseI ATTAAT 2 4
+AvaI CYCGRG 1 5
+AvaII GGWCC 1 4
 AvrII CCTAGG 1 5
 BamHI GGATCC 1 5
+BanI GGYRCC 1 5
 BanII GRGCYC 5 1
 BbsI GAAGAC 8 12
+BbvCI CCTCAGC 2 5
+BccI CCATC 9 10
+BciVI GTATCC 18 16
 BclI TGATCA 1 5
+BfaI CTAG 1 3
+BglI GCCNNNNNGGC 7 5
 BglII AGATCT 1 5
+BlpI GCTNAGC 2 5
+BmgBI CACGTC 3 3
+BmrI ACTGGG 11 10
 BmtI GCTAGC 5 1
+BpmI CTGGAG 22 20
+Bpu10I CCTNAGC 2 5
+BpuEI CTTGAG 22 20
+BsaAI YACGTR 3 3
+BsaBI GATNNNNATC 5 5
+BsaHI GRCGYC 2 4
 BsaI GGTCTC 7 11
+BsaJI CCNNGG 1 5
+BsaWI WCCGGW 1 5
+BseRI GAGGAG 16 14
+BseYI CCCAGC 1 5
+BsgI GTGCAG 22 20
+BsiEI CGRYCG 4 2
+BsiHKAI GWGCWC 5 1
 BsiWI CGTACG 1 5
+BslI CCNNNNNNNGG 7 5
+BsmAI GTCTC 6 10
 BsmBI CGTCTC 7 11
+BsmFI GGGAC 15 19
+BsmI GAATGC 7 5
+BsoBI CYCGRG 1 5
+Bsp1286I GDGCHC 5 1
+BspCNI CTCAG 14 12
+BspDI ATCGAT 2 4
 BspEI TCCGGA 1 5
+BspHI TCATGA 1 5
+BspMI ACCTGC 10 14
+BspQI GCTCTTC 8 11
+BsrBI CCGCTC 3 3
+BsrDI GCAATG 8 6
+BsrFI RCCGGY 1 5
 BsrGI TGTACA 1 5
+BsrI ACTGG 6 4
+BssHII GCGCGC 1 5
+BssSI CACGAG 1 5
+BstAPI GCANNNNNTGC 7 5
 BstBI TTCGAA 2 4
 BstEII GGTNACC 1 6
+BstNI CCWGG 2 3
+BstUI CGCG 2 2
 BstXI CCANNNNNNTGG 8 4
+BstYI RGATCY 1 5
+BstZ17I GTATAC 3 3
+Bsu36I CCTNAGG 2 5
+BtgI CCRYGG 1 5
+BtgZI GCGATG 16 20
+BtsI GCAGTG 8 6
+Cac8I GCNNGC 3 3
 ClaI ATCGAT 2 4
+CviAII CATG 1 3
+CviKI-1 RGCY 2 2
+CviQI GTAC 1 3
+DdeI CTNAG 1 4
 DpnII GATC 0 4
 DraI TTTAAA 3 3
+DraIII CACNNNGTG 6 3
+DrdI GACNNNNNNGTC 7 5
+EaeI YGGCCR 1 5
 EagI CGGCCG 1 5
+EarI CTCTTC 7 10
+EciI GGCGGA 17 15
+Eco53kI GAGCTC 3 3
 EcoNI CCTNNNNNAGG 5 6
+EcoO109I RGGNCCY 2 5
 EcoRI GAATTC 1 5
 EcoRV GATATC 3 3
+FatI CATG 0 4
+FauI CCCGC 9 11
+Fnu4HI GCNGC 2 3
+FokI GGATG 14 18
 FseI GGCCGGCC 6 2
+FspI TGCGCA 3 3
+HaeII RGCGCY 5 1
 HaeIII GGCC 2 2
+HgaI GACGC 10 15
 HhaI GCGC 3 1
 HincII GTYRAC 3 3
 HindIII AAGCTT 1 5
+HinfI GANTC 1 4
+HinP1I GCGC 1 3
 HpaI GTTAAC 3 3
+HpaII CCGG 1 3
+HphI GGTGA 13 12
+Hpy166II GTNNAC 3 3
+Hpy188I TCNGA 3 2
+HpyAV CCTTC 11 10
+HpyCH4III ACNGT 3 2
+HpyCH4IV ACGT 1 3
+HpyCH4V TGCA 2 2
 KasI GGCGCC 1 5
 KpnI GGTACC 5 1
+MboI GATC 0 4
+MboII GAAGA 13 12
 MfeI CAATTG 1 5
+MluCI AATT 0 4
 MluI ACGCGT 1 5
+MlyI GAGTC 10 10
+MmeI TCCRAC 26 24
+MnlI CCTC 11 10
+MscI TGGCCA 3 3
+MseI TTAA 1 3
+MslI CAYNNNNRTG 5 5
+MspA1I CMGCKG 3 3
 MspI CCGG 1 3
+MwoI GCNNNNNNNGC 7 5
 NaeI GCCGGC 3 3
+NciI CCSGG 2 3
 NcoI CCATGG 1 5
 NdeI CATATG 2 4
+NgoMIV GCCGGC 1 5
 NheI GCTAGC 1 5
+NlaIII CATG 4 0
+NlaIV GGNNCC 3 3
+NmeAIII GCCGAG 27 25
 NotI GCGGCCGC 2 6
 NruI TCGCGA 3 3
 NsiI ATGCAT 5 1
+NspI RCATGY 5 1
 PacI TTAATTAA 5 3
+PaeR7I CTCGAG 1 5
 PciI ACATGT 1 5
+PflFI GACNNNGTC 4 5
+PflMI CCANNNNNTGG 7 5
+PleI GAGTC 9 10
+PluTI GGCGCC 5 1
 PmeI GTTTAAAC 4 4
+PpuMI RGGWCCY 2 5
+PshAI GACNNNNGTC 5 5
+PspGI CCWGG 0 5
+PspOMI GGGCCC 1 5
+PspXI VCTCGAGB 2 6
 PstI CTGCAG 5 1
 PvuI CGATCG 4 2
 PvuII CAGCTG 3 3
 RsaI GTAC 2 2
+RsrII CGGWCCG 2 5
 SacI GAGCTC 5 1
 SacII CCGCGG 4 2
 SalI GTCGAC 1 5
 SapI GCTCTTC 8 11
 SbfI CCTGCAGG 6 2
 ScaI AGTACT 3 3
+SexAI ACCWGGT 1 6
+SfaNI GCATC 10 14
+SfcI CTRYAG 1 5
+SfiI GGCCNNNNNGGCC 8 5
+SgrAI CRCCGGYG 2 6
 SmaI CCCGGG 3 3
+SmlI CTYRAG 1 5
 SnaBI TACGTA 3 3
 SpeI ACTAGT 1 5
 SphI GCATGC 5 1
+SrfI GCCCGGGC 4 4
 SspI AATATT 3 3
 StuI AGGCCT 3 3
+StyD4I CCNGG 0 5
+StyI CCWWGG 1 5
 SwaI ATTTAAAT 4 4
 TaqI TCGA 1 3
+TfiI GAWTC 1 4
+Tsp45I GTSAC 0 5
+TspMI CCCGGG 1 5
+Tth111I GACNNNGTC 4 5
 XbaI TCTAGA 1 5
+XcmI CCANNNNNNNNNTGG 8 7
 XhoI CTCGAG 1 5
 XmaI CCCGGG 1 5
 XmnI GAANNNNTTC 5 5
@@ -244,39 +371,87 @@ ZraI GACGTC 3 3`;
   }
 
   // ---------- Common feature library (for "Detect Common Features") ----------
+  // Common features. `kind` says how a match is found: "dna" compares the sequence
+  // directly on both strands, "protein" translates all six frames first, which finds a
+  // tag or peptide whatever codons were used for it.
   const COMMON = [
-    ['T7 promoter', 'promoter', 'TAATACGACTCACTATAGG'],
-    ['SP6 promoter', 'promoter', 'ATTTAGGTGACACTATAG'],
-    ['T3 promoter', 'promoter', 'AATTAACCCTCACTAAAGG'],
-    ['lac operator', 'protein_bind', 'TTGTGAGCGGATAACAA'],
-    ['lac promoter', 'promoter', 'TTTACACTTTATGCTTCCGGCTCGTATGTTG'],
-    ['T7 terminator', 'terminator', 'CTAGCATAACCCCTTGGGGCCTCTAAACGGGTCTTGAGGGGTTTTTTG'],
-    ['loxP', 'protein_bind', 'ATAACTTCGTATAGCATACATTATACGAAGTTAT'],
-    ['lox2272', 'protein_bind', 'ATAACTTCGTATAAAGTATCCTATACGAAGTTAT'],
-    ['FRT', 'protein_bind', 'GAAGTTCCTATTCTCTAGAAAGTATAGGAACTTC'],
-    ['attB1', 'protein_bind', 'ACAAGTTTGTACAAAAAAGCAGGCT'],
-    ['attB2', 'protein_bind', 'ACCCAGCTTTCTTGTACAAAGTGGT'],
-    ['6xHis', 'CDS', 'CATCATCATCATCATCAT'],
-    ['6xHis', 'CDS', 'CACCACCACCACCACCAC'],
-    ['FLAG', 'CDS', 'GATTACAAGGATGACGACGATAAG'],
-    ['HA', 'CDS', 'TACCCATACGATGTTCCAGATTACGCT'],
-    ['Myc', 'CDS', 'GAACAAAAACTCATCTCAGAAGAGGATCTG'],
-    ['V5 tag', 'CDS', 'GGTAAGCCTATCCCTAACCCTCTCCTCGGTCTCGATTCTACG'],
-    ['SV40 NLS', 'CDS', 'CCAAAGAAGAAGCGGAAGGTC'],
-    ['TEV site', 'CDS', 'GAGAATCTTTATTTTCAGGGC'],
-    ['thrombin site', 'CDS', 'CTGGTTCCGCGTGGATCC'],
-    ['Kozak sequence', 'regulatory', 'GCCACCATGG'],
-    ['M13 fwd', 'primer_bind', 'GTAAAACGACGGCCAGT'],
-    ['M13 rev', 'primer_bind', 'CAGGAAACAGCTATGAC'],
-    ['bGH poly(A) signal', 'polyA_signal', 'CTGTGCCTTCTAGTTGCCAGCCATCTGTTGTTTGCCCCTCCCCCGTGCCTTCCTTGACCCTGGAAGGTGCCACTCCCACTGTCCTTTCCTAATAAAATGAGGAAATTGCATCG']
+    // --- promoters and transcription signals
+    { name: 'T7 promoter', type: 'promoter', kind: 'dna', seq: 'TAATACGACTCACTATAGG' },
+    { name: 'SP6 promoter', type: 'promoter', kind: 'dna', seq: 'ATTTAGGTGACACTATAG' },
+    { name: 'T3 promoter', type: 'promoter', kind: 'dna', seq: 'AATTAACCCTCACTAAAGG' },
+    { name: 'lac promoter', type: 'promoter', kind: 'dna', seq: 'TTTACACTTTATGCTTCCGGCTCGTATGTTG' },
+    { name: 'tac promoter', type: 'promoter', kind: 'dna', seq: 'TTGACAATTAATCATCGGCTCGTATAATG' },
+    { name: 'trc promoter', type: 'promoter', kind: 'dna', seq: 'TTGACAATTAATCATCCGGCTCGTATAATG' },
+    { name: 'T7 terminator', type: 'terminator', kind: 'dna', seq: 'CTAGCATAACCCCTTGGGGCCTCTAAACGGGTCTTGAGGGGTTTTTTG' },
+    { name: 'lac operator', type: 'protein_bind', kind: 'dna', seq: 'TTGTGAGCGGATAACAA' },
+    { name: 'lac operator (full)', type: 'protein_bind', kind: 'dna', seq: 'GGAATTGTGAGCGGATAACAATT' },
+    { name: 'Kozak sequence', type: 'regulatory', kind: 'dna', seq: 'GCCACCATGG' },
+    { name: 'poly(A) signal', type: 'polyA_signal', kind: 'dna', seq: 'AATAAA', short: true },
+    { name: 'bGH poly(A) signal', type: 'polyA_signal', kind: 'dna', seq: 'CTGTGCCTTCTAGTTGCCAGCCATCTGTTGTTTGCCCCTCCCCCGTGCCTTCCTTGACCCTGGAAGGTGCCACTCCCACTGTCCTTTCCTAATAAAATGAGGAAATTGCATCG' },
+    { name: 'Shine-Dalgarno', type: 'RBS', kind: 'dna', seq: 'AGGAGG', short: true },
+
+    // --- recombination and integration sites
+    { name: 'loxP', type: 'protein_bind', kind: 'dna', seq: 'ATAACTTCGTATAGCATACATTATACGAAGTTAT' },
+    { name: 'lox2272', type: 'protein_bind', kind: 'dna', seq: 'ATAACTTCGTATAAAGTATCCTATACGAAGTTAT' },
+    { name: 'lox511', type: 'protein_bind', kind: 'dna', seq: 'ATAACTTCGTATAATGTATACTATACGAAGTTAT' },
+    { name: 'FRT', type: 'protein_bind', kind: 'dna', seq: 'GAAGTTCCTATTCTCTAGAAAGTATAGGAACTTC' },
+    { name: 'attB1', type: 'protein_bind', kind: 'dna', seq: 'ACAAGTTTGTACAAAAAAGCAGGCT' },
+    { name: 'attB2', type: 'protein_bind', kind: 'dna', seq: 'ACCCAGCTTTCTTGTACAAAGTGGT' },
+    { name: 'I-SceI site', type: 'protein_bind', kind: 'dna', seq: 'TAGGGATAACAGGGTAAT' },
+    { name: 'Tn5 mosaic end', type: 'misc_feature', kind: 'dna', seq: 'AGATGTGTATAAGAGACAG' },
+
+    // --- sequencing primers
+    { name: 'M13 fwd', type: 'primer_bind', kind: 'dna', seq: 'GTAAAACGACGGCCAGT' },
+    { name: 'M13 rev', type: 'primer_bind', kind: 'dna', seq: 'CAGGAAACAGCTATGAC' },
+
+    // --- affinity and epitope tags, matched on the protein
+    { name: '6xHis', type: 'CDS', kind: 'protein', seq: 'HHHHHH' },
+    { name: '8xHis', type: 'CDS', kind: 'protein', seq: 'HHHHHHHH' },
+    { name: '10xHis', type: 'CDS', kind: 'protein', seq: 'HHHHHHHHHH' },
+    { name: 'FLAG', type: 'CDS', kind: 'protein', seq: 'DYKDDDDK' },
+    { name: '3xFLAG', type: 'CDS', kind: 'protein', seq: 'DYKDHDGDYKDHDIDYKDDDDK' },
+    { name: 'HA', type: 'CDS', kind: 'protein', seq: 'YPYDVPDYA' },
+    { name: 'Myc', type: 'CDS', kind: 'protein', seq: 'EQKLISEEDL' },
+    { name: 'V5 tag', type: 'CDS', kind: 'protein', seq: 'GKPIPNPLLGLDST' },
+    { name: 'Strep-tag II', type: 'CDS', kind: 'protein', seq: 'WSHPQFEK' },
+    { name: 'S-tag', type: 'CDS', kind: 'protein', seq: 'KETAAAKFERQHMDS' },
+    { name: 'T7 tag', type: 'CDS', kind: 'protein', seq: 'MASMTGGQQMG' },
+    { name: 'Avi-tag', type: 'CDS', kind: 'protein', seq: 'GLNDIFEAQKIEWHE' },
+    { name: 'Sortase A site', type: 'CDS', kind: 'protein', seq: 'LPETG', short: true },
+
+    // --- protease cleavage sites
+    { name: 'TEV site', type: 'CDS', kind: 'protein', seq: 'ENLYFQ', short: true },
+    { name: 'HRV 3C / PreScission site', type: 'CDS', kind: 'protein', seq: 'LEVLFQGP' },
+    { name: 'Thrombin site', type: 'CDS', kind: 'protein', seq: 'LVPRGS', short: true },
+    { name: 'Factor Xa site', type: 'CDS', kind: 'protein', seq: 'IEGR', short: true },
+    { name: 'Enterokinase site', type: 'CDS', kind: 'protein', seq: 'DDDDK', short: true },
+
+    // --- localisation signals
+    { name: 'SV40 NLS', type: 'CDS', kind: 'protein', seq: 'PKKKRKV' },
+    { name: 'Nucleoplasmin NLS', type: 'CDS', kind: 'protein', seq: 'KRPAATKKAGQAKKKK' },
+
+    // --- self-cleaving 2A peptides
+    { name: 'P2A', type: 'CDS', kind: 'protein', seq: 'ATNFSLLKQAGDVEENPGP' },
+    { name: 'T2A', type: 'CDS', kind: 'protein', seq: 'EGRGSLLTCGDVEENPGP' },
+    { name: 'E2A', type: 'CDS', kind: 'protein', seq: 'QCTNYALLKLAGDVESNPGP' },
+    { name: 'F2A', type: 'CDS', kind: 'protein', seq: 'VKQTLNFDLLKLAGDVESNPGP' },
+
+    // --- linkers
+    { name: '(G4S)3 linker', type: 'CDS', kind: 'protein', seq: 'GGGGSGGGGSGGGGS' },
+    { name: 'G4S linker', type: 'CDS', kind: 'protein', seq: 'GGGGS', short: true }
   ];
-  function detectCommon(seq, circular, existing) {
-    const n = seq.length, found = [];
-    for (const [name, type, s] of COMMON) {
-      for (const h of searchDNA(seq, circular, s)) {
-        if (existing.some(f => f.start === h.start && f.end === h.end)) continue;
-        if (found.some(f => f.start === h.start && f.end === h.end)) continue;
-        found.push({ name, type, start: h.start, end: h.end, strand: h.strand });
+
+  // `short` entries are left out by default: a motif of a few residues turns up by chance.
+  function detectCommon(seq, circular, existing, opts) {
+    opts = opts || {};
+    const found = [];
+    for (const f of COMMON) {
+      if (f.short && !opts.includeShort) continue;
+      const hits = f.kind === 'protein' ? searchProtein(seq, circular, f.seq) : searchDNA(seq, circular, f.seq);
+      for (const h of hits) {
+        if (existing.some(x => x.start === h.start && x.end === h.end)) continue;
+        if (found.some(x => x.start === h.start && x.end === h.end)) continue;
+        found.push({ name: f.name, type: f.type, start: h.start, end: h.end, strand: h.strand, via: f.kind });
       }
     }
     return found;

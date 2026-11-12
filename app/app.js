@@ -390,6 +390,10 @@ svg .prim { cursor: pointer; }
         { label: 'Remove All Alignments', dis: !has || !d.alignments.length, act: () => { d.alignments = []; toast('Alignments removed'); renderAll(); } }
       ] },
       { label: 'Analyze', items: [
+        { label: 'Choose Enzymes…', dis: !has, act: () => dlgEnzymeChooser() },
+        { label: 'Enzyme Database…', act: dlgEnzymeDB },
+        { label: 'Feature Database…', act: dlgFeatureDB },
+        '-',
         { label: 'Primer Structures…', dis: !has || !d.primers.length, act: () => dlgPrimerStruct(null, null) },
         { label: 'RNA Secondary Structure…', dis: !has, act: dlgRNA },
         { label: 'Protein Properties…', dis: !has, act: dlgProtein },
@@ -548,7 +552,8 @@ svg .prim { cursor: pointer; }
       <option value="unique" ${o.enzMode === 'unique' ? 'selected' : ''}>All unique cutters</option>
       <option value="dual6" ${o.enzMode === 'dual6' ? 'selected' : ''}>Unique &amp; dual 6+ cutters</option>
       <option value="chosen" ${o.enzMode === 'chosen' ? 'selected' : ''}>Chosen enzymes (${d.chosen.length})</option>
-      <option value="none" ${o.enzMode === 'none' ? 'selected' : ''}>None</option></select>`;
+      <option value="none" ${o.enzMode === 'none' ? 'selected' : ''}>None</option></select>
+      <button class="btn" id="side-pick" style="width:100%;margin-top:4px">Choose Enzymes…</button>`;
     h += `<h4>Show</h4>${chk('showFeat', 'Features')}${chk('showPrimers', 'Primers')}${chk('showORFs', 'ORFs')}
       <div class="row2" style="padding-left:22px">min <input type="number" id="side-orfmin" min="20" max="2000" step="10" value="${o.orfMin}"> aa</div>
       ${chk('showTrans', 'Translations')}${chk('showComp', 'Complementary strand')}`;
@@ -1198,7 +1203,7 @@ svg .prim { cursor: pointer; }
     v.innerHTML = `<div class="panel"><div class="ptools">
       <input type="text" id="enzq" placeholder="Filter by name or site" value="${esc(enzFilter)}">
       <select id="enzset"><option value="cutters" ${enzSet === 'cutters' ? 'selected' : ''}>Enzymes that cut</option><option value="unique" ${enzSet === 'unique' ? 'selected' : ''}>Unique cutters</option><option value="noncutters" ${enzSet === 'noncutters' ? 'selected' : ''}>Non-cutters</option><option value="all" ${enzSet === 'all' ? 'selected' : ''}>All enzymes</option></select>
-      <button class="btn" id="enzshow">Show chosen on map</button><button class="btn" id="enzclear">Clear chosen</button><button class="btn pri" id="enzdig" ${d.chosen.length ? '' : 'disabled'}>Digest chosen (${d.chosen.length})…</button>
+      <button class="btn pri" id="enzpick">Choose Enzymes…</button><button class="btn" id="enzshow">Show chosen on map</button><button class="btn" id="enzclear">Clear chosen</button><button class="btn pri" id="enzdig" ${d.chosen.length ? '' : 'disabled'}>Digest chosen (${d.chosen.length})…</button>
       <span class="note">${list.length} enzymes</span></div>
       <div class="tscroll"><table class="grid"><thead><tr><th style="width:30px">✓</th><th class="sort" data-s="name">Enzyme</th><th>Recognition site</th><th class="sort" data-s="count"># Sites</th><th>Cut positions</th><th>Ends</th></tr></thead><tbody>
       ${list.map(x => `<tr data-e="${x.e.name}"><td><input type="checkbox" data-c="${x.e.name}" ${d.chosen.includes(x.e.name) ? 'checked' : ''}></td><td><b>${x.e.name}</b></td><td class="cut-site">${siteHtml(x.e)}</td><td>${x.s.length}</td><td class="wrap">${x.s.map(s => s.cut == null ? '—' : fmt(s.cut)).join(', ')}</td><td>${ends(x.e)}</td></tr>`).join('')}
@@ -1217,6 +1222,7 @@ svg .prim { cursor: pointer; }
       v.querySelectorAll('tr.on').forEach(r => r.classList.remove('on')); tr.classList.add('on');
     };
     v.querySelector('tbody').ondblclick = e => { const tr = e.target.closest('tr[data-e]'); if (tr && A.sites[tr.dataset.e]) { const nm = tr.dataset.e; if (!d.chosen.includes(nm)) d.chosen.push(nm); d.opts.enzMode = 'chosen'; S.view = 'map'; renderAll(); } };
+    $('#enzpick').onclick = () => dlgEnzymeChooser();
     $('#enzshow').onclick = () => { d.opts.enzMode = 'chosen'; S.view = 'map'; renderAll(); };
     $('#enzclear').onclick = () => { d.chosen = []; renderEnzymes(); };
     $('#enzdig').onclick = () => dlgDigest();
@@ -2449,6 +2455,257 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // ================================================================ stored settings
+  // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
+  const SETTINGS_KEY = 'genecanvas.settings';
+  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {} };
+  let SET = { ...DEFAULT_SETTINGS };
+
+  async function loadSettings() {
+    let raw = null;
+    try {
+      if (host && host.loadSettings) raw = await host.loadSettings();
+      else { const t = localStorage.getItem(SETTINGS_KEY); raw = t ? JSON.parse(t) : null; }
+    } catch (e) { raw = null; }
+    SET = { ...DEFAULT_SETTINGS, ...(raw || {}) };
+    SET.enzymeSets = SET.enzymeSets || {};
+    SET.ladders = SET.ladders || {};
+    return SET;
+  }
+  async function saveSettings() {
+    try {
+      if (host && host.saveSettings) await host.saveSettings(SET);
+      else localStorage.setItem(SETTINGS_KEY, JSON.stringify(SET));
+      return true;
+    } catch (e) { toast('Could not save settings: ' + e.message); return false; }
+  }
+
+  // Sets that are always offered, computed from the sequence rather than stored.
+  function builtinSets(d, A) {
+    const cutters = DNA.ENZYMES.filter(e => (A.sites[e.name] || []).some(s => s.cut != null));
+    return {
+      'Unique cutters, 6+ bases': cutters.filter(e => A.sites[e.name].length === 1 && e.core >= 6).map(e => e.name),
+      'Unique cutters': cutters.filter(e => A.sites[e.name].length === 1).map(e => e.name),
+      'Cuts once or twice, 6+ bases': cutters.filter(e => A.sites[e.name].length <= 2 && e.core >= 6).map(e => e.name),
+      'All enzymes that cut': cutters.map(e => e.name),
+      'Type IIS (BsaI, BsmBI, BbsI, SapI)': CLONE.TYPE2S.slice(),
+      'Blunt cutters': cutters.filter(e => e.overhang === 0).map(e => e.name)
+    };
+  }
+
+  // ================================================================ enzyme chooser
+  function dlgEnzymeChooser(onApply) {
+    const d = D(), A = analyze(d);
+    const chosen = new Set(d.chosen);
+    const built = builtinSets(d, A);
+    let filter = '', show = 'cutters', sort = 'name';
+    const countOf = nm => (A.sites[nm] || []).length;
+
+    const listFor = () => {
+      let list = DNA.ENZYMES.slice();
+      if (show === 'cutters') list = list.filter(e => countOf(e.name) > 0);
+      else if (show === 'unique') list = list.filter(e => countOf(e.name) === 1);
+      else if (show === 'noncut') list = list.filter(e => countOf(e.name) === 0);
+      else if (show === 'chosen') list = list.filter(e => chosen.has(e.name));
+      else if (show === 'six') list = list.filter(e => e.core >= 6);
+      if (filter) {
+        const q = filter.toUpperCase();
+        list = list.filter(e => e.name.toUpperCase().includes(q) || e.site.includes(q));
+      }
+      if (sort === 'count') list.sort((a, b) => countOf(a.name) - countOf(b.name) || a.name.localeCompare(b.name));
+      else if (sort === 'site') list.sort((a, b) => a.site.localeCompare(b.site) || a.name.localeCompare(b.name));
+      else list.sort((a, b) => a.name.localeCompare(b.name));
+      return list;
+    };
+    const renderGrid = () => {
+      const list = listFor();
+      $('#ecGrid').innerHTML = list.length ? list.map(e => {
+        const n = countOf(e.name);
+        return `<label class="ecitem${n ? '' : ' nocut'}" title="${esc(e.name)} ${esc(e.site)} — ${n ? n + ' site' + (n > 1 ? 's' : '') : 'does not cut'}">
+          <input type="checkbox" value="${esc(e.name)}" ${chosen.has(e.name) ? 'checked' : ''}>
+          <span class="ecn">${esc(e.name)}</span><span class="ecc">${n || ''}</span></label>`;
+      }).join('') : '<div class="hint">Nothing matches that filter.</div>';
+      $('#ecCount').textContent = `${list.length} shown · ${chosen.size} chosen`;
+    };
+    const renderSets = () => {
+      const saved = Object.keys(SET.enzymeSets).sort();
+      $('#ecSet').innerHTML = `<option value="">— choose a set —</option>`
+        + `<optgroup label="From this sequence">${Object.keys(built).map(k => `<option value="b:${esc(k)}">${esc(k)} (${built[k].length})</option>`).join('')}</optgroup>`
+        + (saved.length ? `<optgroup label="My sets">${saved.map(k => `<option value="s:${esc(k)}">${esc(k)} (${SET.enzymeSets[k].length})</option>`).join('')}</optgroup>` : '');
+      $('#ecDel').disabled = !saved.length;
+    };
+    dialog({
+      title: 'Choose Enzymes', wide: true,
+      body: `<div class="ecbar">
+          <input type="text" id="ecQ" placeholder="Filter by name or site" style="width:160px">
+          <select id="ecShow">
+            <option value="cutters">Enzymes that cut</option>
+            <option value="unique">Unique cutters</option>
+            <option value="six">6+ base recognition</option>
+            <option value="chosen">Currently chosen</option>
+            <option value="noncut">Non-cutters</option>
+            <option value="all">All ${DNA.ENZYMES.length} enzymes</option>
+          </select>
+          <select id="ecSort"><option value="name">Sort by name</option><option value="count">Sort by site count</option><option value="site">Sort by site</option></select>
+          <span class="sp" style="flex:1"></span>
+          <button class="btn" id="ecAll">Check shown</button><button class="btn" id="ecNone">Uncheck shown</button>
+        </div>
+        <div class="ecbar">
+          <span>Set</span><select id="ecSet" style="min-width:220px"></select>
+          <button class="btn" id="ecLoad">Load</button><button class="btn" id="ecAdd">Add to selection</button>
+          <span class="sp" style="flex:1"></span>
+          <button class="btn" id="ecSave">Save as my set…</button><button class="btn dng" id="ecDel">Delete my set</button>
+        </div>
+        <div class="ecgrid" id="ecGrid"></div>
+        <div class="hint" id="ecCount"></div>
+        <div class="hint">A saved set is stored with the program, not with the file, so it is there for every sequence you open.</div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Apply', primary: true, act: () => {
+          d.chosen = [...chosen].sort();
+          d.opts.enzMode = 'chosen';
+          if (onApply) onApply(d.chosen);
+          renderAll(true);
+          toast(`${d.chosen.length} enzyme${d.chosen.length === 1 ? '' : 's'} chosen`);
+        }
+      }],
+      onOpen: box => {
+        renderSets(); renderGrid();
+        box.querySelector('#ecQ').addEventListener('input', e => { filter = e.target.value; renderGrid(); });
+        box.querySelector('#ecShow').addEventListener('change', e => { show = e.target.value; renderGrid(); });
+        box.querySelector('#ecSort').addEventListener('change', e => { sort = e.target.value; renderGrid(); });
+        box.querySelector('#ecGrid').addEventListener('change', e => {
+          const i = e.target.closest('input'); if (!i) return;
+          if (i.checked) chosen.add(i.value); else chosen.delete(i.value);
+          $('#ecCount').textContent = `${listFor().length} shown · ${chosen.size} chosen`;
+        });
+        box.addEventListener('click', e => {
+          const id = e.target.id;
+          if (id === 'ecAll') { for (const el of box.querySelectorAll('#ecGrid input')) { el.checked = true; chosen.add(el.value); } renderGrid(); }
+          else if (id === 'ecNone') { for (const el of box.querySelectorAll('#ecGrid input')) { el.checked = false; chosen.delete(el.value); } renderGrid(); }
+          else if (id === 'ecLoad' || id === 'ecAdd') {
+            const v = val('ecSet'); if (!v) { toast('Choose a set first.'); return; }
+            const names = v.startsWith('b:') ? built[v.slice(2)] : SET.enzymeSets[v.slice(2)];
+            if (!names) return;
+            if (id === 'ecLoad') chosen.clear();
+            for (const nm of names) chosen.add(nm);
+            renderGrid();
+          } else if (id === 'ecSave') {
+            if (!chosen.size) { toast('Check some enzymes first.'); return; }
+            promptName('Save enzyme set', 'Name', '', async name => {
+              SET.enzymeSets[name] = [...chosen].sort();
+              SET.lastEnzymeSet = name;
+              await saveSettings();
+              renderSets();
+              $('#ecSet').value = 's:' + name;
+              toast(`Saved the set “${name}” with ${chosen.size} enzymes`);
+            });
+          } else if (id === 'ecDel') {
+            const v = val('ecSet');
+            if (!v.startsWith('s:')) { toast('Choose one of your own sets to delete.'); return; }
+            const name = v.slice(2);
+            delete SET.enzymeSets[name];
+            saveSettings().then(() => { renderSets(); toast(`Deleted the set “${name}”`); });
+          }
+        });
+      }
+    });
+  }
+  // A one-field prompt that can sit on top of another dialog.
+  function promptName(title, label, initial, done) {
+    const bg = document.createElement('div');
+    bg.className = 'modal-bg';
+    bg.style.zIndex = 120;
+    bg.innerHTML = `<div class="dlg" style="width:360px"><div class="hd">${esc(title)}</div>
+      <div class="bd"><div class="form"><label for="pnV">${esc(label)}</label><input type="text" id="pnV" value="${esc(initial)}"><div class="full err" id="pnE"></div></div></div>
+      <div class="ft"><button class="btn" data-x="1">Cancel</button><button class="btn pri" data-ok="1">OK</button></div></div>`;
+    document.body.appendChild(bg);
+    const input = bg.querySelector('#pnV');
+    const close = () => bg.remove();
+    const ok = () => {
+      const v = input.value.trim();
+      if (!v) { bg.querySelector('#pnE').textContent = 'Enter a name.'; return; }
+      close(); done(v);
+    };
+    bg.addEventListener('click', e => { if (e.target.dataset.x) close(); else if (e.target.dataset.ok) ok(); });
+    bg.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ok(); } else if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  }
+
+  // ================================================================ databases
+  function ends(e) { return e.overhang > 0 ? `5′ overhang (${e.overhang})` : (e.overhang < 0 ? `3′ overhang (${-e.overhang})` : 'blunt'); }
+  function cutSiteHtml(e) {
+    const s = e.site;
+    if (e.top >= 0 && e.top <= s.length) return esc(s.slice(0, e.top)) + '<i>▼</i>' + esc(s.slice(e.top));
+    const off = e.top - s.length;
+    return esc(s) + `<span class="note">(${off}/${e.bot - s.length})</span>`;
+  }
+  function dlgEnzymeDB() {
+    const d = D();
+    const A = d ? analyze(d) : { sites: {} };
+    let q = '', only = 'all';
+    const render = () => {
+      let list = DNA.ENZYMES.slice();
+      if (only === 'blunt') list = list.filter(e => e.overhang === 0);
+      else if (only === '5') list = list.filter(e => e.overhang > 0);
+      else if (only === '3') list = list.filter(e => e.overhang < 0);
+      else if (only === 'iis') list = list.filter(e => e.top > e.site.length);
+      else if (only === 'six') list = list.filter(e => e.core >= 6);
+      if (q) { const u = q.toUpperCase(); list = list.filter(e => e.name.toUpperCase().includes(u) || e.site.includes(u)); }
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      $('#edbT').innerHTML = `<table class="grid"><thead><tr><th>Enzyme</th><th>Recognition site</th><th>Length</th><th>Ends</th><th>Cuts (top/bottom)</th>${d ? `<th>In ${esc(d.name)}</th>` : ''}</tr></thead><tbody>
+        ${list.map(e => `<tr><td><b>${esc(e.name)}</b></td><td class="cut-site">${cutSiteHtml(e)}</td><td>${e.core}</td><td>${ends(e)}</td><td>${e.top} / ${e.bot}</td>${d ? `<td>${(A.sites[e.name] || []).length || '—'}</td>` : ''}</tr>`).join('')}
+      </tbody></table>`;
+      $('#edbN').textContent = `${list.length} of ${DNA.ENZYMES.length} enzymes`;
+    };
+    dialog({
+      title: 'Enzyme Database', wide: true,
+      body: `<div class="ecbar"><input type="text" id="edbQ" placeholder="Filter by name or site" style="width:180px">
+        <select id="edbF"><option value="all">All enzymes</option><option value="six">6+ base recognition</option><option value="5">5′ overhang</option><option value="3">3′ overhang</option><option value="blunt">Blunt</option><option value="iis">Type IIS (cuts outside the site)</option></select>
+        <span class="sp" style="flex:1"></span><span class="note" id="edbN"></span></div>
+        <div class="tscroll" style="max-height:52vh" id="edbT"></div>
+        <div class="hint">▼ marks where the top strand is cut. For a Type IIS enzyme the cut lies outside the recognition site, so the two offsets are given instead. Cut positions are counted from the left end of the site on the top strand.</div>`,
+      buttons: [{ label: 'Export as CSV', act: () => { exportEnzymeCSV(); return false; } }, { label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#edbQ').addEventListener('input', e => { q = e.target.value; render(); });
+        box.querySelector('#edbF').addEventListener('change', e => { only = e.target.value; render(); });
+      }
+    });
+  }
+  function exportEnzymeCSV() {
+    const rows = [['Enzyme', 'Site', 'CoreLength', 'TopCut', 'BottomCut', 'Ends']];
+    for (const e of DNA.ENZYMES) rows.push([e.name, e.site, e.core, e.top, e.bot, ends(e).replace(/[′]/g, "'")]);
+    const csv = rows.map(r => r.join(',')).join('\n');
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'genecanvas-enzymes.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+    else downloadText('genecanvas-enzymes.csv', csv);
+  }
+  function dlgFeatureDB() {
+    let q = '';
+    const render = () => {
+      let list = DNA.COMMON.slice();
+      if (q) { const u = q.toUpperCase(); list = list.filter(f => f.name.toUpperCase().includes(u) || f.type.toUpperCase().includes(u) || f.seq.includes(u)); }
+      $('#fdbT').innerHTML = `<table class="grid"><thead><tr><th>Name</th><th>Type</th><th>Matched on</th><th>Length</th><th>Sequence</th></tr></thead><tbody>
+        ${list.map(f => `<tr><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${f.kind === 'protein' ? 'protein' : 'DNA'}${f.short ? ' <span class="note">(short — off by default)</span>' : ''}</td><td>${f.seq.length} ${f.kind === 'protein' ? 'aa' : 'bp'}</td><td class="mono wrap">${esc(f.seq)}</td></tr>`).join('')}
+      </tbody></table>`;
+      $('#fdbN').textContent = `${list.length} of ${DNA.COMMON.length} features`;
+    };
+    dialog({
+      title: 'Feature Database', wide: true,
+      body: `<div class="ecbar"><input type="text" id="fdbQ" placeholder="Filter by name, type or sequence" style="width:220px"><span class="sp" style="flex:1"></span><span class="note" id="fdbN"></span></div>
+        <div class="tscroll" style="max-height:52vh" id="fdbT"></div>
+        <div class="hint">Features matched <b>on protein</b> are found whatever codons were used, which is what makes a tag turn up in a gene that was codon-optimised. Entries marked short are skipped by Detect Common Features unless you ask for them, because a motif of a few residues appears by chance.</div>`,
+      buttons: [{ label: 'Export as CSV', act: () => { exportFeatureCSV(); return false; } }, { label: 'Close', primary: true }],
+      onOpen: box => { render(); box.querySelector('#fdbQ').addEventListener('input', e => { q = e.target.value; render(); }); }
+    });
+  }
+  function exportFeatureCSV() {
+    const rows = [['Name', 'Type', 'MatchedOn', 'Length', 'Sequence']];
+    for (const f of DNA.COMMON) rows.push([JSON.stringify(f.name), f.type, f.kind, f.seq.length, f.seq]);
+    const csv = rows.map(r => r.join(',')).join('\n');
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'genecanvas-features.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+    else downloadText('genecanvas-features.csv', csv);
+  }
+
   // ================================================================ structure analysis
   // Links open in the default browser; the Electron main process handles that.
   function extLink(url, label) { return `<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(label)} ↗</a>`; }
@@ -2951,10 +3208,13 @@ svg .prim { cursor: pointer; }
     const d = D(); if (!d) return;
     const t = e.target;
     if (t.dataset.o) setOpt(t.dataset.o, t.checked);
-    else if (t.id === 'side-enz') setOpt('enzMode', t.value);
+    else if (t.id === 'side-enz') { if (t.value === 'chosen') { setOpt('enzMode', 'chosen'); dlgEnzymeChooser(); } else setOpt('enzMode', t.value); }
     else if (t.id === 'side-orfmin') { const v = Math.max(20, Math.min(2000, parseInt(t.value, 10) || 100)); setOpt('orfMin', v); }
   });
-  $('#side').addEventListener('click', e => { const b = e.target.closest('[data-mm]'); if (b) setOpt('mapMode', b.dataset.mm); });
+  $('#side').addEventListener('click', e => {
+    const b = e.target.closest('[data-mm]'); if (b) { setOpt('mapMode', b.dataset.mm); return; }
+    if (e.target.id === 'side-pick') dlgEnzymeChooser();
+  });
 
   document.addEventListener('keydown', e => {
     if (!$('#modal').hidden) return;
@@ -3004,7 +3264,8 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ start
-  function start() {
+  async function start() {
+    await loadSettings();
     const st = document.createElement('style');
     st.textContent = SVG_CSS;
     document.head.appendChild(st);
@@ -3025,5 +3286,5 @@ svg .prim { cursor: pointer; }
     if (it.dis) throw new Error('Disabled: ' + itemLabel);
     return it.act();
   }
-  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML };
+  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings };
 })();

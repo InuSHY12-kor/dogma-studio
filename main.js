@@ -102,6 +102,23 @@ ipcMain.on('confirm-close', () => { allowClose = true; if (win) win.close(); });
 ipcMain.on('quit', () => { if (win) win.close(); });
 ipcMain.on('version', e => { e.returnValue = app.getVersion(); });
 
+// ---------------------------------------------------------------- stored settings
+// Preferences that apply to every file, such as saved enzyme sets. Kept beside the
+// app's own data so they survive reinstalling and are shared by all documents.
+const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
+
+ipcMain.handle('load-settings', async () => {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); }
+  catch (e) { return {}; }
+});
+ipcMain.handle('save-settings', async (_e, data) => {
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    return { ok: true, path: SETTINGS_FILE };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
 // ---------------------------------------------------------------- NCBI E-utilities
 // Downloads sequence records by accession. NCBI asks unauthenticated clients to stay
 // under three requests a second, so every call goes through one paced queue.

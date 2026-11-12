@@ -257,3 +257,15 @@ svg.chroma { display: block; }
 .dg.warn { background: #fdf0dd; color: #a9631b; }
 .dg.bad { background: #fbe0de; color: var(--danger); }
 .dlg a { color: var(--accent); }
+
+/* ---------- Enzyme chooser ---------- */
+.ecbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; }
+.ecbar select, .ecbar input[type=text] { padding: 3px 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--win); }
+.ecgrid { columns: 7 110px; column-gap: 10px; max-height: 46vh; overflow: auto; border: 1px solid var(--border-soft); border-radius: 4px; padding: 6px 8px; background: var(--win); }
+.ecitem { display: flex; align-items: center; gap: 4px; break-inside: avoid; font-size: 12px; line-height: 1.55; padding: 0 2px; border-radius: 3px; }
+.ecitem:hover { background: var(--hover); }
+.ecitem input { margin: 0; flex: none; }
+.ecitem .ecn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ecitem .ecc { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; font-size: 11px; }
+.ecitem.nocut .ecn { color: var(--faint); }
+.cut-site i { color: var(--danger); font-style: normal; }
