@@ -280,3 +280,6 @@ svg.chroma { display: block; }
 .msb:hover { background: var(--hover); color: var(--ink); }
 .msb.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .mssep { height: 1px; background: var(--border-soft); margin: 3px 1px; }
+.dtab.gel .nm::before { content: "▤ "; color: var(--muted); }
+.ptools label { display: inline-flex; align-items: center; gap: 4px; }
+.ptools select { padding: 2px 4px; }

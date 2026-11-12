@@ -1,7 +1,7 @@
 /* GeneCanvas — application UI */
 (function () {
   'use strict';
-  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON, STRUCT = window.STRUCT;
+  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON, STRUCT = window.STRUCT, GEL = window.GEL;
   const host = window.gcHost || null; // provided by the Electron preload; null in a plain browser
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -301,7 +301,7 @@ svg .prim { cursor: pointer; }
 
   // ---------------------------------------------------------------- menus
   function menus() {
-    const d = D(), has = !!d, sl = has && selLen(d) > 0;
+    const d = D(), has = !!d && !isGel(d), sl = has && selLen(d) > 0;
     return [
       { label: 'File', items: [
         { label: 'New DNA File…', key: 'Ctrl+N', act: dlgNew },
@@ -406,6 +406,7 @@ svg .prim { cursor: pointer; }
         { label: 'Protein Properties…', dis: !has, act: dlgProtein },
         '-',
         { label: 'Restriction Digest & Gel…', dis: !has, act: dlgDigest },
+        { label: 'New Agarose Gel…', dis: !S.docs.some(x => !isGel(x)), act: () => newGelDoc({ doc: has ? d : null }) },
         { label: 'Translate Selection…', dis: !sl, act: dlgTranslate }
       ] },
       { label: 'Actions', items: [
@@ -492,7 +493,7 @@ svg .prim { cursor: pointer; }
 
   // ---------------------------------------------------------------- toolbar / tabs
   function renderToolbar() {
-    const d = D(), has = !!d;
+    const d = D(), has = !!d && !isGel(d);
     const b = (k, label, act, o = {}) => `<button class="tb${o.on ? ' on' : ''}" data-a="${act}" title="${esc(o.title || label)}" ${o.dis ? 'disabled' : ''}>${icon(k)}<span>${label}</span></button>`;
     $('#toolbar').innerHTML = [
       b('new', 'New', 'new'), b('open', 'Open', 'open'), b('ncbi', 'NCBI', 'ncbi', { title: 'Download a sequence from NCBI' }), b('save', 'Save', 'save', { dis: !has }), b('print', 'Print', 'print', { dis: !has }),
@@ -528,13 +529,13 @@ svg .prim { cursor: pointer; }
   };
 
   function renderDocTabs() {
-    $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''}" data-i="${i}" title="${esc(d.name)} — ${fmt(d.seq.length)} bp"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
+    $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''}${isGel(d) ? ' gel' : ''}" data-i="${i}" title="${esc(d.name)}${isGel(d) ? ' \u2014 agarose gel' : ' \u2014 ' + fmt(d.seq.length) + ' bp'}"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
   }
   const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['compare', 'Compare', 'compare'], ['hist', 'History', 'hist']];
   function renderViewTabs() {
     const vt = $('#viewtabs');
     vt.classList.toggle('noside', S.sideHidden || !(S.view === 'map' || S.view === 'seq'));
-    vt.innerHTML = D() ? VIEWS.map(([k, l, ic]) => `<button class="vt${S.view === k ? ' on' : ''}" data-v="${k}">${icon(ic)}${l}</button>`).join('') : '';
+    vt.innerHTML = D() && !isGel(D()) ? VIEWS.map(([k, l, ic]) => `<button class="vt${S.view === k ? ' on' : ''}" data-v="${k}">${icon(ic)}${l}</button>`).join('') : '';
   }
   function setView(v) { if (!D()) return; S.view = v; renderAll(); if (v === 'seq') setTimeout(() => { scrollSeqTo(D().sel.start); $('#seqscroll') && $('#seqscroll').focus(); }, 0); }
   function setOpt(k, v, toggleView) {
@@ -548,7 +549,7 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- side panel
   function renderSide() {
     const side = $('#side'), d = D();
-    const show = d && !S.sideHidden && (S.view === 'map' || S.view === 'seq');
+    const show = d && !isGel(d) && !S.sideHidden && (S.view === 'map' || S.view === 'seq');
     side.classList.toggle('hidden', !show);
     if (!show) return;
     const o = d.opts, n = d.seq.length, L = selLen(d), A = analyze(d);
@@ -581,6 +582,11 @@ svg .prim { cursor: pointer; }
   function renderStatus() {
     const d = D(), st = $('#status');
     if (!d) { st.innerHTML = '<span>No file open</span>'; return; }
+    if (isGel(d)) {
+      const o = d.gel, r = GEL.rangeFor(o.percent);
+      st.innerHTML = `<span><b>${esc(d.name)}</b></span><span>${o.percent.toFixed(1)}% agarose, 1\u00d7 ${esc(o.buffer)}, run ${Math.round(o.run * 100)}%</span><span>${o.laneCount} lanes</span><span class="r">resolves about ${fmt(Math.round(r[1]))}\u2013${fmt(Math.round(r[0]))} bp</span>`;
+      return;
+    }
     const n = d.seq.length, L = selLen(d);
     let sel;
     if (L) {
@@ -593,6 +599,7 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- main view dispatcher
   function renderView(keepScroll) {
     const v = $('#view'), d = D();
+    if (isGel(d)) { v.onclick = null; renderGel(); return; }
     if (!d) {
       v.innerHTML = `<div class="empty"><h2>GeneCanvas</h2><p>Open a GenBank, FASTA or .dna file, or start a new sequence. You can also drop a file onto this window.</p><div class="btns"><button class="btn pri" data-a="open">Open File…</button><button class="btn" data-a="new">New DNA File…</button><button class="btn" data-a="demo">Open Example Plasmid</button></div></div>`;
       v.onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; ({ open: openFiles, new: dlgNew, demo: () => addDoc(DNA.buildDemo()) })[b.dataset.a](); };
@@ -2568,6 +2575,213 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // ================================================================ agarose gel document
+  const isGel = x => !!(x && x.gel);
+  function newGelDoc(opts) {
+    const dnaDocs = S.docs.filter(x => !isGel(x));
+    const first = (opts && opts.doc) || dnaDocs[0];
+    const g = {
+      id: uid(), name: 'Agarose Gel', gel: {
+        percent: 1.0, buffer: 'TAE', run: 0.75, laneCount: 6, ladder: 'neb-1kb',
+        lanes: []
+      }, dirty: false
+    };
+    g.gel.lanes = [{ src: 'ladder:neb-1kb' }];
+    if (first) g.gel.lanes.push({ src: 'doc:' + first.id, enzymes: (opts && opts.enzymes) || first.chosen.slice(0, 2) });
+    while (g.gel.lanes.length < g.gel.laneCount) g.gel.lanes.push({ src: '' });
+    S.docs.push(g);
+    S.active = S.docs.length - 1;
+    renderAll();
+    return g;
+  }
+
+  function laneBands(lane) {
+    if (!lane || !lane.src) return { bands: [], label: '', sub: '' };
+    if (lane.src.startsWith('ladder:')) {
+      const l = GEL.ladderByKey(lane.src.slice(7), SET.ladders);
+      if (!l) return { bands: [], label: 'missing ladder', sub: '' };
+      const bright = new Set(l.bright || []);
+      return { bands: l.bands.map(size => ({ size, mass: bright.has(size) ? size * 2.4 : size, ref: bright.has(size) })), label: l.name, sub: l.brand, ladder: true };
+    }
+    if (lane.src.startsWith('doc:')) {
+      const doc = S.docs.find(x => String(x.id) === lane.src.slice(4) && !isGel(x));
+      if (!doc) return { bands: [], label: 'missing sequence', sub: '' };
+      const enz = (lane.enzymes || []).filter(nm => DNA.ENZ_BY_NAME[nm]);
+      if (!enz.length) {
+        const n = doc.seq.length;
+        // A supercoiled circle is more compact than a linear fragment and runs ahead of it.
+        return { bands: [{ size: doc.circular ? Math.round(n * 0.65) : n, mass: n, real: n, sc: doc.circular }], label: doc.name, sub: doc.circular ? 'uncut, supercoiled' : 'uncut' };
+      }
+      const sites = DNA.findSites(doc.seq, doc.circular);
+      const frags = DNA.digest(doc.seq, doc.circular, sites, enz);
+      return { bands: frags.map(f => ({ size: f.size, mass: f.size })), label: doc.name, sub: enz.join(' + ') };
+    }
+    if (lane.src === 'custom') {
+      const list = (lane.bands || []);
+      return { bands: list.map(size => ({ size, mass: size })), label: lane.label || 'Custom', sub: list.length + ' bands' };
+    }
+    return { bands: [], label: '', sub: '' };
+  }
+
+  function gelSVGDoc(g, width) {
+    const o = g.gel;
+    const lanes = o.lanes.slice(0, o.laneCount);
+    const avail = Math.max(360, width - 120);
+    const laneW = Math.max(54, Math.min(170, Math.floor(avail / Math.max(1, lanes.length))));
+    const left = 86, top = 58, gelH = 520, wellY = top + 10, runH = gelH - 54;
+    const W = left + lanes.length * laneW + 26, H = top + gelH + 34;
+    const data = lanes.map(laneBands);
+    const parts = [];
+    parts.push(`<rect width="${W}" height="${H}" fill="#0f1116" rx="5"/>`);
+    parts.push(`<rect x="${left - 10}" y="${top}" width="${lanes.length * laneW + 20}" height="${gelH}" fill="#15181f" rx="3"/>`);
+    // ladder size labels down the left, taken from the first ladder lane
+    const refIdx = data.findIndex(x => x.ladder);
+    if (refIdx >= 0) {
+      // Bands that pile up near the well cannot all be labelled, so skip the ones that
+      // would print on top of the label above them.
+      let lastY = -99;
+      for (const b of data[refIdx].bands.slice().sort((p, q) => q.size - p.size)) {
+        const y = wellY + GEL.mobility(b.size, o) * runH;
+        if (y > top + gelH - 6) continue;
+        if (y - lastY < 11) continue;
+        lastY = y;
+        parts.push(`<text x="${left - 16}" y="${(y + 3.5).toFixed(1)}" fill="#9aa3b2" font-size="10" text-anchor="end">${b.size >= 1000 ? (b.size / 1000) + ' kb' : b.size + ' bp'}</text>`);
+        parts.push(`<line x1="${left - 13}" y1="${y.toFixed(1)}" x2="${left - 9}" y2="${y.toFixed(1)}" stroke="#4a5262"/>`);
+      }
+    }
+    lanes.forEach((lane, i) => {
+      const x = left + i * laneW, cx = x + laneW / 2, bw = Math.min(laneW - 12, 120);
+      parts.push(`<rect x="${(cx - bw / 2).toFixed(1)}" y="${wellY - 9}" width="${bw}" height="7" fill="#2b3040" rx="1"/>`);
+      const d2 = data[i];
+      const head = d2.label || '—';
+      parts.push(`<text x="${cx.toFixed(1)}" y="26" fill="#d6dbe5" font-size="11" text-anchor="middle" font-weight="600">${esc(head.length > Math.floor(laneW / 6) ? head.slice(0, Math.floor(laneW / 6) - 1) + '…' : head)}</text>`);
+      if (d2.sub) parts.push(`<text x="${cx.toFixed(1)}" y="40" fill="#8e97a8" font-size="9.5" text-anchor="middle">${esc(d2.sub.length > Math.floor(laneW / 5) ? d2.sub.slice(0, Math.floor(laneW / 5) - 1) + '…' : d2.sub)}</text>`);
+      parts.push(`<text x="${cx.toFixed(1)}" y="${H - 10}" fill="#6f7889" font-size="10" text-anchor="middle">${i + 1}</text>`);
+      if (!d2.bands.length) return;
+      // bands close enough to overlap are drawn as one, which is what a real gel shows
+      const placed = [];
+      const maxMass = Math.max(...d2.bands.map(b => b.mass), 1);
+      for (const b of d2.bands.slice().sort((p, q) => q.size - p.size)) {
+        const y = wellY + GEL.mobility(b.size, o) * runH;
+        if (y > top + gelH - 4) continue;
+        const near = placed.find(p => Math.abs(p.y - y) < 2.2);
+        if (near) { near.mass += b.mass; near.sizes.push(b.size); continue; }
+        placed.push({ y, mass: b.mass, sizes: [b.size], ref: b.ref, sc: b.sc, real: b.real });
+      }
+      for (const p of placed) {
+        const op = 0.3 + 0.7 * Math.min(1, p.mass / maxMass);
+        const h = 3 + 1.6 * Math.min(1, p.mass / maxMass);
+        const title = p.sizes.map(s => fmt(s) + ' bp').join(' + ') + (p.sc ? ` (supercoiled, really ${fmt(p.real)} bp)` : '');
+        parts.push(`<rect x="${(cx - bw / 2).toFixed(1)}" y="${(p.y - h / 2).toFixed(1)}" width="${bw}" height="${h.toFixed(1)}" fill="#f2f6ff" opacity="${op.toFixed(2)}" rx="1"><title>${esc(title)}</title></rect>`);
+      }
+    });
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif">${parts.join('')}</svg>`;
+  }
+
+  function renderGel() {
+    const g = D(), o = g.gel, v = $('#view');
+    const dnaDocs = S.docs.filter(x => !isGel(x));
+    const ladders = GEL.ladderList(SET.ladders);
+    const byBrand = {};
+    for (const l of ladders) (byBrand[l.brand] = byBrand[l.brand] || []).push(l);
+    const srcOptions = lane => {
+      const cur = lane.src || '';
+      let h = `<option value="" ${cur === '' ? 'selected' : ''}>— empty —</option>`;
+      h += Object.entries(byBrand).map(([brand, list]) => `<optgroup label="${esc(brand)}">${list.map(l => `<option value="ladder:${esc(l.key)}" ${cur === 'ladder:' + l.key ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</optgroup>`).join('');
+      if (dnaDocs.length) h += `<optgroup label="Open sequences">${dnaDocs.map(x => `<option value="doc:${x.id}" ${cur === 'doc:' + x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`;
+      return h;
+    };
+    const lanes = o.lanes.slice(0, o.laneCount);
+    v.innerHTML = `<div class="panel">
+      <div class="ptools">
+        <label>Agarose <select id="glPct">${[0.5, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0].map(p => `<option value="${p}" ${p === o.percent ? 'selected' : ''}>${p.toFixed(1)} %</option>`).join('')}</select></label>
+        <label>Buffer <select id="glBuf">${['TAE', 'TBE'].map(x => `<option ${x === o.buffer ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <label>Run <input type="range" id="glRun" min="20" max="100" step="5" value="${Math.round(o.run * 100)}" style="width:110px"> <span id="glRunV">${Math.round(o.run * 100)}%</span></label>
+        <label>Lanes <select id="glN">${Array.from({ length: 20 }, (_, i) => i + 1).map(k => `<option value="${k}" ${k === o.laneCount ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+        <button class="btn" id="glLadder">Add a ladder…</button>
+        <button class="btn" id="glPNG">Export SVG…</button>
+        <span class="note">${(() => { const r = GEL.rangeFor(o.percent); return `resolves about ${fmt(Math.round(r[1]))}–${fmt(Math.round(r[0]))} bp`; })()}</span>
+      </div>
+      <div class="tscroll" style="background:var(--chrome2)"><div id="glImg" style="padding:14px"></div>
+        <div style="padding:0 14px 14px">
+          <table class="grid" style="width:auto;background:var(--win)"><thead><tr><th>Lane</th><th>Contents</th><th>Cut with</th><th>Bands</th></tr></thead><tbody>
+          ${lanes.map((lane, i) => {
+            const d2 = laneBands(lane);
+            const isDoc = (lane.src || '').startsWith('doc:');
+            return `<tr><td>${i + 1}</td>
+              <td><select data-lane="${i}" class="glSrc">${srcOptions(lane)}</select></td>
+              <td>${isDoc ? `<button class="btn" data-enz="${i}">${(lane.enzymes || []).length ? esc((lane.enzymes || []).join(' + ')) : 'uncut — choose…'}</button>` : '<span class="note">—</span>'}</td>
+              <td class="wrap">${d2.bands.length ? d2.bands.slice().sort((a, b) => b.size - a.size).map(b => fmt(b.size)).join(', ') + ' bp' : '<span class="note">—</span>'}</td></tr>`;
+          }).join('')}
+          </tbody></table>
+        </div>
+      </div>
+      <div class="ptools"><span class="note">Migration is a model of a 1× ${esc(o.buffer)} gel, not a measurement. Ladder band sizes follow the suppliers' published values — check them against the datasheet in your box.</span></div>
+    </div>`;
+    const img = $('#glImg');
+    img.innerHTML = gelSVGDoc(g, img.clientWidth || 900);
+    const mark = () => { g.dirty = true; renderAll(true); };
+    $('#glPct').onchange = e => { o.percent = parseFloat(e.target.value); mark(); };
+    $('#glBuf').onchange = e => { o.buffer = e.target.value; mark(); };
+    $('#glRun').oninput = e => { o.run = +e.target.value / 100; $('#glRunV').textContent = e.target.value + '%'; img.innerHTML = gelSVGDoc(g, img.clientWidth || 900); };
+    $('#glRun').onchange = () => { g.dirty = true; };
+    $('#glN').onchange = e => {
+      o.laneCount = +e.target.value;
+      while (o.lanes.length < o.laneCount) o.lanes.push({ src: '' });
+      mark();
+    };
+    $('#glLadder').onclick = dlgCustomLadder;
+    $('#glPNG').onclick = () => {
+      const svg = img.querySelector('svg');
+      const content = svg.outerHTML;
+      if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'gel.svg', content, filters: [{ name: 'SVG image', extensions: ['svg'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+      else downloadText('gel.svg', content);
+    };
+    v.querySelectorAll('.glSrc').forEach(sel => sel.onchange = e => {
+      const i = +e.target.dataset.lane;
+      o.lanes[i] = { src: e.target.value };
+      if (e.target.value.startsWith('doc:')) {
+        const doc = S.docs.find(x => String(x.id) === e.target.value.slice(4));
+        o.lanes[i].enzymes = doc ? doc.chosen.slice(0, 2) : [];
+      }
+      mark();
+    });
+    v.querySelectorAll('[data-enz]').forEach(btn => btn.onclick = () => {
+      const i = +btn.dataset.enz;
+      const doc = S.docs.find(x => String(x.id) === o.lanes[i].src.slice(4));
+      if (!doc) return;
+      dlgEnzymeChooser({ doc, initial: o.lanes[i].enzymes || [], title: `Cut ${doc.name} with`, onApply: names => { o.lanes[i].enzymes = names; mark(); } });
+    });
+  }
+
+  function dlgCustomLadder() {
+    dialog({
+      title: 'Add a Ladder',
+      body: `<div class="form">
+        <label for="clN">Name</label><input type="text" id="clN" placeholder="e.g. Bioneer 1 kb">
+        <label for="clB">Band sizes</label><textarea id="clB" rows="5" placeholder="10000, 8000, 6000, 5000, 4000, 3000*, 2000, 1500, 1000, 500"></textarea>
+        <div class="full hint">Sizes in base pairs, separated by commas, spaces or line breaks. Write <b>3000*</b> to mark a brighter reference band. A number under 50 is read as kilobases.</div>
+        <div class="full" id="clPrev"></div><div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Save', primary: true, act: () => {
+          const name = val('clN').trim();
+          if (!name) return showErr('Give the ladder a name.');
+          let parsed;
+          try { parsed = GEL.parseLadder(val('clB')); } catch (e) { return showErr(e.message); }
+          SET.ladders[name] = parsed;
+          saveSettings().then(() => { toast(`Saved the ladder “${name}” with ${parsed.bands.length} bands`); renderAll(true); });
+        }
+      }],
+      onOpen: box => {
+        const upd = () => {
+          try { const r = GEL.parseLadder(val('clB')); $('#clPrev').innerHTML = `<div class="hint">${r.bands.length} bands: ${r.bands.map(b => fmt(b)).join(', ')}${r.bright.length ? ` · reference: ${r.bright.map(fmt).join(', ')}` : ''}</div>`; }
+          catch (e) { $('#clPrev').innerHTML = ''; }
+        };
+        box.querySelector('#clB').addEventListener('input', upd);
+      }
+    });
+  }
+
   // ================================================================ stored settings
   // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
   const SETTINGS_KEY = 'genecanvas.settings';
@@ -2607,9 +2821,10 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ enzyme chooser
-  function dlgEnzymeChooser(onApply) {
-    const d = D(), A = analyze(d);
-    const chosen = new Set(d.chosen);
+  function dlgEnzymeChooser(opts) {
+    opts = typeof opts === 'function' ? { onApply: opts } : (opts || {});
+    const d = opts.doc || D(), A = analyze(d);
+    const chosen = new Set(opts.initial || d.chosen);
     const built = builtinSets(d, A);
     let filter = '', show = 'cutters', sort = 'name';
     const countOf = nm => (A.sites[nm] || []).length;
@@ -2648,7 +2863,7 @@ svg .prim { cursor: pointer; }
       $('#ecDel').disabled = !saved.length;
     };
     dialog({
-      title: 'Choose Enzymes', wide: true,
+      title: opts.title || 'Choose Enzymes', wide: true,
       body: `<div class="ecbar">
           <input type="text" id="ecQ" placeholder="Filter by name or site" style="width:160px">
           <select id="ecShow">
@@ -2674,11 +2889,12 @@ svg .prim { cursor: pointer; }
         <div class="hint">A saved set is stored with the program, not with the file, so it is there for every sequence you open.</div>`,
       buttons: [{ label: 'Cancel' }, {
         label: 'Apply', primary: true, act: () => {
-          d.chosen = [...chosen].sort();
+          const names = [...chosen].sort();
+          if (opts.onApply) { opts.onApply(names); return; }
+          d.chosen = names;
           d.opts.enzMode = 'chosen';
-          if (onApply) onApply(d.chosen);
           renderAll(true);
-          toast(`${d.chosen.length} enzyme${d.chosen.length === 1 ? '' : 's'} chosen`);
+          toast(`${names.length} enzyme${names.length === 1 ? '' : 's'} chosen`);
         }
       }],
       onOpen: box => {
@@ -3205,6 +3421,7 @@ svg .prim { cursor: pointer; }
   }
   function closeDoc(i, force) {
     const d = S.docs[i]; if (!d) return;
+    if (isGel(d)) { S.docs.splice(i, 1); if (S.active >= S.docs.length) S.active = S.docs.length - 1; renderAll(); return; }
     if (d.dirty && !force) {
       dialog({
         title: 'Unsaved Changes', body: `<p>Save changes to “${esc(d.name)}” before closing?</p>`,
@@ -3264,7 +3481,7 @@ svg .prim { cursor: pointer; }
   }
   function primerSitesFor(d) { const A = analyze(d); return p => A.psites[p.id] || []; }
   async function saveDoc(asNew) {
-    const d = D(); if (!d) return false;
+    const d = D(); if (!d || isGel(d)) return false;
     const content = DNA.toGenBank(d, primerSitesFor(d));
     const fname = d.name.replace(/[\\/:*?"<>|]/g, '_') + '.gb';
     if (host && host.saveFile) {
