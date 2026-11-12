@@ -445,13 +445,18 @@ ZraI GACGTC 3 3`;
   function detectCommon(seq, circular, existing, opts) {
     opts = opts || {};
     const found = [];
-    for (const f of COMMON) {
+    for (const f of COMMON.concat(opts.extra || [])) {
+      if (!f || !f.seq) continue;
       if (f.short && !opts.includeShort) continue;
       const hits = f.kind === 'protein' ? searchProtein(seq, circular, f.seq) : searchDNA(seq, circular, f.seq);
       for (const h of hits) {
         if (existing.some(x => x.start === h.start && x.end === h.end)) continue;
         if (found.some(x => x.start === h.start && x.end === h.end)) continue;
-        found.push({ name: f.name, type: f.type, start: h.start, end: h.end, strand: h.strand, via: f.kind });
+        found.push({
+          name: f.name, type: f.type || 'misc_feature', start: h.start, end: h.end, strand: h.strand,
+          via: f.kind, molecule: f.molecule || (f.kind === 'protein' ? 'protein' : 'DNA'),
+          matchProtein: f.kind === 'protein', color: f.color || null, mine: !!f.mine
+        });
       }
     }
     return found;

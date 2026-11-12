@@ -64,7 +64,16 @@ svg .prim { cursor: pointer; }
       features: (src.features || []).map(f => {
         let color = f.color;
         if (!color) color = f.type === 'CDS' ? CDS_PALETTE[(cdsI++) % CDS_PALETTE.length] : (TYPE_COL[f.type] || '#c9ced6');
-        return { id: uid(), name: f.name || f.type, type: f.type || 'misc_feature', start: Math.max(0, Math.min(n, f.start)), end: Math.max(0, Math.min(n, f.end)), strand: f.strand === undefined ? 1 : f.strand, color, notes: f.notes || '' };
+        return {
+          id: uid(), name: f.name || f.type, type: f.type || 'misc_feature',
+          start: Math.max(0, Math.min(n, f.start)), end: Math.max(0, Math.min(n, f.end)),
+          strand: f.strand === undefined ? 1 : f.strand, color, notes: f.notes || '',
+          molecule: f.molecule || 'DNA',
+          translated: f.translated !== undefined ? !!f.translated : (f.type === 'CDS'),
+          frame: f.frame || 0,
+          matchProtein: !!f.matchProtein,
+          quals: f.quals || {}
+        };
       }),
       primers: (src.primers || []).map(p => ({ id: uid(), name: p.name, seq: DNA.clean(p.seq), notes: p.notes || '' })),
       provenance: src.provenance || null,
@@ -1082,7 +1091,7 @@ svg .prim { cursor: pointer; }
     // translations, carrying the residue number so each one can be numbered like a protein
     const aaRows = {};
     if (o.showTrans) for (const it of items) {
-      if (!((it.kind === 'f' && it.type === 'CDS') || it.kind === 'o')) continue;
+      if (!((it.kind === 'f' && it.ref && it.ref.translated) || it.kind === 'o')) continue;
       const L = DNA.rlen(it, n); const fs = DNA.sub(d.seq, it.start, it.end);
       const s = it.strand === -1 ? DNA.rc(fs) : fs;
       for (let j = 0; j + 3 <= L; j += 3) {
@@ -1129,7 +1138,7 @@ svg .prim { cursor: pointer; }
       for (const s of rsegs) {
         let l = 0; while (laneEnd[l] !== undefined && laneEnd[l] > s.x1) l++;
         laneEnd[l] = s.x2; s.lane = l;
-        if (o.showTrans && ((s.it.kind === 'f' && s.it.type === 'CDS') || s.it.kind === 'o')) laneTrans[l] = true;
+        if (o.showTrans && ((s.it.kind === 'f' && s.it.ref && s.it.ref.translated) || s.it.kind === 'o')) laneTrans[l] = true;
       }
       const laneBar = [], laneAA = [], laneNum = [];
       for (let l = 0; l < laneEnd.length; l++) {
@@ -1359,8 +1368,8 @@ svg .prim { cursor: pointer; }
     const d = D(), n = d.seq.length, v = $('#view');
     const fs = d.features.slice().sort((a, b) => a.start - b.start);
     v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="fadd">Add Feature…</button><button class="btn" id="fdet">Detect Common Features</button><span class="note">${fs.length} features · double-click a row to edit</span></div>
-      <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th></th><th>Name</th><th>Type</th><th>Location</th><th>Length</th><th>Direction</th><th>Notes</th><th></th></tr></thead><tbody>
-      ${fs.map(f => `<tr data-f="${f.id}"><td><span class="sw" style="background:${f.color}"></span></td><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)} .. ${fmt(f.end)}${f.end <= f.start ? ' (spans origin)' : ''}</td><td>${fmt(DNA.rlen(f, n))} bp${f.type === 'CDS' ? ` · ${Math.floor(DNA.rlen(f, n) / 3) - 1} aa` : ''}</td><td>${f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : '— none'}</td><td class="wrap">${esc(f.notes || '')}</td><td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`).join('')}
+      <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th></th><th>Name</th><th>Type</th><th>Location</th><th>Length</th><th>Direction</th><th>Molecule</th><th>Notes</th><th></th></tr></thead><tbody>
+      ${fs.map(f => `<tr data-f="${f.id}"><td><span class="sw" style="background:${f.color}"></span></td><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)} .. ${fmt(f.end)}${f.end <= f.start ? ' (spans origin)' : ''}</td><td>${fmt(DNA.rlen(f, n))} bp${f.type === 'CDS' ? ` · ${Math.floor(DNA.rlen(f, n) / 3) - 1} aa` : ''}</td><td>${f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : '— none'}</td><td>${esc(f.molecule || 'DNA')}${f.translated ? ' · translated' : ''}${f.matchProtein ? ' · protein match' : ''}</td><td class="wrap">${esc(f.notes || '')}</td><td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`).join('')}
       </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let GeneCanvas detect common features such as promoters, tags and recombination sites.</p></div>`}</div></div>`;
     $('#fadd').onclick = () => dlgFeature(null);
     $('#fdet').onclick = detectCommon;
@@ -1487,7 +1496,13 @@ svg .prim { cursor: pointer; }
   // ================================================================ feature / primer ops
   function addFeature(f) {
     const d = D();
-    const nf = { id: uid(), name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand, color: f.color || (f.type === 'CDS' ? CDS_PALETTE[d.features.filter(x => x.type === 'CDS').length % CDS_PALETTE.length] : (TYPE_COL[f.type] || '#c9ced6')), notes: f.notes || '' };
+    const nf = {
+      id: uid(), name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand,
+      color: f.color || (f.type === 'CDS' ? CDS_PALETTE[d.features.filter(x => x.type === 'CDS').length % CDS_PALETTE.length] : (TYPE_COL[f.type] || '#c9ced6')),
+      notes: f.notes || '', molecule: f.molecule || 'DNA',
+      translated: f.translated !== undefined ? !!f.translated : (f.type === 'CDS'),
+      frame: f.frame || 0, matchProtein: !!f.matchProtein, quals: f.quals || {}
+    };
     d.features.push(nf); commit(d, `Added feature ${nf.name}`); renderAll(true);
     return nf;
   }
@@ -1512,9 +1527,14 @@ svg .prim { cursor: pointer; }
   }
   function detectCommon() {
     const d = D();
-    const found = DNA.detectCommon(d.seq, d.circular, d.features);
+    const found = DNA.detectCommon(d.seq, d.circular, d.features, { extra: SET.myFeatures.map(f => ({ ...f, mine: true })) });
     if (!found.length) { toast('No additional common features found.'); return; }
-    for (const f of found) d.features.push({ id: uid(), name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand, color: TYPE_COL[f.type] || '#c9ced6', notes: 'Detected automatically' });
+    for (const f of found) d.features.push({
+      id: uid(), name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand,
+      color: f.color || TYPE_COL[f.type] || '#c9ced6',
+      notes: `Detected automatically${f.mine ? ' from my features' : ''}${f.via === 'protein' ? ', matched on protein' : ''}`,
+      molecule: f.molecule, translated: f.type === 'CDS', frame: 0, matchProtein: !!f.matchProtein, quals: {}
+    });
     commit(d, `Detected ${found.length} common feature${found.length > 1 ? 's' : ''}`); renderAll(true);
     toast(`Added ${found.length}: ${[...new Set(found.map(f => f.name))].join(', ')}`);
   }
@@ -1611,48 +1631,101 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  const MOLECULES = ['DNA', 'RNA', 'protein'];
   function dlgFeature(f, preset = {}) {
     const d = D(), n = d.seq.length, isNew = !f;
     if (isNew && !selLen(d)) { toast('Select a region first, then add a feature.'); return; }
-    const cur = f || { name: preset.name || 'New feature', type: preset.type || 'misc_feature', start: d.sel.start, end: d.sel.end, strand: preset.strand !== undefined ? preset.strand : 1, color: '', notes: '' };
+    const cur = f || {
+      name: preset.name || 'New feature', type: preset.type || 'misc_feature',
+      start: d.sel.start, end: d.sel.end, strand: preset.strand !== undefined ? preset.strand : 1,
+      color: '', notes: '', molecule: 'DNA', translated: (preset.type || '') === 'CDS', frame: 0, matchProtein: false, quals: {}
+    };
     const color = cur.color || TYPE_COL[cur.type] || '#c9ced6';
+    const qualText = Object.entries(cur.quals || {}).map(([k, v]) => `${k}=${v}`).join('\n');
     dialog({
-      title: isNew ? 'Add Feature' : `Edit Feature “${cur.name}”`,
+      title: isNew ? 'Add Feature' : `Edit Feature “${cur.name}”`, wide: true,
       body: `<div class="form">
         <label for="fn">Name</label><input type="text" id="fn" value="${esc(cur.name)}">
         <label for="ft">Type</label><select id="ft">${FEATURE_TYPES.map(t => `<option ${t === cur.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label for="fmol">Molecule</label><select id="fmol">${MOLECULES.map(m => `<option ${m === (cur.molecule || 'DNA') ? 'selected' : ''}>${m}</option>`).join('')}</select>
         <label for="fs">Start</label><input type="number" id="fs" min="1" max="${n}" value="${cur.start + 1}">
         <label for="fe">End</label><input type="number" id="fe" min="1" max="${n}" value="${cur.end === 0 ? n : cur.end}">
-        <label for="fd">Direction</label><select id="fd"><option value="1" ${cur.strand === 1 ? 'selected' : ''}>→ Forward</option><option value="-1" ${cur.strand === -1 ? 'selected' : ''}>← Reverse</option><option value="0" ${!cur.strand ? 'selected' : ''}>— None</option></select>
-        <label for="fc">Color</label><input type="color" id="fc" value="${color}">
-        <label for="fno">Notes</label><input type="text" id="fno" value="${esc(cur.notes || '')}">
+        <label for="fd">Direction</label><select id="fd"><option value="1" ${cur.strand === 1 ? 'selected' : ''}>→ Forward</option><option value="-1" ${cur.strand === -1 ? 'selected' : ''}>← Reverse</option><option value="0" ${!cur.strand ? 'selected' : ''}>— None (bidirectional)</option></select>
+        <label for="fc">Colour</label><input type="color" id="fc" value="${color}">
+        <label>Translation</label><div class="row2">
+          <label><input type="checkbox" id="ftr" ${cur.translated ? 'checked' : ''}> Show the protein</label>
+          <label>reading frame <select id="ffr">${[0, 1, 2].map(k => `<option value="${k}" ${k === (cur.frame || 0) ? 'selected' : ''}>+${k + 1}</option>`).join('')}</select></label></div>
+        <label>Matching</label><label><input type="checkbox" id="fmp" ${cur.matchProtein ? 'checked' : ''}> Recognise this feature wherever the <b>protein</b> matches, even if the DNA differs</label>
+        <label for="fno">Note</label><input type="text" id="fno" value="${esc(cur.notes || '')}">
+        <label for="fq">Qualifiers</label><textarea id="fq" rows="3" placeholder="one per line, like  gene=bla">${esc(qualText)}</textarea>
         <div class="full hint" id="finfo"></div><div class="full err"></div></div>`,
-      buttons: [...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => removeFeature(f.id) }]), { label: 'Cancel' }, {
-        label: isNew ? 'Add' : 'Save', primary: true, act: () => {
-          const name = val('fn').trim(), a = parseInt(val('fs'), 10), b = parseInt(val('fe'), 10);
-          if (!name) return showErr('Enter a feature name.');
-          if (!(a >= 1 && a <= n && b >= 1 && b <= n)) return showErr(`Start and end must be between 1 and ${fmt(n)}.`);
-          if (b < a && !d.circular) return showErr('End must not be before start on a linear sequence.');
-          const nf = { name, type: val('ft'), start: a - 1, end: b, strand: +val('fd'), color: val('fc'), notes: val('fno').trim() };
-          if (b < a) nf.end = b; // spans origin on a circular sequence
-          if (isNew) addFeature(nf);
-          else { Object.assign(f, nf); commit(d, `Edited feature ${name}`); renderAll(true); }
-        }
-      }],
+      buttons: [
+        ...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => removeFeature(f.id) }]),
+        { label: 'Save to My Features', act: () => { saveMyFeature(); return false; } },
+        { label: 'Cancel' },
+        {
+          label: isNew ? 'Add' : 'Save', primary: true, act: () => {
+            const nf = collect();
+            if (!nf) return false;
+            if (isNew) addFeature(nf);
+            else { Object.assign(f, nf); commit(d, `Edited feature ${nf.name}`); renderAll(true); }
+          }
+        }],
       onOpen: box => {
         const upd = () => {
           const a = parseInt(val('fs'), 10), b = parseInt(val('fe'), 10);
           if (!(a >= 1 && b >= 1)) return;
-          const r = { start: a - 1, end: b }; const L = DNA.rlen(r, n);
+          const r = { start: a - 1, end: b }, L = DNA.rlen(r, n);
           let s = `${fmt(L)} bp`;
-          if (val('ft') === 'CDS' && L >= 3) { const seq = DNA.sub(d.seq, r.start, r.end); const p = DNA.translate(+val('fd') === -1 ? DNA.rc(seq) : seq); s += ` · ${p.length} codons · ${p.startsWith('M') ? 'starts with Met' : 'no ATG start'} · ${p.indexOf('*') === p.length - 1 ? 'ends with a stop codon' : (p.includes('*') ? 'internal stop codon' : 'no stop codon')}`; }
+          if ($('#ftr').checked && L >= 3) {
+            const seq = DNA.sub(d.seq, r.start, r.end);
+            const fr = +val('ffr');
+            const p = DNA.translate((+val('fd') === -1 ? DNA.rc(seq) : seq).slice(fr));
+            s += ` · ${p.length} codons · ${p.startsWith('M') ? 'starts with Met' : 'no ATG start'} · ${p.indexOf('*') === p.length - 1 ? 'ends with a stop codon' : (p.includes('*') ? 'internal stop codon' : 'no stop codon')}`;
+          }
           $('#finfo').textContent = s;
         };
         box.querySelectorAll('input,select').forEach(el => el.addEventListener('input', upd));
-        $('#ft').addEventListener('change', () => { if (isNew) $('#fc').value = TYPE_COL[val('ft')] || '#c9ced6'; upd(); });
+        $('#ft').addEventListener('change', () => {
+          if (isNew) { $('#fc').value = TYPE_COL[val('ft')] || '#c9ced6'; $('#ftr').checked = val('ft') === 'CDS'; }
+          upd();
+        });
         upd();
       }
     });
+
+    function collect() {
+      const name = val('fn').trim(), a = parseInt(val('fs'), 10), b = parseInt(val('fe'), 10);
+      if (!name) return showErr('Enter a feature name.') || null;
+      if (!(a >= 1 && a <= n && b >= 1 && b <= n)) return showErr(`Start and end must be between 1 and ${fmt(n)}.`) || null;
+      if (b < a && !d.circular) return showErr('End must not be before start on a linear sequence.') || null;
+      const quals = {};
+      for (const line of val('fq').split('\n')) {
+        const t = line.trim(); if (!t) continue;
+        const i = t.indexOf('=');
+        if (i > 0) quals[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+      }
+      return {
+        name, type: val('ft'), start: a - 1, end: b, strand: +val('fd'), color: val('fc'),
+        notes: val('fno').trim(), molecule: val('fmol'), translated: $('#ftr').checked,
+        frame: +val('ffr'), matchProtein: $('#fmp').checked, quals
+      };
+    }
+    function saveMyFeature() {
+      const nf = collect(); if (!nf) return;
+      const fs = DNA.sub(d.seq, nf.start, nf.end);
+      const fwd = nf.strand === -1 ? DNA.rc(fs) : fs;
+      let kind = 'dna', seq = fwd;
+      if (nf.matchProtein) {
+        const prot = DNA.translate(fwd.slice(nf.frame)).replace(/\*+$/, '');
+        if (prot.length < 4) { showErr('The protein is too short to match on. Turn protein matching off, or choose a longer region.'); return; }
+        kind = 'protein'; seq = prot;
+      }
+      const entry = { name: nf.name, type: nf.type, kind, seq, molecule: nf.molecule, color: nf.color, note: nf.notes };
+      const at = SET.myFeatures.findIndex(x => x.name === entry.name && x.kind === entry.kind);
+      if (at >= 0) SET.myFeatures[at] = entry; else SET.myFeatures.push(entry);
+      saveSettings().then(() => toast(`“${entry.name}” saved to my features (matched on ${kind === 'protein' ? 'protein' : 'DNA'})`));
+    }
   }
 
   function dlgPrimer(p, preset) {
@@ -3419,22 +3492,47 @@ svg .prim { cursor: pointer; }
     else downloadText('genecanvas-enzymes.csv', csv);
   }
   function dlgFeatureDB() {
-    let q = '';
+    let q = '', tab = 'built';
     const render = () => {
-      let list = DNA.COMMON.slice();
+      let list = (tab === 'mine' ? SET.myFeatures : DNA.COMMON).slice();
       if (q) { const u = q.toUpperCase(); list = list.filter(f => f.name.toUpperCase().includes(u) || f.type.toUpperCase().includes(u) || f.seq.includes(u)); }
-      $('#fdbT').innerHTML = `<table class="grid"><thead><tr><th>Name</th><th>Type</th><th>Matched on</th><th>Length</th><th>Sequence</th></tr></thead><tbody>
-        ${list.map(f => `<tr><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${f.kind === 'protein' ? 'protein' : 'DNA'}${f.short ? ' <span class="note">(short — off by default)</span>' : ''}</td><td>${f.seq.length} ${f.kind === 'protein' ? 'aa' : 'bp'}</td><td class="mono wrap">${esc(f.seq)}</td></tr>`).join('')}
-      </tbody></table>`;
-      $('#fdbN').textContent = `${list.length} of ${DNA.COMMON.length} features`;
+      $('#fdbT').innerHTML = list.length ? `<table class="grid"><thead><tr><th>Name</th><th>Type</th><th>Molecule</th><th>Matched on</th><th>Length</th><th>Sequence</th>${tab === 'mine' ? '<th></th>' : ''}</tr></thead><tbody>
+        ${list.map((f, i) => `<tr><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${esc(f.molecule || 'DNA')}</td><td>${f.kind === 'protein' ? 'protein' : 'DNA'}${f.short ? ' <span class="note">(short — off by default)</span>' : ''}</td><td>${f.seq.length} ${f.kind === 'protein' ? 'aa' : 'bp'}</td><td class="mono wrap">${esc(f.seq)}</td>${tab === 'mine' ? `<td><button class="ib" data-use="${i}">Add to this file</button><button class="ib dng" data-rm="${i}">Delete</button></td>` : ''}</tr>`).join('')}
+      </tbody></table>` : `<div class="hint">${tab === 'mine' ? 'No features of your own yet. Open a feature, set it up, and choose “Save to My Features”.' : 'Nothing matches that filter.'}</div>`;
+      $('#fdbN').textContent = `${list.length} of ${(tab === 'mine' ? SET.myFeatures : DNA.COMMON).length} features`;
     };
     dialog({
       title: 'Feature Database', wide: true,
-      body: `<div class="ecbar"><input type="text" id="fdbQ" placeholder="Filter by name, type or sequence" style="width:220px"><span class="sp" style="flex:1"></span><span class="note" id="fdbN"></span></div>
+      body: `<div class="ecbar"><div class="seg" style="width:260px"><button data-tab="built" class="on">Built in</button><button data-tab="mine">My features</button></div>
+        <input type="text" id="fdbQ" placeholder="Filter by name, type or sequence" style="width:200px"><span class="sp" style="flex:1"></span><span class="note" id="fdbN"></span></div>
         <div class="tscroll" style="max-height:52vh" id="fdbT"></div>
         <div class="hint">Features matched <b>on protein</b> are found whatever codons were used, which is what makes a tag turn up in a gene that was codon-optimised. Entries marked short are skipped by Detect Common Features unless you ask for them, because a motif of a few residues appears by chance.</div>`,
       buttons: [{ label: 'Export as CSV', act: () => { exportFeatureCSV(); return false; } }, { label: 'Close', primary: true }],
-      onOpen: box => { render(); box.querySelector('#fdbQ').addEventListener('input', e => { q = e.target.value; render(); }); }
+      onOpen: box => {
+        render();
+        box.querySelector('#fdbQ').addEventListener('input', e => { q = e.target.value; render(); });
+        box.querySelector('.seg').addEventListener('click', e => {
+          const b = e.target.closest('[data-tab]'); if (!b) return;
+          tab = b.dataset.tab;
+          box.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+          render();
+        });
+        box.querySelector('#fdbT').addEventListener('click', e => {
+          const rm = e.target.closest('[data-rm]');
+          if (rm) { SET.myFeatures.splice(+rm.dataset.rm, 1); saveSettings().then(render); return; }
+          const use = e.target.closest('[data-use]');
+          if (use) {
+            const d = D();
+            if (!d || isGel(d)) { toast('Open a sequence first.'); return; }
+            const f = SET.myFeatures[+use.dataset.use];
+            const found = DNA.detectCommon(d.seq, d.circular, d.features, { extra: [{ ...f, mine: true }], includeShort: true });
+            if (!found.length) { toast(`“${f.name}” does not appear in this sequence.`); return; }
+            for (const h of found) d.features.push({ id: uid(), name: h.name, type: h.type, start: h.start, end: h.end, strand: h.strand, color: f.color || TYPE_COL[h.type] || '#c9ced6', notes: `From my features${h.via === 'protein' ? ', matched on protein' : ''}`, molecule: f.molecule || 'DNA', translated: h.type === 'CDS', frame: 0, matchProtein: f.kind === 'protein', quals: {} });
+            commit(d, `Added ${found.length} × ${f.name} from my features`);
+            renderAll(true); closeDialog(); toast(`Added ${found.length} copy${found.length > 1 ? 'ies' : ''} of “${f.name}”`);
+          }
+        });
+      }
     });
   }
   function exportFeatureCSV() {
