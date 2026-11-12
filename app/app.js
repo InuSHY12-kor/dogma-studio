@@ -46,7 +46,14 @@ svg .prim { cursor: pointer; }
   const D = () => S.docs[S.active] || null;
 
   function defaultOpts(circular) {
-    return { mapMode: circular ? 'circular' : 'linear', showFeat: true, showPrimers: true, showORFs: false, orfMin: 100, showTrans: true, enzMode: 'unique6', showComp: true };
+    return {
+      mapMode: circular ? 'circular' : 'linear', showFeat: true, showPrimers: true, showORFs: false,
+      orfMin: 100, showTrans: true, enzMode: 'unique6', showComp: true,
+      labelMode: 'auto',      // auto | inside | outside
+      featOnLine: false,      // draw every feature on the backbone instead of in its own lane
+      showRuler: true,
+      baseColors: { enabled: false, A: '#2e9e4f', C: '#2563c9', G: '#1c2230', T: '#c43c3c' }
+    };
   }
 
   function makeDoc(src) {
@@ -60,7 +67,7 @@ svg .prim { cursor: pointer; }
         return { id: uid(), name: f.name || f.type, type: f.type || 'misc_feature', start: Math.max(0, Math.min(n, f.start)), end: Math.max(0, Math.min(n, f.end)), strand: f.strand === undefined ? 1 : f.strand, color, notes: f.notes || '' };
       }),
       primers: (src.primers || []).map(p => ({ id: uid(), name: p.name, seq: DNA.clean(p.seq), notes: p.notes || '' })),
-      opts: defaultOpts(!!src.circular), chosen: [], sel: { start: 0, end: 0 }, anchor: 0, alignments: [], designed: [],
+      opts: Object.assign(defaultOpts(!!src.circular), SET.mapView || {}, SET.baseColors ? { baseColors: { ...SET.baseColors } } : {}), chosen: [], sel: { start: 0, end: 0 }, anchor: 0, alignments: [], designed: [],
       hist: [], hi: -1, ver: 0, cache: null, dirty: false, path: src.path || null
     };
     commit(d, src.histLabel || 'Opened ' + d.name, { initial: true });
@@ -603,20 +610,97 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ MAP VIEW
+  // Where the middle of the window sits, as a fraction of the whole drawing, so the same
+  // place stays in view when the drawing is redrawn at another size.
+  function scrollCentre(el) {
+    const mx = el.scrollWidth - el.clientWidth, my = el.scrollHeight - el.clientHeight;
+    return { x: mx > 0 ? el.scrollLeft / mx : 0.5, y: my > 0 ? el.scrollTop / my : 0.5 };
+  }
+  function applyCentre(el, c) {
+    const mx = el.scrollWidth - el.clientWidth, my = el.scrollHeight - el.clientHeight;
+    el.scrollLeft = mx > 0 ? Math.round(mx * c.x) : 0;
+    el.scrollTop = my > 0 ? Math.round(my * c.y) : 0;
+  }
   function renderMap(keepScroll) {
     const v = $('#view');
     let wrap = $('#mapwrap');
-    const prev = wrap ? { t: wrap.scrollTop, l: wrap.scrollLeft } : null;
-    v.innerHTML = `<div class="mapwrap" id="mapwrap"></div><div class="map-zoom"><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Fit">⤢</button><button data-z="in" title="Zoom in">+</button></div>`;
+    const prev = wrap ? scrollCentre(wrap) : null;
+    v.innerHTML = `<div class="mapwrap" id="mapwrap"></div>${mapSideHTML()}<div class="map-zoom"><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Fit">⤢</button><button data-z="in" title="Zoom in">+</button></div>`;
     wrap = $('#mapwrap');
     const d = D(), A = analyze(d);
     const W = Math.max(420, wrap.clientWidth), H = Math.max(380, wrap.clientHeight);
     const svg = d.opts.mapMode === 'circular' ? drawCircular(d, A, W * S.zoom, H * S.zoom) : drawLinear(d, A, W * S.zoom);
     wrap.innerHTML = svg;
-    if (keepScroll && prev) { wrap.scrollTop = prev.t; wrap.scrollLeft = prev.l; }
+    // The drawing is normally wider or taller than the window, so centre it rather than
+    // leaving it pinned to the top left corner.
+    applyCentre(wrap, keepScroll && prev ? prev : { x: 0.5, y: 0.5 });
     drawSelLayer();
     bindMap(wrap.querySelector('svg'));
-    v.querySelector('.map-zoom').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.z === 'in') zoom(1.25); else if (b.dataset.z === 'out') zoom(0.8); else { S.zoom = 1; renderView(); } };
+    v.querySelector('.map-zoom').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.z === 'in') zoom(1.25); else if (b.dataset.z === 'out') zoom(0.8); else { S.zoom = 1; renderView(true); } };
+    bindMapSide();
+  }
+
+  // ---------------------------------------------------------------- map view panel
+  const MS_ICONS = {
+    feat: '<path d="M3 9h12l4 3-4 3H3z"/>',
+    primer: '<path d="M3 12h13"/><path d="m12 8 4 4-4 4"/>',
+    enz: '<path d="M6 4l12 16M18 4 6 20"/>',
+    orf: '<path d="M4 12h12"/><path d="M16 9l4 3-4 3"/><circle cx="6" cy="12" r="2"/>',
+    label: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h10"/>',
+    online: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16" stroke-dasharray="2 2"/>',
+    ruler: '<rect x="3" y="9" width="18" height="6" rx="1"/><path d="M7 9v3M11 9v3M15 9v3M19 9v3"/>',
+    paint: '<path d="M6 3h9v6H6z"/><path d="M12 9v4a2 2 0 0 1-2 2H9v6"/>'
+  };
+  function mapSideHTML() {
+    const d = D(); if (!d) return '';
+    const o = d.opts;
+    const b = (k, on, title, act) => `<button class="msb${on ? ' on' : ''}" data-ms="${act}" title="${esc(title)}"><svg viewBox="0 0 24 24">${MS_ICONS[k]}</svg></button>`;
+    return `<div class="mapside" id="mapside">
+      ${b('feat', o.showFeat, 'Show features', 'showFeat')}
+      ${b('primer', o.showPrimers, 'Show primers', 'showPrimers')}
+      ${b('enz', o.enzMode !== 'none', 'Show enzyme sites', 'enz')}
+      ${b('orf', o.showORFs, 'Show open reading frames', 'showORFs')}
+      <div class="mssep"></div>
+      ${b('label', o.labelMode !== 'auto', `Feature labels: ${o.labelMode}`, 'label')}
+      ${b('online', o.featOnLine, 'Draw features on the backbone', 'featOnLine')}
+      ${b('ruler', o.showRuler, 'Show the position ruler', 'showRuler')}
+      <div class="mssep"></div>
+      ${b('paint', o.baseColors.enabled, 'Colour the bases', 'colors')}
+    </div>`;
+  }
+  function bindMapSide() {
+    const el = $('#mapside'); if (!el) return;
+    el.onclick = e => {
+      const btn = e.target.closest('[data-ms]'); if (!btn) return;
+      const d = D(), o = d.opts, a = btn.dataset.ms;
+      if (a === 'enz') o.enzMode = o.enzMode === 'none' ? 'unique6' : 'none';
+      else if (a === 'label') o.labelMode = o.labelMode === 'auto' ? 'inside' : (o.labelMode === 'inside' ? 'outside' : 'auto');
+      else if (a === 'colors') { dlgBaseColors(); return; }
+      else o[a] = !o[a];
+      d.cache = null;
+      renderAll(true);
+      if (a === 'label') toast('Feature labels: ' + d.opts.labelMode);
+    };
+  }
+  function dlgBaseColors() {
+    const d = D(), c = d.opts.baseColors;
+    dialog({
+      title: 'Base Colours',
+      body: `<div class="form">
+        <label></label><label><input type="checkbox" id="bcOn" ${c.enabled ? 'checked' : ''}> Colour each base in the sequence view</label>
+        ${['A', 'C', 'G', 'T'].map(b => `<label for="bc${b}">${b}</label><input type="color" id="bc${b}" value="${c[b]}">`).join('')}
+        <div class="full hint">Colours apply to both strands in the Sequence view. They are saved with the program, so every file you open uses them.</div></div>`,
+      buttons: [{ label: 'Reset', act: () => { Object.assign(d.opts.baseColors, { A: '#2e9e4f', C: '#2563c9', G: '#1c2230', T: '#c43c3c' }); SET.baseColors = { ...d.opts.baseColors }; saveSettings(); renderAll(true); } },
+      { label: 'Cancel' }, {
+        label: 'Apply', primary: true, act: () => {
+          c.enabled = $('#bcOn').checked;
+          for (const b of ['A', 'C', 'G', 'T']) c[b] = val('bc' + b);
+          SET.baseColors = { ...c };
+          saveSettings();
+          renderAll(true);
+        }
+      }]
+    });
   }
 
   function arcPath(cx, cy, r, a1, a2, sweep) {
@@ -629,7 +713,8 @@ svg .prim { cursor: pointer; }
     const n = d.seq.length, o = d.opts;
     const items = collectItems(d, A);
     const feats = items.filter(i => i.kind === 'f'), prims = items.filter(i => i.kind === 'p'), orfs = items.filter(i => i.kind === 'o');
-    const nF = assignLanes(feats, n), nP = assignLanes(prims, n), nO = assignLanes(orfs, n);
+    let nF = assignLanes(feats, n), nP = assignLanes(prims, n), nO = assignLanes(orfs, n);
+    if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
     const enz = shownEnz(d, A);
     // label count estimation decides how much room labels need
     const labelGuess = enz.reduce((s, e) => s + e.sites.length, 0) + feats.length;
@@ -655,7 +740,7 @@ svg .prim { cursor: pointer; }
     // ticks inside
     const step = niceStep(n / 10);
     const tr = Math.max(20, innerAll - 3);
-    for (let t = step; t < n; t += step) {
+    for (let t = step; o.showRuler && t < n; t += step) {
       const a = ang(t);
       g.push(`<line class="tick" x1="${fmtP(P(tr, a)).replace(',', '" y1="')}" x2="${fmtP(P(tr - 5, a)).replace(',', '" y2="')}"/>`);
       if (tr > 70) { const q = P(tr - 15, a); g.push(`<text class="tickl" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" text-anchor="middle" dy=".35em">${fmt(t)}</text>`); }
@@ -693,7 +778,9 @@ svg .prim { cursor: pointer; }
       g.push(`<path class="feat" d="${ar.path}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} (${esc(it.type)}) ${fmt(it.start + 1)}..${fmt(it.end)} · ${fmt(DNA.rlen(it, n))} bp</title></path>`);
       const textW = it.name.length * 6.4 + 10;
       const avail = (ar.span - ar.h) * r;
-      if (avail > textW) {
+      const fits = avail > textW;
+      const inside = o.labelMode === 'inside' ? avail > it.name.length * 4 : (o.labelMode === 'outside' ? false : fits);
+      if (inside) {
         const mid = ar.a1 + ar.span / 2;
         const b1 = it.strand === -1 ? ar.a1 + ar.h : ar.a1, b2 = it.strand === 1 ? ar.a2 - ar.h : ar.a2;
         const id = 'tp' + (tpi++);
@@ -775,7 +862,9 @@ svg .prim { cursor: pointer; }
       }
       return lanes.length;
     };
-    const nF = pxLanes(feats, true), nP = pxLanes(prims, true), nO = pxLanes(orfs, false);
+    const o = d.opts;
+    let nF = pxLanes(feats, true), nP = pxLanes(prims, true), nO = pxLanes(orfs, false);
+    if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
     const enz = shownEnz(d, A);
     // enzyme label rows
     const elabels = [];
@@ -799,7 +888,7 @@ svg .prim { cursor: pointer; }
     }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
     const step = niceStep(n / Math.max(4, Math.floor(w / 90)));
-    for (let t = 0; t <= n; t += step) {
+    for (let t = 0; o.showRuler && t <= n; t += step) {
       const x = X(t);
       g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${fmt(t || 1)}</text>`);
     }
@@ -818,7 +907,9 @@ svg .prim { cursor: pointer; }
         g.push(`<polygon class="${cls}" points="${pts}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)}</title></polygon>`);
         if (labelBelow !== false) {
           const tw = it.name.length * 6.3 + 8;
-          if (it.kind === 'f' && x2 - x1 - hd > tw) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${ym}" dy=".35em" text-anchor="middle">${esc(it.name)}</text>`);
+          const fits = x2 - x1 - hd > tw;
+          const inside = o.labelMode === 'inside' ? (x2 - x1 > it.name.length * 4) : (o.labelMode === 'outside' ? false : fits);
+          if (it.kind === 'f' && inside) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${ym}" dy=".35em" text-anchor="middle">${esc(it.name)}</text>`);
           else g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}" x="${((x1 + x2) / 2).toFixed(1)}" y="${y2 + 11}" text-anchor="middle" data-k="${it.key}">${esc(it.name)}</text>`);
         }
       }
@@ -965,8 +1056,8 @@ svg .prim { cursor: pointer; }
   function buildSeqRows() {
     const d = D(), A = analyze(d), n = d.seq.length, o = d.opts;
     const sc = $('#seqscroll'), host = $('#seqrows');
-    const G = 72;
-    const bpr = Math.max(10, Math.floor((sc.clientWidth - G - 26) / CW / 10) * 10);
+    const G = 78;
+    const bpr = Math.max(10, Math.floor((sc.clientWidth - G - 30) / CW / 10) * 10);
     // enzyme cuts
     const cuts = [];
     for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, u: e.unique }); });
@@ -975,7 +1066,7 @@ svg .prim { cursor: pointer; }
     const items = collectItems(d, A);
     const segsAll = [];
     for (const it of items) for (const [a, b] of DNA.segs(it, n)) segsAll.push({ a, b, it, tipR: it.strand === 1 && b === it.end, tipL: it.strand === -1 && a === it.start });
-    // translations
+    // translations, carrying the residue number so each one can be numbered like a protein
     const aaRows = {};
     if (o.showTrans) for (const it of items) {
       if (!((it.kind === 'f' && it.type === 'CDS') || it.kind === 'o')) continue;
@@ -985,36 +1076,41 @@ svg .prim { cursor: pointer; }
         const aa = DNA.CODON[s.substr(j, 3)] || 'X';
         const mid = it.strand === -1 ? ((it.end - j - 2) % n + n) % n : (it.start + j + 1) % n;
         const r = Math.floor(mid / bpr);
-        (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key });
+        (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key, res: j / 3 + 1 });
       }
     }
     const rows = [], html = [];
     const comp = o.showComp;
+    const NT_H = 17, RULER_H = 15, NUM_H = 13, AA_H = 15;
     for (let rs = 0, ri = 0; rs < n; rs += bpr, ri++) {
       const re = Math.min(n, rs + bpr), len = re - rs;
       const parts = [];
-      // enzymes
+      // --- enzyme labels stacked above the strands
       const lineEnd = [];
       const myCuts = cuts.filter(c => c.pos >= rs && (c.pos < re || (re === n && c.pos === n)));
       for (const c of myCuts) {
-        const x = (c.pos - rs) * CW, w = c.name.length * 6.4 + 6;
+        const x = (c.pos - rs) * CW, w = c.name.length * 6.6 + 6;
         let l = 0; while (lineEnd[l] !== undefined && lineEnd[l] > x - 1) l++;
         lineEnd[l] = x + w; c.line = l;
       }
-      const nL = lineEnd.length, enzH = nL ? nL * 13 + 5 : 2;
+      const nL = lineEnd.length, enzH = nL ? nL * 14 + 6 : 3;
       const y0 = 4 + enzH;
       for (const c of myCuts) {
-        const x = G + (c.pos - rs) * CW, y = 4 + (nL - 1 - c.line) * 13;
-        parts.push(`<div class="enz${c.u ? ' u' : ''}" data-k="${c.k}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" style="left:${x}px;top:${y + 12}px;height:${y0 - y - 11}px"></div>`);
+        const x = G + (c.pos - rs) * CW, y = 4 + (nL - 1 - c.line) * 14;
+        parts.push(`<div class="enz${c.u ? ' u' : ''}" data-k="${c.k}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
       }
+      // --- top strand, tick ruler, bottom strand
       parts.push(`<div class="num" style="top:${y0 + 1}px">${fmt(rs + 1)}</div>`);
-      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${d.seq.slice(rs, re)}</div>`);
-      const rulerTop = y0 + 17;
-      parts.push(`<div class="ruler" style="left:${G}px;top:${rulerTop}px;width:${len * CW}px;background:repeating-linear-gradient(to right,transparent 0,transparent ${(CW * 10 - 1).toFixed(2)}px,#9aa2ae ${(CW * 10 - 1).toFixed(2)}px,#9aa2ae ${(CW * 10).toFixed(2)}px);background-position:${(-CW * 0.5).toFixed(2)}px 0"></div>`);
-      let y = rulerTop + 6;
-      if (comp) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${DNA.comp(d.seq.slice(rs, re))}</div>`); y += 17; }
+      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${paintBases(d.seq.slice(rs, re), o)}</div>`);
+      const rulerTop = y0 + NT_H;
+      let ruler = '';
+      for (let p = rs; p < re; p++) ruler += ((p + 1) % 10 === 0) ? '+' : '-';
+      parts.push(`<div class="tick" style="left:${G}px;top:${rulerTop}px">${ruler}</div>`);
+      let y = rulerTop + RULER_H;
+      if (comp) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${paintBases(DNA.comp(d.seq.slice(rs, re)), o)}</div>`); y += NT_H; }
       const strandBottom = y;
-      // features in this row
+      y += 2;
+      // --- features, each translated one carrying its own residue numbering above it
       const rsegs = segsAll.filter(s => s.a < re && s.b > rs).map(s => ({ ...s, x1: Math.max(s.a, rs), x2: Math.min(s.b, re) })).sort((p, q) => p.x1 - q.x1 || (q.x2 - q.x1) - (p.x2 - p.x1));
       const laneEnd = [], laneTrans = [];
       for (const s of rsegs) {
@@ -1022,26 +1118,29 @@ svg .prim { cursor: pointer; }
         laneEnd[l] = s.x2; s.lane = l;
         if (o.showTrans && ((s.it.kind === 'f' && s.it.type === 'CDS') || s.it.kind === 'o')) laneTrans[l] = true;
       }
-      y += 5;
-      const laneY = [];
-      for (let l = 0; l < laneEnd.length; l++) { laneY[l] = y; y += 16 + (laneTrans[l] ? 14 : 0); }
+      const laneBar = [], laneAA = [], laneNum = [];
+      for (let l = 0; l < laneEnd.length; l++) {
+        if (laneTrans[l]) { laneNum[l] = y; laneAA[l] = y + NUM_H; laneBar[l] = y + NUM_H + AA_H; y += NUM_H + AA_H + 16; }
+        else { laneBar[l] = y; y += 17; }
+      }
       const keyLane = {};
       for (const s of rsegs) {
         const x = G + (s.x1 - rs) * CW, w = (s.x2 - s.x1) * CW;
         let clip = '';
-        if (s.tipR && s.x2 === s.b) clip = 'clip-path:polygon(0 0,calc(100% - 7px) 0,100% 50%,calc(100% - 7px) 100%,0 100%);';
-        else if (s.tipL && s.x1 === s.a) clip = 'clip-path:polygon(7px 0,100% 0,100% 100%,7px 100%,0 50%);';
-        const label = w > s.it.name.length * 6 + 14 ? esc(s.it.name) : '';
-        const h = s.it.kind === 'o' ? 7 : 12;
-        parts.push(`<div class="fbar" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneY[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:9px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
+        if (s.tipR && s.x2 === s.b) clip = 'clip-path:polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%);';
+        else if (s.tipL && s.x1 === s.a) clip = 'clip-path:polygon(8px 0,100% 0,100% 100%,8px 100%,0 50%);';
+        const label = w > s.it.name.length * 6.4 + 16 ? esc(s.it.name) : '';
+        const h = s.it.kind === 'o' ? 8 : 14;
+        parts.push(`<div class="fbar${s.it.kind === 'o' ? ' orf' : ''}" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneBar[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:10px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
         keyLane[s.it.key] = s.lane;
       }
       for (const a of (aaRows[ri] || [])) {
-        const l = keyLane[a.key]; if (l === undefined) continue;
+        const l = keyLane[a.key]; if (l === undefined || laneAA[l] === undefined) continue;
         const x = G + (a.mid - rs) * CW - CW;
-        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}" style="left:${x}px;top:${laneY[l] + 14}px;width:${CW * 3}px">${a.aa}</div>`);
+        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px">${a.aa}</div>`);
+        if (a.res % 5 === 0) parts.push(`<div class="aanum" style="left:${x - CW * 1.5}px;top:${laneNum[l]}px;width:${CW * 6}px">${a.res}</div>`);
       }
-      const hgt = y + 6;
+      const hgt = y + 5;
       rows.push({ rs, re, y0, y1: strandBottom });
       html.push(`<div class="srow" data-i="${ri}" style="height:${hgt}px">${parts.join('')}<div class="selov" hidden style="top:${y0 - 1}px;height:${strandBottom - y0 + 2}px"></div><div class="caret-el" hidden style="top:${y0 - 1}px;height:${strandBottom - y0 + 2}px"></div></div>`);
     }
@@ -1050,6 +1149,20 @@ svg .prim { cursor: pointer; }
     updateSeqSel();
   }
 
+  // Wraps each base in a coloured span, but only while base colouring is switched on,
+  // since a span per base is wasted work otherwise.
+  function paintBases(str, o) {
+    if (!o.baseColors || !o.baseColors.enabled) return str;
+    let out = '', run = '', cur = '';
+    for (const ch of str) {
+      const c = o.baseColors[ch] || 'inherit';
+      if (c === cur) { run += ch; continue; }
+      if (run) out += `<span style="color:${cur}">${run}</span>`;
+      cur = c; run = ch;
+    }
+    if (run) out += `<span style="color:${cur}">${run}</span>`;
+    return out;
+  }
   function updateSeqSel() {
     const d = D(), V = S.seq; if (!V || !d) return;
     const n = d.seq.length, L = selLen(d);
