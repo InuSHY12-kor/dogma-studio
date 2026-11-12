@@ -57,10 +57,11 @@ svg .prim { cursor: pointer; }
   }
 
   function makeDoc(src) {
+    if (src.kind === 'protein') return makeProteinDoc(src);
     const n = src.seq.length;
     let cdsI = 0;
     const d = {
-      id: uid(), name: src.name || 'Untitled', seq: DNA.clean(src.seq), circular: !!src.circular,
+      id: uid(), kind: src.kind || 'dna', name: src.name || 'Untitled', seq: DNA.clean(src.seq), circular: !!src.circular,
       features: (src.features || []).map(f => {
         let color = f.color;
         if (!color) color = f.type === 'CDS' ? CDS_PALETTE[(cdsI++) % CDS_PALETTE.length] : (TYPE_COL[f.type] || '#c9ced6');
@@ -84,11 +85,29 @@ svg .prim { cursor: pointer; }
     return d;
   }
 
-  function snapshot(d) { return JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, primers: d.primers }); }
+  // A protein document holds amino acids rather than bases, so it keeps its own shape.
+  function makeProteinDoc(src) {
+    const prot = String(src.prot || src.seq || '').toUpperCase().replace(/[^A-Z*]/g, '');
+    const d = {
+      id: uid(), kind: 'protein', name: src.name || 'Untitled protein', prot, seq: '', circular: false,
+      features: (src.features || []).map(f => ({
+        id: uid(), name: f.name || 'region', type: f.type || 'misc_feature',
+        start: Math.max(0, Math.min(prot.length, f.start)), end: Math.max(0, Math.min(prot.length, f.end)),
+        strand: 0, color: f.color || '#8fb3e8', notes: f.notes || '', molecule: 'protein',
+        translated: false, frame: 0, matchProtein: true, quals: f.quals || {}
+      })),
+      primers: [], provenance: src.provenance || null,
+      opts: defaultOpts(false), chosen: [], sel: { start: 0, end: 0 }, anchor: 0,
+      alignments: [], designed: [], hist: [], hi: -1, ver: 0, cache: null, dirty: false, path: src.path || null
+    };
+    commit(d, src.histLabel || 'Opened ' + d.name, { initial: true });
+    return d;
+  }
+  function snapshot(d) { return JSON.stringify({ name: d.name, seq: d.seq, prot: d.prot || '', circular: d.circular, features: d.features, primers: d.primers }); }
   function commit(d, label, o = {}) {
     d.hist = d.hist.slice(0, d.hi + 1);
     const last = d.hist[d.hist.length - 1];
-    const entry = { label, t: new Date(), snap: snapshot(d), len: d.seq.length };
+    const entry = { label, t: new Date(), snap: snapshot(d), len: (d.prot ? d.prot.length : d.seq.length) };
     if (o.merge && last && last.mergeKey === o.merge && (Date.now() - last.t.getTime()) < 2500) { entry.mergeKey = o.merge; d.hist[d.hist.length - 1] = entry; }
     else { if (o.merge) entry.mergeKey = o.merge; d.hist.push(entry); }
     if (d.hist.length > 300) d.hist.shift();
@@ -99,6 +118,7 @@ svg .prim { cursor: pointer; }
   function restore(d, i) {
     const s = JSON.parse(d.hist[i].snap);
     d.name = s.name; d.seq = s.seq; d.circular = s.circular; d.features = s.features; d.primers = s.primers;
+    if (s.prot !== undefined) d.prot = s.prot;
     d.hi = i; d.ver++; d.cache = null; d.dirty = true;
     const n = d.seq.length;
     d.sel = { start: Math.min(d.sel.start, n), end: Math.min(d.sel.end, n) };
@@ -310,11 +330,13 @@ svg .prim { cursor: pointer; }
   const icon = k => `<svg viewBox="0 0 24 24">${IC[k]}</svg>`;
 
   // ---------------------------------------------------------------- menus
-  function menus() {
-    const d = D(), has = !!d && !isGel(d), sl = has && selLen(d) > 0;
+  function menusDNA() {
+    const d = D(), has = !!d && isNuc(d), sl = has && selLen(d) > 0;
     return [
       { label: 'File', items: [
-        { label: 'New DNA File…', key: 'Ctrl+N', act: dlgNew },
+        { label: 'New DNA File…', key: 'Ctrl+N', act: () => dlgNew('dna') },
+        { label: 'New RNA File…', act: () => dlgNew('rna') },
+        { label: 'New Protein File…', act: () => dlgNew('protein') },
         { label: 'Open…', key: 'Ctrl+O', act: openFiles },
         { label: 'Open from NCBI…', key: 'Ctrl+D', act: dlgNCBI },
         { label: 'Open Sequencing Trace (.ab1)…', dis: !has, act: openTraces },
@@ -441,14 +463,67 @@ svg .prim { cursor: pointer; }
       ] }
     ];
   }
+  // The menu bar follows the document on screen: a protein file gets protein tools,
+  // an RNA file gets RNA tools, and neither is offered cloning or enzymes.
+  function menus() {
+    const all = menusDNA();
+    const d = D();
+    if (!d || isGel(d) || kindOf(d) === 'dna') return all;
+    const keep = n => all.find(m => m.label === n);
+    const base = [keep('File'), keep('Edit'), keep('View'), keep('Features')];
+    if (isRNA(d)) {
+      base.push({
+        label: 'RNA', items: [
+          { label: 'Fold Secondary Structure', act: () => setView('struct') },
+          { label: 'Fold a Region…', act: dlgRNA },
+          '-',
+          { label: 'Translate Selection…', dis: !selLen(d), act: dlgTranslate },
+          { label: 'Find ORFs', act: () => { d.opts.showORFs = true; d.cache = null; renderAll(true); toast('Open reading frames shown'); } },
+          '-',
+          { label: 'Reverse Complement', act: revCompSel },
+          { label: 'Make a DNA Copy', act: () => addDoc({ kind: 'dna', name: d.name + ' (DNA)', seq: d.seq, circular: d.circular, features: d.features, primers: [], histLabel: 'Copied from ' + d.name }) },
+          '-',
+          { label: 'Detect Common Features', act: detectCommon },
+          { label: 'Feature Database…', act: dlgFeatureDB }
+        ]
+      });
+      base.push(keep('Help'));
+      return base;
+    }
+    // protein
+    const sel = protSel(d), hasSel = sel.b > sel.a;
+    base.push({
+      label: 'Protein', items: [
+        { label: 'Properties', act: () => setView('prop') },
+        { label: 'Properties in a Window…', act: dlgProtein },
+        '-',
+        { label: 'Add Region…', act: () => dlgProtFeature(null) },
+        { label: 'Copy Sequence', act: () => copyText(hasSel ? d.prot.slice(sel.a, sel.b) : d.prot, 'Copied protein sequence') },
+        { label: 'Export FASTA…', act: exportFasta },
+        '-',
+        { label: 'Back-translate and Codon-optimise…', act: () => dlgCodonFromProtein() },
+        '-',
+        { label: 'Look Up the Structure…', act: dlgProteinTools }
+      ]
+    });
+    base.push(keep('Help'));
+    return base;
+  }
   let openMenu = -1;
   function renderMenuBar() {
     const mb = $('#menubar');
+    menuBarSig = menus().map(m => m.label).join(',');
     mb.innerHTML = menus().map((m, i) => `<div class="mi" data-i="${i}">${m.label}</div>`).join('') + `<div class="brand"><span class="brand-dot"></span>GeneCanvas</div>`;
     mb.onmousedown = e => { const it = e.target.closest('.mi'); if (!it) return; e.preventDefault(); const i = +it.dataset.i; if (openMenu === i) closeMenu(); else showMenu(i); };
     mb.onmouseover = e => { const it = e.target.closest('.mi'); if (it && openMenu >= 0 && +it.dataset.i !== openMenu) showMenu(+it.dataset.i); };
   }
-  function renderMenuState() { /* menu items are generated when opened */ }
+  // The bar itself is rebuilt only when the set of menus changes, which happens when
+  // the document on screen is a different kind.
+  let menuBarSig = '';
+  function renderMenuState() {
+    const sig = menus().map(m => m.label).join(',');
+    if (sig !== menuBarSig) { menuBarSig = sig; renderMenuBar(); }
+  }
   function showMenu(i) {
     closeCtx();
     const m = menus()[i]; openMenu = i;
@@ -508,7 +583,7 @@ svg .prim { cursor: pointer; }
 
   // ---------------------------------------------------------------- toolbar / tabs
   function renderToolbar() {
-    const d = D(), has = !!d && !isGel(d);
+    const d = D(), has = !!d && isNuc(d);
     const b = (k, label, act, o = {}) => `<button class="tb${o.on ? ' on' : ''}" data-a="${act}" title="${esc(o.title || label)}" ${o.dis ? 'disabled' : ''}>${icon(k)}<span>${label}</span></button>`;
     $('#toolbar').innerHTML = [
       b('new', 'New', 'new'), b('open', 'Open', 'open'), b('ncbi', 'NCBI', 'ncbi', { title: 'Download a sequence from NCBI' }), b('save', 'Save', 'save', { dis: !has }), b('print', 'Print', 'print', { dis: !has }),
@@ -544,15 +619,18 @@ svg .prim { cursor: pointer; }
   };
 
   function renderDocTabs() {
-    $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''}${isGel(d) ? ' gel' : ''}" data-i="${i}" title="${esc(d.name)}${isGel(d) ? ' \u2014 agarose gel' : ' \u2014 ' + fmt(d.seq.length) + ' bp'}"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
+    $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''} k-${kindOf(d)}" data-i="${i}" title="${esc(d.name)} \u2014 ${isGel(d) ? 'agarose gel' : (isProt(d) ? fmt(d.prot.length) + ' aa protein' : fmt(d.seq.length) + ' ' + (isRNA(d) ? 'nt RNA' : 'bp DNA'))}"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
   }
+  const PROT_VIEWS = [['seq', 'Sequence', 'seq'], ['feat', 'Features', 'feat'], ['prop', 'Properties', 'design'], ['hist', 'History', 'hist']];
+  const RNA_VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['feat', 'Features', 'feat'], ['struct', 'Structure', 'align'], ['hist', 'History', 'hist']];
+  function viewsFor(d) { return isProt(d) ? PROT_VIEWS : (isRNA(d) ? RNA_VIEWS : VIEWS); }
   const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['compare', 'Compare', 'compare'], ['hist', 'History', 'hist']];
   function renderViewTabs() {
     const vt = $('#viewtabs');
     vt.classList.toggle('noside', S.sideHidden || !(S.view === 'map' || S.view === 'seq'));
-    vt.innerHTML = D() && !isGel(D()) ? VIEWS.map(([k, l, ic]) => `<button class="vt${S.view === k ? ' on' : ''}" data-v="${k}">${icon(ic)}${l}</button>`).join('') : '';
+    vt.innerHTML = D() && !isGel(D()) ? viewsFor(D()).map(([k, l, ic]) => `<button class="vt${S.view === k ? ' on' : ''}" data-v="${k}">${icon(ic)}${l}</button>`).join('') : '';
   }
-  function setView(v) { if (!D()) return; S.view = v; renderAll(); if (v === 'seq') setTimeout(() => { scrollSeqTo(D().sel.start); $('#seqscroll') && $('#seqscroll').focus(); }, 0); }
+  function setView(v) { const dd = D(); if (!dd || isGel(dd)) return; if (!viewsFor(dd).some(x => x[0] === v)) v = viewsFor(dd)[0][0]; S.view = v; renderAll(); if (v === 'seq') setTimeout(() => { scrollSeqTo(D().sel.start); $('#seqscroll') && $('#seqscroll').focus(); }, 0); }
   function setOpt(k, v, toggleView) {
     const d = D(); if (!d) return; d.opts[k] = v;
     if (k === 'orfMin') d.cache = null;
@@ -564,7 +642,7 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- side panel
   function renderSide() {
     const side = $('#side'), d = D();
-    const show = d && !isGel(d) && !S.sideHidden && (S.view === 'map' || S.view === 'seq');
+    const show = d && isNuc(d) && !S.sideHidden && (S.view === 'map' || S.view === 'seq');
     side.classList.toggle('hidden', !show);
     if (!show) return;
     const o = d.opts, n = d.seq.length, L = selLen(d), A = analyze(d);
@@ -597,6 +675,14 @@ svg .prim { cursor: pointer; }
   function renderStatus() {
     const d = D(), st = $('#status');
     if (!d) { st.innerHTML = '<span>No file open</span>'; return; }
+    if (isProt(d)) {
+      const { a, b } = protSel(d);
+      const sel = b > a ? `Selected <b>${fmt(a + 1)} – ${fmt(b)}</b> = <b>${fmt(b - a)} aa</b>` : `Cursor after residue <b>${fmt(a)}</b>`;
+      let mwTxt = '';
+      try { const st = STRUCT.proteinStats(b > a ? d.prot.slice(a, b) : d.prot); mwTxt = `${(st.mw / 1000).toFixed(2)} kDa · pI ${st.pI.toFixed(2)}`; } catch (e) { mwTxt = ''; }
+      st.innerHTML = `<span><b>${esc(d.name)}</b> &nbsp; ${fmt(d.prot.length)} aa &nbsp; protein</span><span>${sel}</span><span class="r">${mwTxt}</span>`;
+      return;
+    }
     if (isGel(d)) {
       const o = d.gel, r = GEL.rangeFor(o.percent);
       st.innerHTML = `<span><b>${esc(d.name)}</b></span><span>${o.percent.toFixed(1)}% agarose, 1\u00d7 ${esc(o.buffer)}, run ${Math.round(o.run * 100)}%</span><span>${o.laneCount} lanes</span><span class="r">resolves about ${fmt(Math.round(r[1]))}\u2013${fmt(Math.round(r[0]))} bp</span>`;
@@ -615,6 +701,15 @@ svg .prim { cursor: pointer; }
   function renderView(keepScroll) {
     const v = $('#view'), d = D();
     if (isGel(d)) { v.onclick = null; renderGel(); return; }
+    if (isProt(d)) {
+      v.onclick = null;
+      if (S.view === 'prop') return renderProtProps();
+      if (S.view === 'feat') return renderFeatures();
+      if (S.view === 'hist') return renderHistory();
+      S.view = 'seq';
+      return renderProtSeq();
+    }
+    if (isRNA(d) && S.view === 'struct') { v.onclick = null; return renderRNAStruct(); }
     if (!d) {
       v.innerHTML = `<div class="empty"><h2>GeneCanvas</h2><p>Open a GenBank, FASTA or .dna file, or start a new sequence. You can also drop a file onto this window.</p><div class="btns"><button class="btn pri" data-a="open">Open File…</button><button class="btn" data-a="new">New DNA File…</button><button class="btn" data-a="demo">Open Example Plasmid</button></div></div>`;
       v.onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; ({ open: openFiles, new: dlgNew, demo: () => addDoc(DNA.buildDemo()) })[b.dataset.a](); };
@@ -1123,13 +1218,13 @@ svg .prim { cursor: pointer; }
       }
       // --- top strand, tick ruler, bottom strand
       parts.push(`<div class="num" style="top:${y0 + 1}px">${fmt(rs + 1)}</div>`);
-      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${paintBases(d.seq.slice(rs, re), o)}</div>`);
+      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${paintBases(disp(d, d.seq.slice(rs, re)), o)}</div>`);
       const rulerTop = y0 + NT_H;
       let ruler = '';
       for (let p = rs; p < re; p++) ruler += ((p + 1) % 10 === 0) ? '+' : '-';
       parts.push(`<div class="tick" style="left:${G}px;top:${rulerTop}px">${ruler}</div>`);
       let y = rulerTop + RULER_H;
-      if (comp) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${paintBases(DNA.comp(d.seq.slice(rs, re)), o)}</div>`); y += NT_H; }
+      if (comp && !isRNA(d)) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${paintBases(DNA.comp(d.seq.slice(rs, re)), o)}</div>`); y += NT_H; }
       const strandBottom = y;
       y += 2;
       // --- features, each translated one carrying its own residue numbering above it
@@ -1365,23 +1460,25 @@ svg .prim { cursor: pointer; }
 
   // ================================================================ FEATURES TABLE
   function renderFeatures() {
-    const d = D(), n = d.seq.length, v = $('#view');
+    const d = D(), n = isProt(d) ? d.prot.length : d.seq.length, v = $('#view');
     const fs = d.features.slice().sort((a, b) => a.start - b.start);
     v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="fadd">Add Feature…</button><button class="btn" id="fdet">Detect Common Features</button><span class="note">${fs.length} features · double-click a row to edit</span></div>
       <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th></th><th>Name</th><th>Type</th><th>Location</th><th>Length</th><th>Direction</th><th>Molecule</th><th>Notes</th><th></th></tr></thead><tbody>
-      ${fs.map(f => `<tr data-f="${f.id}"><td><span class="sw" style="background:${f.color}"></span></td><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)} .. ${fmt(f.end)}${f.end <= f.start ? ' (spans origin)' : ''}</td><td>${fmt(DNA.rlen(f, n))} bp${f.type === 'CDS' ? ` · ${Math.floor(DNA.rlen(f, n) / 3) - 1} aa` : ''}</td><td>${f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : '— none'}</td><td>${esc(f.molecule || 'DNA')}${f.translated ? ' · translated' : ''}${f.matchProtein ? ' · protein match' : ''}</td><td class="wrap">${esc(f.notes || '')}</td><td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`).join('')}
+      ${fs.map(f => `<tr data-f="${f.id}"><td><span class="sw" style="background:${f.color}"></span></td><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)} .. ${fmt(f.end)}${f.end <= f.start ? ' (spans origin)' : ''}</td><td>${fmt(DNA.rlen(f, n))} ${isProt(d) ? 'aa' : 'bp'}${f.type === 'CDS' ? ` · ${Math.floor(DNA.rlen(f, n) / 3) - 1} aa` : ''}</td><td>${f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : '— none'}</td><td>${esc(f.molecule || 'DNA')}${f.translated ? ' · translated' : ''}${f.matchProtein ? ' · protein match' : ''}</td><td class="wrap">${esc(f.notes || '')}</td><td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`).join('')}
       </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let GeneCanvas detect common features such as promoters, tags and recombination sites.</p></div>`}</div></div>`;
-    $('#fadd').onclick = () => dlgFeature(null);
+    $('#fadd').onclick = () => (isProt(d) ? dlgProtFeature(null) : dlgFeature(null));
     $('#fdet').onclick = detectCommon;
     const tb = v.querySelector('tbody'); if (!tb) return;
     tb.onclick = e => {
-      const ed = e.target.closest('[data-ed]'); if (ed) { dlgFeature(d.features.find(f => f.id === +ed.dataset.ed)); return; }
+      const ed = e.target.closest('[data-ed]'); if (ed) { const ff = d.features.find(f => f.id === +ed.dataset.ed); isProt(d) ? dlgProtFeature(ff) : dlgFeature(ff); return; }
       const del = e.target.closest('[data-del]'); if (del) { removeFeature(+del.dataset.del); return; }
       const tr = e.target.closest('tr[data-f]'); if (!tr) return;
-      const f = d.features.find(x => x.id === +tr.dataset.f); selectRange(f);
+      const f = d.features.find(x => x.id === +tr.dataset.f);
+      if (isProt(d)) { d.sel = { start: f.start, end: f.end }; d.anchor = f.start; renderStatus(); }
+      else selectRange(f);
       tb.querySelectorAll('tr.on').forEach(r => r.classList.remove('on')); tr.classList.add('on');
     };
-    tb.ondblclick = e => { const tr = e.target.closest('tr[data-f]'); if (tr) dlgFeature(d.features.find(x => x.id === +tr.dataset.f)); };
+    tb.ondblclick = e => { const tr = e.target.closest('tr[data-f]'); if (!tr) return; const ff = d.features.find(x => x.id === +tr.dataset.f); isProt(d) ? dlgProtFeature(ff) : dlgFeature(ff); };
   }
 
   // ================================================================ PRIMERS TABLE
@@ -1577,10 +1674,13 @@ svg .prim { cursor: pointer; }
   const val = id => document.getElementById(id).value;
   const showErr = (msg) => { const e = $('#dlg .err'); if (e) e.textContent = msg; return false; };
 
-  function dlgNew() {
+  function dlgNew(kind) {
+    kind = kind || 'dna';
+    if (kind === 'protein') return dlgNewProtein();
+    const isR = kind === 'rna';
     dialog({
-      title: 'New DNA File',
-      body: `<div class="form"><label for="nn">Name</label><input type="text" id="nn" value="New DNA">
+      title: isR ? 'New RNA File' : 'New DNA File',
+      body: `<div class="form"><label for="nn">Name</label><input type="text" id="nn" value="${isR ? 'New RNA' : 'New DNA'}">
         <label for="nt">Topology</label><select id="nt"><option value="0">Linear</option><option value="1">Circular</option></select>
         <div class="full"><textarea id="ns" rows="9" placeholder="Paste DNA bases, FASTA or a full GenBank record"></textarea><div class="hint">Non-DNA characters such as numbers and spaces are removed. A pasted GenBank record keeps its features and topology.</div><div class="err"></div></div></div>`,
       buttons: [{ label: 'Cancel' }, {
@@ -1589,9 +1689,33 @@ svg .prim { cursor: pointer; }
           let src;
           try {
             if (/^\s*(LOCUS|>)/.test(raw)) { src = DNA.parseAny(raw); if (val('nn') && val('nn') !== 'New DNA') src.name = val('nn'); }
-            else { const s = DNA.clean(raw); if (!s) return showErr('Enter at least one base.'); src = { name: val('nn') || 'New DNA', seq: s, circular: val('nt') === '1', features: [], primers: [] }; }
+            else { const s = DNA.clean(raw); if (!s) return showErr('Enter at least one base.'); src = { name: val('nn') || (isR ? 'New RNA' : 'New DNA'), seq: s, circular: val('nt') === '1', features: [], primers: [] }; }
+            src.kind = kind;
           } catch (err) { return showErr(err.message); }
           addDoc(src);
+        }
+      }]
+    });
+  }
+  function dlgNewProtein() {
+    dialog({
+      title: 'New Protein File',
+      body: `<div class="form"><label for="pn">Name</label><input type="text" id="pn" value="New protein">
+        <div class="full"><textarea id="pp" rows="9" placeholder="Paste a protein sequence in one-letter code, or a FASTA record"></textarea>
+        <div class="hint">Anything that is not an amino acid letter is ignored. A FASTA header is used as the name.</div><div class="err"></div></div></div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Create', primary: true, act: () => {
+          let text = val('pp'), name = val('pn').trim() || 'New protein';
+          if (/^\s*>/.test(text)) {
+            const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+            name = lines[0].slice(1).trim().split(/\s+/)[0] || name;
+            text = lines.slice(1).join('');
+          }
+          const prot = text.toUpperCase().replace(/[^A-Z*]/g, '');
+          if (prot.length < 2) return showErr('Enter at least two amino acids.');
+          const bad = [...new Set([...prot].filter(c => !'ACDEFGHIKLMNPQRSTVWY*X'.includes(c)))];
+          if (bad.length) return showErr(`“${bad.join(', ')}” ${bad.length > 1 ? 'are not amino acid letters' : 'is not an amino acid letter'}.`);
+          addDoc({ kind: 'protein', name, prot });
         }
       }]
     });
@@ -2453,7 +2577,7 @@ svg .prim { cursor: pointer; }
     const d = D(), n = d.seq.length;
     const orfs = analyze(d).orfs;
     const cdsFeatures = d.features.filter(f => f.type === 'CDS' || f.type === 'gene');
-    let mode = 'region';
+    let mode = S.pendingProtein ? 'protein' : 'region';
     let preserve = [];
     let avoid = new Set(), add = new Set();
     let result = null, lastCds = '';
@@ -2630,6 +2754,14 @@ svg .prim { cursor: pointer; }
         { label: 'Optimise', primary: true, act: () => { run(); return false; } }
       ],
       onOpen: box => {
+        if (S.pendingProtein) {
+          const r = box.querySelector('input[name=comode][value=protein]');
+          if (r) r.checked = true;
+          $('#coRegionBox').style.display = 'none';
+          $('#coProteinBox').style.display = '';
+          $('#coProt').value = S.pendingProtein;
+          S.pendingProtein = null;
+        }
         const mkList = (id, chosen, q) => {
           const query = (q || '').toUpperCase();
           box.querySelector('#' + id).innerHTML = enzChoices.filter(x => !query || x.toUpperCase().includes(query))
@@ -2800,8 +2932,218 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // ---------------------------------------------------------------- shared reports
+  // Used by both the dialog and the dedicated Protein document view.
+  function proteinReport(st, width, win) {
+    win = win || 9;
+    const internal = st.protein.slice(0, -1).includes('*');
+    const comp = st.composition.filter(c => c.n > 0);
+    const seqRows = [];
+    for (let i = 0; i < st.protein.length; i += 60) seqRows.push(esc(String(i + 1).padStart(5) + '  ' + st.protein.slice(i, i + 60)));
+    const w = Math.min(740, width - 10);
+    return `
+      ${internal ? '<div class="err">This translation contains a stop codon in the middle, so the reading frame is probably wrong.</div>' : ''}
+      ${st.unknown.length ? `<div class="err">Unrecognised letters ignored: ${esc(st.unknown.join(', '))}</div>` : ''}
+      <table class="grid" style="width:auto"><tbody>
+        <tr><td>Length</td><td><b>${fmt(st.length)}</b> amino acids</td></tr>
+        <tr><td>Molecular weight</td><td><b>${(st.mw / 1000).toFixed(2)} kDa</b> (${fmt(Math.round(st.mw))} Da)</td></tr>
+        <tr><td>Isoelectric point</td><td><b>${st.pI.toFixed(2)}</b> <span class="note">(${esc(st.pkaSet)} pKa set)</span></td></tr>
+        <tr><td>Net charge at pH 7</td><td><b>${st.charge7 >= 0 ? '+' : ''}${st.charge7.toFixed(2)}</b></td></tr>
+        <tr><td>Extinction at 280 nm</td><td><b>${fmt(st.extinction.reduced)}</b> M⁻¹cm⁻¹ with free cysteines${st.extinction.cystine !== st.extinction.reduced ? `, <b>${fmt(st.extinction.cystine)}</b> with all cysteines in cystines` : ''}<br><span class="note">A280 of a 1 mg/mL solution: ${st.a280.reduced.toFixed(3)}${st.extinction.cystine !== st.extinction.reduced ? ` / ${st.a280.cystine.toFixed(3)}` : ''} · ${st.extinction.trp} Trp, ${st.extinction.tyr} Tyr, ${st.extinction.cys} Cys</span></td></tr>
+        <tr><td>GRAVY</td><td><b>${st.gravy.toFixed(3)}</b> <span class="note">${st.gravy > 0 ? 'overall hydrophobic' : 'overall hydrophilic'}</span></td></tr>
+        <tr><td>Aliphatic index</td><td><b>${st.aliphatic.toFixed(1)}</b></td></tr>
+      </tbody></table>
+      <div style="margin-top:10px"><b>Hydropathy</b></div><div>${hydroSVG(STRUCT.hydropathy(st.protein, win), w, win)}</div>
+      <div><b>Charge</b></div><div>${chargeSVG(STRUCT.chargeCurve(st.protein), st.pI, w)}</div>
+      <div style="margin-top:8px"><b>Composition</b></div>
+      <table class="grid"><thead><tr><th>Residue</th><th>Count</th><th>%</th><th>Residue</th><th>Count</th><th>%</th></tr></thead><tbody>
+        ${Array.from({ length: Math.ceil(comp.length / 2) }, (_, i) => {
+          const L = comp[i], Rr = comp[i + Math.ceil(comp.length / 2)];
+          const cell = c => c ? `<td>${esc(c.name)} (${c.aa})</td><td>${c.n}</td><td>${c.pct.toFixed(1)}%</td>` : '<td></td><td></td><td></td>';
+          return `<tr>${cell(L)}${cell(Rr)}</tr>`;
+        }).join('')}
+      </tbody></table>
+      <div style="margin-top:8px"><b>Sequence</b></div>
+      <div class="aa-box" style="max-height:130px">${seqRows.join('<br>')}</div>
+      <div class="hint">Mass, extinction coefficient, GRAVY and the aliphatic index are exact calculations. The isoelectric point depends on which pKa set is used, and different tools will differ by a few tenths of a unit. Secondary and three-dimensional structure are not predicted here — use one of the tools below.</div>
+      ${toolLinks('protein', st.protein)}`;
+  }
+
+  function rnaReport(res, offset, width) {
+    const stems = STRUCT.stemList(res.structure);
+    const rows = [];
+    for (let i = 0; i < res.seq.length; i += 60) rows.push(esc(String(offset + i + 1).padStart(6) + '  ' + res.seq.slice(i, i + 60)) + '<br>' + esc(' '.repeat(8) + res.structure.slice(i, i + 60)));
+    return `
+      <div class="pshead"><span class="dg ${res.dg <= -20 ? 'bad' : res.dg <= -8 ? 'warn' : 'okdg'}">ΔG ≈ ${res.dg.toFixed(2)} kcal/mol</span>
+        <span class="note">${fmt(res.seq.length)} nt · ${res.pairs.length} base pairs · ${stems.length} stem${stems.length === 1 ? '' : 's'}</span></div>
+      <div>${rnaDiagram(res, Math.min(760, width))}</div>
+      ${stems.length ? `<table class="grid"><thead><tr><th>Stem</th><th>Pairs</th><th>Positions</th><th>Loop</th></tr></thead><tbody>${stems.slice(0, 20).map((s2, i) => `<tr><td>${i + 1}</td><td>${s2.len} bp</td><td>${fmt(offset + s2.i + 1)}–${fmt(offset + s2.j + 1)}</td><td>${fmt(s2.j - s2.i - 1 - 2 * (s2.len - 1))} nt</td></tr>`).join('')}</tbody></table>` : '<div class="hint">No stems found.</div>'}
+      <div style="margin-top:8px"><b>Dot-bracket</b></div>
+      <div class="aa-box" style="max-height:150px">${rows.join('<br>')}</div>
+      <div class="hint"><b>These free energies are approximate.</b> The search is a standard minimum-free-energy fold, but it uses a simplified energy model rather than the full Turner parameter set, so treat ΔG as a rough guide and the structure as a starting point. For a number you would publish, fold the sequence with one of the tools below.</div>
+      ${toolLinks('rna', res.seq)}`;
+  }
+
+  // A feature editor for protein documents, where positions are residues.
+  function dlgProtFeature(f) {
+    const d = D(), n = d.prot.length;
+    const isNew = !f;
+    const { a, b } = protSel(d);
+    const cur = f || { name: 'New region', type: 'misc_feature', start: a, end: b > a ? b : Math.min(n, a + 10), color: '#8fb3e8', notes: '' };
+    dialog({
+      title: isNew ? 'Add Region' : `Edit Region “${cur.name}”`,
+      body: `<div class="form">
+        <label for="pfn">Name</label><input type="text" id="pfn" value="${esc(cur.name)}">
+        <label for="pft">Type</label><select id="pft">${FEATURE_TYPES.map(t => `<option ${t === cur.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label for="pfs">From</label><input type="number" id="pfs" min="1" max="${n}" value="${cur.start + 1}">
+        <label for="pfe">To</label><input type="number" id="pfe" min="1" max="${n}" value="${cur.end}">
+        <label for="pfc">Colour</label><input type="color" id="pfc" value="${cur.color}">
+        <label for="pfno">Note</label><input type="text" id="pfno" value="${esc(cur.notes || '')}">
+        <div class="full err"></div></div>`,
+      buttons: [...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => { d.features = d.features.filter(x => x.id !== f.id); commit(d, `Deleted region ${f.name}`); renderAll(true); } }]), { label: 'Cancel' }, {
+        label: isNew ? 'Add' : 'Save', primary: true, act: () => {
+          const name = val('pfn').trim(), x = parseInt(val('pfs'), 10), y = parseInt(val('pfe'), 10);
+          if (!name) return showErr('Enter a name.');
+          if (!(x >= 1 && y > x - 1 && y <= n)) return showErr(`Positions must run upward inside 1–${fmt(n)}.`);
+          const nf = { name, type: val('pft'), start: x - 1, end: y, strand: 0, color: val('pfc'), notes: val('pfno').trim(), molecule: 'protein', translated: false, frame: 0, matchProtein: true, quals: {} };
+          if (isNew) { d.features.push({ id: uid(), ...nf }); commit(d, `Added region ${name}`); }
+          else { Object.assign(f, nf); commit(d, `Edited region ${name}`); }
+          renderAll(true);
+        }
+      }]
+    });
+  }
+
+  // Opens the codon-optimisation dialog already set to this protein.
+  function dlgCodonFromProtein() {
+    const d = D(), { a, b } = protSel(d);
+    S.pendingProtein = b > a ? d.prot.slice(a, b) : d.prot;
+    dlgCodon();
+  }
+  function dlgProteinTools() {
+    const d = D();
+    dialog({
+      title: 'Look Up the Structure',
+      body: `<p class="hint">Three-dimensional structure is not predicted here. These services take a pasted sequence.</p>${toolLinks('protein', d.prot)}`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: () => bindCopySeq(d.prot, 'protein sequence')
+    });
+  }
+
+  // ================================================================ protein documents
+  function protSel(d) { return { a: Math.min(d.sel.start, d.sel.end), b: Math.max(d.sel.start, d.sel.end) }; }
+  function renderProtSeq() {
+    const d = D(), v = $('#view'), p = d.prot;
+    const per = 60;
+    const rows = [];
+    for (let i = 0; i < p.length; i += per) {
+      const chunk = p.slice(i, i + per);
+      let marks = '';
+      for (let k = 0; k < chunk.length; k++) marks += ((i + k + 1) % 10 === 0) ? '+' : '-';
+      const bars = d.features.filter(f => f.start < i + chunk.length && f.end > i).map(f => {
+        const x1 = Math.max(f.start, i) - i, x2 = Math.min(f.end, i + chunk.length) - i;
+        return `<div class="fbar" data-fid="${f.id}" title="${esc(f.name)} ${fmt(f.start + 1)}..${fmt(f.end)}" style="left:${(78 + x1 * CW).toFixed(1)}px;top:0;width:${((x2 - x1) * CW).toFixed(1)}px;height:14px;background:${f.color}">${(x2 - x1) * CW > f.name.length * 6.4 + 16 ? esc(f.name) : ''}</div>`;
+      }).join('');
+      rows.push(`<div class="srow" style="height:${bars ? 76 : 58}px">
+        <div class="num" style="top:5px">${fmt(i + 1)}</div>
+        <div class="nt" style="left:78px;top:4px">${esc(chunk)}</div>
+        <div class="tick" style="left:78px;top:21px">${marks}</div>
+        <div class="selov" hidden style="top:3px;height:18px"></div>
+        ${bars ? `<div style="position:absolute;left:0;top:40px;right:0;height:14px">${bars}</div>` : ''}
+      </div>`);
+    }
+    v.innerHTML = `<div class="panel"><div class="ptools">
+        <span class="note">${fmt(p.length)} amino acids</span>
+        <button class="btn" id="pSelAll">Select all</button>
+        <button class="btn" id="pCopy">Copy</button>
+        <button class="btn" id="pProps">Properties…</button>
+      </div><div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows">${rows.join('')}</div></div></div>`;
+    const sc = $('#seqscroll');
+    S.seq = { rows: [], G: 78, bpr: per, els: [...sc.querySelectorAll('.srow')], prot: true };
+    const paint = () => {
+      const { a, b } = protSel(d);
+      S.seq.els.forEach((el, i) => {
+        const rs = i * per, re = rs + per;
+        const ov = el.querySelector('.selov');
+        const x1 = Math.max(a, rs), x2 = Math.min(b, re);
+        if (x2 > x1) { ov.hidden = false; ov.style.left = (78 + (x1 - rs) * CW) + 'px'; ov.style.width = ((x2 - x1) * CW) + 'px'; }
+        else ov.hidden = true;
+      });
+    };
+    paint();
+    let drag = false;
+    const posAt = (e, row) => {
+      const i = S.seq.els.indexOf(row), r = row.getBoundingClientRect();
+      return Math.max(0, Math.min(p.length, i * per + Math.round((e.clientX - r.left - 78) / CW)));
+    };
+    sc.addEventListener('mousedown', e => {
+      const row = e.target.closest('.srow'); if (!row) return;
+      e.preventDefault(); sc.focus();
+      const q = posAt(e, row); d.sel = { start: q, end: q }; d.anchor = q; drag = true; paint(); renderStatus();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!drag) return;
+      const el = document.elementFromPoint(e.clientX, Math.max(1, e.clientY));
+      const row = el && el.closest && el.closest('.srow');
+      if (!row) return;
+      const q = posAt(e, row);
+      d.sel = { start: Math.min(d.anchor, q), end: Math.max(d.anchor, q) }; paint(); renderStatus();
+    });
+    window.addEventListener('mouseup', () => { drag = false; });
+    $('#pSelAll').onclick = () => { d.sel = { start: 0, end: p.length }; d.anchor = 0; paint(); renderStatus(); };
+    $('#pCopy').onclick = () => { const { a, b } = protSel(d); copyText(b > a ? p.slice(a, b) : p, 'Copied protein sequence'); };
+    $('#pProps').onclick = () => { S.view = 'prop'; renderAll(); };
+    sc.addEventListener('dblclick', e => { const f = e.target.closest('[data-fid]'); if (f) dlgProtFeature(d.features.find(x => x.id === +f.dataset.fid)); });
+  }
+
+  function renderProtProps() {
+    const d = D(), v = $('#view');
+    let st;
+    try { st = STRUCT.proteinStats(d.prot); }
+    catch (e) { v.innerHTML = `<div class="empty"><h2>Nothing to measure</h2><p>${esc(e.message)}</p></div>`; return; }
+    v.innerHTML = `<div class="panel"><div class="ptools"><span class="note">${esc(d.name)} · ${fmt(st.length)} amino acids</span><button class="btn" id="ppCopy">Copy sequence</button></div>
+      <div class="tscroll" style="padding:14px"><div id="ppBody"></div></div></div>`;
+    $('#ppBody').innerHTML = proteinReport(st, $('#ppBody').clientWidth || 760);
+    $('#ppCopy').onclick = () => copyText(d.prot, 'Copied protein sequence');
+    bindCopySeq(d.prot, 'protein sequence');
+  }
+
+  // ================================================================ RNA structure view
+  function renderRNAStruct() {
+    const d = D(), v = $('#view');
+    const n = d.seq.length;
+    const sel = selLen(d);
+    const a = sel ? d.sel.start : 0, b = sel ? (d.sel.end || n) : Math.min(n, 400);
+    v.innerHTML = `<div class="panel"><div class="ptools">
+        <label>Fold <input type="number" id="rsFrom" min="1" max="${n}" value="${a + 1}" style="width:80px"> to <input type="number" id="rsTo" min="1" max="${n}" value="${b}" style="width:80px"></label>
+        <button class="btn pri" id="rsGo">Fold</button>
+        <span class="note">T is read as U · up to 600 nt here</span></div>
+      <div class="tscroll" style="padding:14px"><div id="rsRes"><div class="hint">Choose a range and press Fold.</div></div></div></div>`;
+    const run = () => {
+      const x = parseInt(val('rsFrom'), 10) - 1, y = parseInt(val('rsTo'), 10);
+      if (!(x >= 0 && y >= 1 && x < n && y <= n)) { $('#rsRes').innerHTML = '<div class="err">Enter a range inside the sequence.</div>'; return; }
+      $('#rsRes').innerHTML = '<div class="hint">Folding…</div>';
+      setTimeout(() => {
+        let res;
+        try { res = STRUCT.rnaFold(DNA.sub(d.seq, x, y)); }
+        catch (err) { $('#rsRes').innerHTML = `<div class="err">${esc(err.message)}</div>${toolLinks('rna', DNA.sub(d.seq, x, y))}`; bindCopySeq(STRUCT.toRNA(DNA.sub(d.seq, x, y)), 'RNA sequence'); return; }
+        $('#rsRes').innerHTML = rnaReport(res, x, $('#rsRes').clientWidth || 740);
+        bindCopySeq(res.seq, 'RNA sequence');
+      }, 30);
+    };
+    $('#rsGo').onclick = run;
+    if (sel) run();
+  }
+
   // ================================================================ agarose gel document
   const isGel = x => !!(x && x.gel);
+  const kindOf = d => isGel(d) ? 'gel' : ((d && d.kind) || 'dna');
+  const isNuc = d => !!d && !isGel(d) && kindOf(d) !== 'protein';   // DNA or RNA
+  const isProt = d => kindOf(d) === 'protein';
+  const isRNA = d => kindOf(d) === 'rna';
+  const KIND_LABEL = { dna: 'DNA', rna: 'RNA', protein: 'Protein', gel: 'Gel' };
+  // RNA is held as ACGT so every analysis keeps working; U appears only on screen.
+  const disp = (d, str) => isRNA(d) ? str.replace(/T/g, 'U') : str;
   function newGelDoc(opts) {
     const dnaDocs = S.docs.filter(x => !isGel(x));
     const first = (opts && opts.doc) || dnaDocs[0];
@@ -3669,16 +4011,7 @@ svg .prim { cursor: pointer; }
         const stems = STRUCT.stemList(res.structure);
         const rows = [];
         for (let i = 0; i < res.seq.length; i += 60) rows.push(esc(String(a + i + 1).padStart(6) + '  ' + res.seq.slice(i, i + 60)) + '<br>' + esc(' '.repeat(8) + res.structure.slice(i, i + 60)));
-        $('#rnRes').innerHTML = `
-          <div class="pshead"><span class="dg ${res.dg <= -20 ? 'bad' : res.dg <= -8 ? 'warn' : 'okdg'}">ΔG ≈ ${res.dg.toFixed(2)} kcal/mol</span>
-            <span class="note">${fmt(res.seq.length)} nt · ${res.pairs.length} base pairs · ${stems.length} stem${stems.length === 1 ? '' : 's'} · folded in ${ms} ms</span></div>
-          <div id="rnDiag"></div>
-          ${stems.length ? `<table class="grid"><thead><tr><th>Stem</th><th>Pairs</th><th>Positions</th><th>Loop</th></tr></thead><tbody>${stems.slice(0, 20).map((s2, i) => `<tr><td>${i + 1}</td><td>${s2.len} bp</td><td>${fmt(a + s2.i + 1)}–${fmt(a + s2.j + 1)}</td><td>${fmt(s2.j - s2.i - 1 - 2 * (s2.len - 1))} nt</td></tr>`).join('')}</tbody></table>` : '<div class="hint">No stems found.</div>'}
-          <div style="margin-top:8px"><b>Dot-bracket</b></div>
-          <div class="aa-box" style="max-height:150px">${rows.join('<br>')}</div>
-          <div class="hint"><b>These free energies are approximate.</b> The search is a standard minimum-free-energy fold, but it uses a simplified energy model rather than the full Turner parameter set, so treat ΔG as a rough guide and the structure as a starting point. For a number you would publish, fold the sequence with one of the tools below.</div>
-          ${toolLinks('rna', res.seq)}`;
-        $('#rnDiag').innerHTML = rnaDiagram(res, Math.min(760, $('#rnRes').clientWidth - 10));
+        $('#rnRes').innerHTML = rnaReport(res, a, $('#rnRes').clientWidth || 740) + `<div class="hint">Folded in ${ms} ms.</div>`;
         bindCopySeq(res.seq, 'RNA sequence');
       }, 30);
     };
@@ -3757,34 +4090,7 @@ svg .prim { cursor: pointer; }
       const comp = st.composition.filter(c => c.n > 0);
       const seqRows = [];
       for (let i = 0; i < st.protein.length; i += 60) seqRows.push(esc(String(i + 1).padStart(5) + '  ' + st.protein.slice(i, i + 60)));
-      $('#prRes').innerHTML = `
-        ${internal ? '<div class="err">This translation contains a stop codon in the middle, so the reading frame is probably wrong.</div>' : ''}
-        ${st.unknown.length ? `<div class="err">Unrecognised letters ignored: ${esc(st.unknown.join(', '))}</div>` : ''}
-        <table class="grid" style="width:auto"><tbody>
-          <tr><td>Length</td><td><b>${fmt(st.length)}</b> amino acids</td></tr>
-          <tr><td>Molecular weight</td><td><b>${(st.mw / 1000).toFixed(2)} kDa</b> (${fmt(Math.round(st.mw))} Da)</td></tr>
-          <tr><td>Isoelectric point</td><td><b>${st.pI.toFixed(2)}</b> <span class="note">(${esc(st.pkaSet)} pKa set)</span></td></tr>
-          <tr><td>Net charge at pH 7</td><td><b>${st.charge7 >= 0 ? '+' : ''}${st.charge7.toFixed(2)}</b></td></tr>
-          <tr><td>Extinction at 280 nm</td><td><b>${fmt(st.extinction.reduced)}</b> M⁻¹cm⁻¹ with free cysteines${st.extinction.cystine !== st.extinction.reduced ? `, <b>${fmt(st.extinction.cystine)}</b> with all cysteines in cystines` : ''}<br><span class="note">A280 of a 1 mg/mL solution: ${st.a280.reduced.toFixed(3)}${st.extinction.cystine !== st.extinction.reduced ? ` / ${st.a280.cystine.toFixed(3)}` : ''} · ${st.extinction.trp} Trp, ${st.extinction.tyr} Tyr, ${st.extinction.cys} Cys</span></td></tr>
-          <tr><td>GRAVY</td><td><b>${st.gravy.toFixed(3)}</b> <span class="note">${st.gravy > 0 ? 'overall hydrophobic' : 'overall hydrophilic'}</span></td></tr>
-          <tr><td>Aliphatic index</td><td><b>${st.aliphatic.toFixed(1)}</b></td></tr>
-        </tbody></table>
-        <div style="margin-top:10px"><b>Hydropathy</b></div><div id="prHydro"></div>
-        <div><b>Charge</b></div><div id="prCharge"></div>
-        <div style="margin-top:8px"><b>Composition</b></div>
-        <table class="grid"><thead><tr><th>Residue</th><th>Count</th><th>%</th><th>Residue</th><th>Count</th><th>%</th></tr></thead><tbody>
-          ${Array.from({ length: Math.ceil(comp.length / 2) }, (_, i) => {
-            const L = comp[i], Rr = comp[i + Math.ceil(comp.length / 2)];
-            const cell = c => c ? `<td>${esc(c.name)} (${c.aa})</td><td>${c.n}</td><td>${c.pct.toFixed(1)}%</td>` : '<td></td><td></td><td></td>';
-            return `<tr>${cell(L)}${cell(Rr)}</tr>`;
-          }).join('')}
-        </tbody></table>
-        <div style="margin-top:8px"><b>Sequence</b></div>
-        <div class="aa-box" style="max-height:130px">${seqRows.join('<br>')}</div>
-        <div class="hint">Mass, extinction coefficient, GRAVY and the aliphatic index are exact calculations. The isoelectric point depends on which pKa set is used, and different tools will differ by a few tenths of a unit. Secondary and three-dimensional structure are not predicted here — use one of the tools below.</div>
-        ${toolLinks('protein', st.protein)}`;
-      $('#prHydro').innerHTML = hydroSVG(STRUCT.hydropathy(st.protein, parseInt(val('prWin'), 10) || 9), Math.min(740, $('#prRes').clientWidth - 10), parseInt(val('prWin'), 10) || 9);
-      $('#prCharge').innerHTML = chargeSVG(STRUCT.chargeCurve(st.protein), st.pI, Math.min(740, $('#prRes').clientWidth - 10));
+      $('#prRes').innerHTML = proteinReport(st, $('#prRes').clientWidth || 760, parseInt(val('prWin'), 10) || 9);
       bindCopySeq(st.protein, 'protein sequence');
     };
     dialog({
@@ -4001,7 +4307,7 @@ svg .prim { cursor: pointer; }
     downloadText(fname, content); d.dirty = false; renderAll(true); return true;
   }
   async function exportFasta() {
-    const d = D(); const content = DNA.toFASTA(d.name, d.seq), fname = d.name.replace(/[\\/:*?"<>|]/g, '_') + '.fasta';
+    const d = D(); const content = DNA.toFASTA(d.name, isProt(d) ? d.prot : disp(d, d.seq)), fname = d.name.replace(/[\\/:*?"<>|]/g, '_') + '.fasta';
     if (host && host.saveFile) { const r = await host.saveFile({ path: null, defaultName: fname, content, filters: [{ name: 'FASTA', extensions: ['fasta', 'fa'] }] }); if (r) toast('Exported ' + r.split(/[\\/]/).pop()); }
     else downloadText(fname, content);
   }
@@ -4040,7 +4346,13 @@ svg .prim { cursor: pointer; }
   $('#toolbar').addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b && !b.disabled) TB_ACT[b.dataset.a](); });
   $('#doctabs').addEventListener('mousedown', e => {
     const x = e.target.closest('[data-x]'); if (x) { e.stopPropagation(); closeDoc(+x.dataset.x); return; }
-    const t = e.target.closest('.dtab'); if (t) { S.active = +t.dataset.i; renderAll(); }
+    const t = e.target.closest('.dtab');
+    if (t) {
+      S.active = +t.dataset.i;
+      const dd = D();
+      if (dd && !isGel(dd) && !viewsFor(dd).some(x => x[0] === S.view)) S.view = viewsFor(dd)[0][0];
+      renderAll();
+    }
   });
   $('#viewtabs').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) setView(b.dataset.v); });
   $('#side').addEventListener('change', e => {

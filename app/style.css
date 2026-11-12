@@ -311,3 +311,6 @@ svg.chroma { display: block; }
 .imitem .imn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .imitem .ims { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
 .imitem.dis .imn { color: var(--faint); }
+.dtab.k-gel .nm::before { content: "▤ "; color: var(--muted); }
+.dtab.k-rna .nm::before { content: "RNA "; color: #1a7f37; font-size: 10px; font-weight: 700; }
+.dtab.k-protein .nm::before { content: "PRO "; color: #8a4ec4; font-size: 10px; font-weight: 700; }

@@ -26,6 +26,8 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
 | **Tools** | **코돈 최적화(8개 organism, 알고리즘 4종, 효소 사이트 추가/제거, 보존 영역) · 서열 비교(여러 플라스미드 정렬) · PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
 | **Compare** | **여러 서열을 한 화면에서 비교 · 원형은 회전·역상보까지 맞춰서 정렬 · 치환/삽입/결실을 색으로 표시 · 차이 있는 줄만 보기** |
+| **파일 종류** | **DNA · RNA · Protein 파일을 각각 만들 수 있고**, 열려 있는 파일의 종류에 따라 상단 메뉴와 탭이 바뀜 |
+| **Import** | 다른 파일에서 Feature/Primer 가져오기 · 최근 파일 30개 + 찾아보기 · **서열을 맞춰서 위치를 찾아 넣음**(좌표가 달라도 됨) |
 | **Enzymes** | 효소 **203종** · 한 화면에 다 보이는 선택 창 · **나만의 효소 세트 저장**(파일이 아니라 프로그램에 저장돼서 모든 파일에 적용) · 효소/Feature 데이터베이스 열람과 CSV 내보내기 |
 | **Gel** | **아가로스 젤을 별도 탭 문서로** · 0.5~3.0% · TAE/TBE · running 정도 조절 · ladder 15종(NEB, Thermo, Invitrogen, Promega, λ, φX) + **직접 입력한 ladder 저장** · lane 1~20개(개수만큼 젤이 넓어짐) |
 | **Analyze** | **프라이머 구조(헤어핀·self dimer·cross dimer를 ΔG와 그림으로) · RNA 2차 구조(arc 다이어그램, dot-bracket, stem 목록) · 단백질 성질(분자량·pI·흡광계수·hydropathy·전하 곡선·조성) · 외부 구조 예측 툴 연결** |
@@ -35,6 +37,23 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | History | 모든 변경 기록, 원하는 단계로 되돌리기, Undo/Redo |
 
 ## 기능별 사용법
+
+**DNA / RNA / Protein 파일** — File → New DNA / New RNA / New Protein File. 같은 창에 탭으로 열리고, 보고 있는 파일의 종류에 따라 상단 메뉴가 바뀝니다.
+
+| 파일 | 상단 메뉴 | 탭 |
+|---|---|---|
+| DNA | File, Edit, View, Features, Primers, Cloning, Tools, Analyze, Actions, Help | Map, Sequence, Enzymes, Features, Primers, Alignment, Compare, History |
+| RNA | File, Edit, View, Features, **RNA**, Help | Map, Sequence, Features, **Structure**, History |
+| Protein | File, Edit, View, Features, **Protein**, Help | Sequence, Features, **Properties**, History |
+
+RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(내부에는 T로 저장해서 ORF·번역·Feature 기능이 그대로 동작합니다). Structure 탭에서 바로 접을 수 있고, Protein 파일은 Properties 탭에서 분자량·pI·흡광계수·hydropathy·전하 곡선·조성을 보여줍니다. Protein 메뉴의 `Back-translate and Codon-optimise…`를 누르면 그 단백질이 코돈 최적화 창에 미리 채워집니다.
+
+**Feature / Primer 가져오기** — Features → Import Features from Another File, Primers → Import Primers. 새 창 위쪽에 **지금 열려 있는 파일**과 **최근 파일 30개**가 나오고 맨 아래 `Browse…`가 있습니다. Feature는 **자기 서열을 대상 파일에서 찾아서** 넣기 때문에 번호가 달라도, origin이 돌아가 있어도, 가닥이 뒤집혀 있어도 제자리에 들어갑니다(원래 좌표 그대로 넣는 선택지도 있습니다).
+
+**Primer 세트 / 효소 세트** — Primers → Primer Sets, Analyze → Enzyme Sets. 이름을 붙여 저장하고, 이름 바꾸기·현재 선택으로 갱신·다른 파일에 적용·삭제가 됩니다. 파일이 아니라 프로그램에 저장돼서 모든 파일에서 쓸 수 있습니다.
+
+**Feature 속성과 나만의 Feature** — Feature를 더블클릭하면 이름, 종류, **Molecule(DNA/RNA/protein)**, 방향(정방향/역방향/양방향), 색, **번역 표시와 reading frame**, **단백질 일치 인식**, note, qualifier(`gene=bla` 형식)를 지정할 수 있습니다. `Save to My Features`로 저장하면 Detect Common Features가 함께 찾아 줍니다. 단백질 일치를 켜 두면 **코돈이 전부 바뀐 서열에서도 같은 단백질이면 인식합니다** — 코돈 최적화한 유전자에서 태그나 CDS를 찾을 때 쓸 수 있습니다.
+
 
 **효소 세트 저장** — Map/Sequence 탭 왼쪽의 `Choose Enzymes…`, 또는 Analyze → Choose Enzymes. 한 화면에 모든 효소가 보이고 각각 몇 번 자르는지 숫자가 붙습니다. 체크한 뒤 `Save as my set…`으로 이름을 주면 저장되고, **다른 파일을 열어도 그 세트가 그대로 목록에 나옵니다**. 서열에서 자동으로 계산되는 세트(unique cutter, 6+ cutter, Type IIS, blunt 등)도 함께 제공합니다.
 
