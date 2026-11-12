@@ -1,7 +1,7 @@
 /* GeneCanvas — application UI */
 (function () {
   'use strict';
-  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER;
+  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON;
   const host = window.gcHost || null; // provided by the Electron preload; null in a plain browser
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -281,6 +281,8 @@ svg .prim { cursor: pointer; }
     tbl: '<rect x="3" y="5" width="18" height="14"/><path d="M3 10h18M9 5v14"/>',
     hist: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     align: '<path d="M4 7h16M4 12h11M4 17h14"/><path d="M19 10v4"/>',
+    compare: '<path d="M4 6h7M4 12h7M4 18h7"/><path d="M15 6h5M15 12h5M15 18h5"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
+    codon: '<path d="M5 8h14M5 12h14M5 16h14"/><circle cx="9" cy="8" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="16" r="1.6" fill="currentColor" stroke="none"/>',
     ncbi: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/>',
     clone: '<circle cx="7" cy="8" r="3.4"/><circle cx="17" cy="16" r="3.4"/><path d="M9.6 10.4 14.4 14"/>',
     design: '<path d="M4 16h8"/><path d="m9 13 3 3-3 3"/><path d="M4 7h16"/><circle cx="17" cy="7" r="2"/>',
@@ -368,6 +370,7 @@ svg .prim { cursor: pointer; }
       ] },
       { label: 'Cloning', items: [
         { label: 'Restriction Cloning…', dis: S.docs.length < 1, act: dlgRestrictionClone },
+        { label: 'Golden Gate Assembly…', dis: S.docs.length < 1, act: dlgGoldenGate },
         { label: 'Gibson / Overlap Assembly…', dis: S.docs.length < 1, act: dlgGibson },
         { label: 'Gateway BP / LR…', dis: S.docs.length < 2, act: dlgGateway },
         '-',
@@ -375,6 +378,9 @@ svg .prim { cursor: pointer; }
         { label: 'Show att Sites in This Sequence', dis: !has, act: showAttSites }
       ] },
       { label: 'Tools', items: [
+        { label: 'Codon Optimisation…', dis: !has, act: dlgCodon },
+        { label: 'Compare Sequences…', dis: S.docs.length < 2, act: dlgCompare },
+        '-',
         { label: 'Design PCR Primers…', dis: !has, act: dlgDesignPCR },
         { label: 'Design Sequencing Primers…', dis: !has, act: dlgDesignWalk },
         { label: 'Design Mutagenesis Primers…', dis: !has || !sl, act: dlgDesignMut },
@@ -505,7 +511,7 @@ svg .prim { cursor: pointer; }
   function renderDocTabs() {
     $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''}" data-i="${i}" title="${esc(d.name)} — ${fmt(d.seq.length)} bp"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
   }
-  const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['hist', 'History', 'hist']];
+  const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['compare', 'Compare', 'compare'], ['hist', 'History', 'hist']];
   function renderViewTabs() {
     const vt = $('#viewtabs');
     vt.classList.toggle('noside', S.sideHidden || !(S.view === 'map' || S.view === 'seq'));
@@ -579,6 +585,7 @@ svg .prim { cursor: pointer; }
     else if (S.view === 'feat') renderFeatures();
     else if (S.view === 'primer') renderPrimers();
     else if (S.view === 'align') renderAlign();
+    else if (S.view === 'compare') renderCompare();
     else if (S.view === 'hist') renderHistory();
   }
 
@@ -1301,7 +1308,7 @@ svg .prim { cursor: pointer; }
     const prev = $('#dlg'), box = prev.cloneNode(false);
     prev.parentNode.replaceChild(box, prev);
     box.className = 'dlg' + (wide ? ' wide' : '');
-    box.innerHTML = `<div class="hd">${esc(title)}</div><div class="bd">${body}</div><div class="ft">${buttons.map((b, i) => `<button class="btn${b.primary ? ' pri' : ''}${b.danger ? ' dng' : ''}" data-b="${i}">${esc(b.label)}</button>`).join('')}</div>`;
+    box.innerHTML = `<div class="hd">${esc(title)}</div><div class="bd">${body}</div><div class="ft">${buttons.map((b, i) => `<button class="btn${b.primary ? ' pri' : ''}${b.danger ? ' dng' : ''}" data-b="${i}"${b.id ? ` id="${b.id}"` : ''}${b.disabled ? ' disabled' : ''}>${esc(b.label)}</button>`).join('')}</div>`;
     m.hidden = false;
     box.querySelector('.ft').onclick = e => {
       const b = e.target.closest('[data-b]'); if (!b) return;
@@ -1946,6 +1953,398 @@ svg .prim { cursor: pointer; }
     }
     commit(d, `Marked ${sites.length} att site${sites.length > 1 ? 's' : ''}`); renderAll(true);
     toast(sites.map(s => s.label).join(', '));
+  }
+
+  // ================================================================ Golden Gate
+  function dlgGoldenGate() {
+    let enzyme = 'BsaI';
+    let picked = S.docs.map((_, i) => i === S.active);
+    let result = null;
+    const describe = (d, enz) => {
+      const n = (DNA.findSites(d.seq, d.circular)[enz] || []).length;
+      let frags = [];
+      try { frags = CLONE.ggFragments(d, enz); } catch (e) { frags = []; }
+      if (!n) return `<span style="color:var(--danger)">no ${enz} site</span>`;
+      if (!frags.length) return `<span style="color:var(--danger)">${n} ${enz} site${n > 1 ? 's' : ''}, but no site-free fragment</span>`;
+      const f = frags.slice().sort((a, b) => b.size - a.size)[0];
+      const inner = n > 2 ? ` <span style="color:var(--danger)">— ${n - 2} site${n - 2 > 1 ? 's' : ''} inside the part</span>` : '';
+      return `${n} ${enz} site${n > 1 ? 's' : ''} → part of ${fmt(f.size)} bp, overhangs <span class="mono">${esc(f.left.x)}</span> / <span class="mono">${esc(f.right.x)}</span>${inner}`;
+    };
+    const refreshList = () => {
+      $('#ggp').innerHTML = S.docs.map((d, i) => `<label><input type="checkbox" value="${i}" ${picked[i] ? 'checked' : ''}> <b>${esc(d.name)}</b> — ${describe(d, enzyme)}</label>`).join('');
+    };
+    const simulate = () => {
+      const idx = picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
+      if (idx.length < 2) { $('#ggres').innerHTML = '<div class="err">Choose at least two parts.</div>'; return; }
+      try {
+        result = CLONE.goldenGate(idx.map(i => ({ doc: S.docs[i] })), enzyme, { name: 'Golden Gate product' });
+      } catch (err) { $('#ggres').innerHTML = `<div class="err">${esc(err.message)}</div>`; return; }
+      const warn = [];
+      if (result.duplicateOverhangs.length) warn.push(`Two parts end in the same overhang (${esc(result.duplicateOverhangs.join(', '))}), so the order is ambiguous.`);
+      warn.push(...result.notes);
+      if (!result.products.length) {
+        $('#ggres').innerHTML = `<div class="err">The parts do not form a circle. Their overhangs are ${result.parts.map(f => esc(f.left.x + '…' + f.right.x)).join(', ')}. Each part's right overhang must match the next part's left overhang.</div>`;
+        return;
+      }
+      $('#ggres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Junction overhangs</th><th>${esc(enzyme)} sites left</th><th></th></tr></thead><tbody>${result.products.map((p, k) => `<tr><td>${k + 1}</td><td><b>${fmt(p.size)} bp</b></td><td class="mono">${p.overhangs.map(esc).join(' · ')}</td><td>${p.leftover === 0 ? '<span style="color:#1a7f37">none</span>' : `<span style="color:var(--danger)">${p.leftover}</span>`}</td><td><button class="ib" data-mk="${k}">Create</button></td></tr>`).join('')}</tbody></table>
+        ${warn.length ? `<div class="hint" style="color:var(--danger)">${warn.map(esc).join('<br>')}</div>` : ''}
+        <div class="hint">A finished Golden Gate product keeps no ${esc(enzyme)} site, because both sites are carried away on the discarded ends.</div>`;
+    };
+    dialog({
+      title: 'Golden Gate Assembly', wide: true,
+      body: `<div class="form">
+        <label for="ggenz">Enzyme</label><select id="ggenz">${CLONE.TYPE2S.map(e => `<option ${e === enzyme ? 'selected' : ''}>${e}</option>`).join('')}</select>
+        <label>Parts</label><div class="enz-pick" id="ggp" style="columns:1;max-height:180px"></div>
+        <div class="full hint">Each part needs two inward-facing ${esc(enzyme)} sites. The piece between them carries no site of its own and is what goes into the product; the overhangs decide the order.</div>
+        <div class="full" id="ggres"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Simulate Assembly', primary: true, act: () => { simulate(); return false; } }],
+      onOpen: box => {
+        refreshList();
+        box.addEventListener('change', e => {
+          if (e.target.id === 'ggenz') { enzyme = e.target.value; refreshList(); $('#ggres').innerHTML = ''; }
+          else if (e.target.closest('#ggp')) picked = S.docs.map((_, i) => { const el = box.querySelector(`#ggp input[value="${i}"]`); return !!(el && el.checked); });
+        });
+        box.addEventListener('click', e => {
+          const b = e.target.closest('[data-mk]'); if (!b || !result) return;
+          const p = result.products[+b.dataset.mk];
+          closeDialog(); addDoc({ ...p.doc, histLabel: `Golden Gate with ${enzyme}` });
+          toast(`Created ${fmt(p.size)} bp construct`);
+        });
+      }
+    });
+  }
+
+  // ================================================================ compare sequences
+  function dlgCompare() {
+    let picked = S.docs.map((_, i) => i === S.active);
+    dialog({
+      title: 'Compare Sequences', wide: true,
+      body: `<div class="form">
+        <label>Sequences</label><div class="enz-pick" id="cmpp" style="columns:1;max-height:200px">${S.docs.map((d, i) => `<label><input type="checkbox" value="${i}" ${picked[i] ? 'checked' : ''}> ${esc(d.name)} — ${fmt(d.seq.length)} bp, ${d.circular ? 'circular' : 'linear'}</label>`).join('')}</div>
+        <div class="full hint">The first sequence you tick is the reference; the rest are aligned to it. Circular sequences are rotated and, where needed, reverse-complemented to line up.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Compare', primary: true, act: () => {
+          const idx = picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
+          if (idx.length < 2) return showErr('Choose at least two sequences.');
+          if (idx.length > 8) return showErr('Choose at most eight sequences.');
+          const total = idx.reduce((a, i) => a + S.docs[i].seq.length, 0);
+          if (total > 600000) return showErr('These sequences are too long to compare in one go.');
+          try {
+            S.compare = MSA.compare(idx.map(i => ({ name: S.docs[i].name, seq: S.docs[i].seq, circular: S.docs[i].circular })));
+            S.compareDiffOnly = false;
+          } catch (err) { return showErr(err.message); }
+          closeDialog();
+          S.view = 'compare';
+          renderAll();
+        }
+      }],
+      onOpen: box => {
+        box.querySelector('#cmpp').addEventListener('change', () => {
+          picked = S.docs.map((_, i) => { const el = box.querySelector(`#cmpp input[value="${i}"]`); return !!(el && el.checked); });
+        });
+      }
+    });
+  }
+
+  function renderCompare() {
+    const v = $('#view'), C = S.compare;
+    if (!C) {
+      v.innerHTML = `<div class="empty"><h2>No comparison yet</h2><p>Compare two or more open sequences to see every substitution, insertion and deletion between them.</p><div class="btns"><button class="btn pri" data-a="cmp">Compare Sequences…</button></div></div>`;
+      v.querySelector('[data-a]').onclick = dlgCompare;
+      return;
+    }
+    v.innerHTML = `<div class="panel">
+      <div class="ptools">
+        <button class="btn" id="cmpnew">Compare Other Sequences…</button>
+        <label><input type="checkbox" id="cmpdiff" ${S.compareDiffOnly ? 'checked' : ''}> Show only rows with differences</label>
+        <span class="note">Reference <b>${esc(C.refName)}</b> · ${fmt(C.refLength)} bp · ${fmt(C.columns)} alignment columns</span>
+      </div>
+      <div class="ptools" style="background:var(--win);display:block">
+        <table class="grid" style="width:auto"><thead><tr><th>Sequence</th><th>Length</th><th>Strand</th><th>Identity</th><th>Substitutions</th><th>Insertions</th><th>Deletions</th></tr></thead><tbody>
+        ${C.stats.map(s => `<tr><td><b>${esc(s.name)}</b></td><td>${fmt(s.length)} bp</td><td>${s.strand > 0 ? 'same' : 'reverse complement'}${s.rotation ? `, rotated ${fmt(s.rotation)}` : ''}</td><td>${s.identity.toFixed(2)}%</td><td>${fmt(s.substitutions)}</td><td>${fmt(s.insertions)}</td><td>${fmt(s.deletions)}</td></tr>`).join('')}
+        </tbody></table></div>
+      <div class="tscroll" id="cmprows"></div></div>`;
+    buildCompareRows();
+    $('#cmpnew').onclick = dlgCompare;
+    $('#cmpdiff').onchange = e => { S.compareDiffOnly = e.target.checked; buildCompareRows(); };
+  }
+
+  function buildCompareRows() {
+    const C = S.compare, host2 = $('#cmprows');
+    const labelW = Math.min(170, 24 + Math.max(...[C.refName, ...C.names].map(n => n.length)) * 6.6);
+    const G = labelW + 62;
+    const per = Math.max(20, Math.floor((host2.clientWidth - G - 26) / CW / 10) * 10);
+    const rows = [C.refRow, ...C.rows], names = [C.refName, ...C.names];
+    const out = [];
+    for (let c0 = 0; c0 < C.columns; c0 += per) {
+      const c1 = Math.min(C.columns, c0 + per);
+      let anyDiff = false;
+      for (let c = c0; c < c1 && !anyDiff; c++) for (let r = 1; r < rows.length; r++) if (rows[r][c] !== rows[0][c]) anyDiff = true;
+      if (S.compareDiffOnly && !anyDiff) continue;
+      let pos = null;
+      for (let c = c0; c < c1 && pos === null; c++) if (C.refPos[c] !== null) pos = C.refPos[c];
+      const lines = rows.map((row, r) => {
+        let html = '';
+        for (let c = c0; c < c1; c++) {
+          const ch = row[c], ref = rows[0][c];
+          if (r === 0) { html += ch; continue; }
+          if (ch === ref) html += '<span class="s">.</span>';
+          else if (ch === '-') html += '<span class="d">-</span>';
+          else if (ref === '-') html += `<span class="i">${ch}</span>`;
+          else html += `<span class="m">${ch}</span>`;
+        }
+        return `<div class="cname" style="top:${4 + r * 17}px;width:${labelW}px">${esc(names[r])}</div><div class="nt${r ? ' alt' : ''}" style="left:${G}px;top:${4 + r * 17}px">${html}</div>`;
+      }).join('');
+      out.push(`<div class="crow" style="height:${8 + rows.length * 17}px"><div class="num" style="left:${labelW}px;top:5px">${pos === null ? '' : fmt(pos + 1)}</div>${lines}</div>`);
+    }
+    host2.innerHTML = out.length ? out.join('') : '<div class="empty"><p>No differences between these sequences.</p></div>';
+  }
+
+  // ================================================================ codon optimisation
+  function dlgCodon() {
+    const d = D(), n = d.seq.length;
+    const orfs = analyze(d).orfs;
+    const cdsFeatures = d.features.filter(f => f.type === 'CDS' || f.type === 'gene');
+    let mode = 'region';
+    let preserve = [];
+    let avoid = new Set(), add = new Set();
+    let result = null, lastCds = '';
+
+    const regionSeq = () => {
+      const a = parseInt(val('coFrom'), 10) - 1, b = parseInt(val('coTo'), 10);
+      if (!(a >= 0 && b >= 1 && a < n && b <= n)) return '';
+      let s = DNA.sub(d.seq, a, b);
+      if ($('#coRev').checked) s = DNA.rc(s);
+      return s;
+    };
+    const currentCds = () => mode === 'protein' ? '' : regionSeq();
+
+    const checkORF = () => {
+      const box = $('#coOrf'); if (!box) return;
+      if (mode === 'protein') {
+        const p = val('coProt').toUpperCase().replace(/[^A-Z*]/g, '');
+        box.innerHTML = p ? `<span style="color:#1a7f37">✓</span> ${fmt(p.length)} amino acids. A coding sequence will be built for the chosen organism.` : 'Paste a protein sequence.';
+        return;
+      }
+      const s = regionSeq();
+      lastCds = s;
+      if (!s) { box.innerHTML = '<span style="color:var(--danger)">Enter a range inside the sequence.</span>'; return; }
+      const r = CODON.inspectORF(s);
+      if (r.ok) box.innerHTML = `<span style="color:#1a7f37">✓ Valid reading frame</span> — ${fmt(r.codons)} codons, ${fmt(r.aa)} amino acids, ${esc(r.startsWith)} … ${esc(r.stopsWith)}`;
+      else box.innerHTML = `<span style="color:var(--danger)">Not a clean reading frame:</span> ${esc(r.issues.join('; '))}.<br><span style="color:var(--muted)">${fmt(r.codons)} codons read as ${esc(r.protein.slice(0, 40))}${r.protein.length > 40 ? '…' : ''}</span>`;
+    };
+    const setRange = (a, b, rev) => { $('#coFrom').value = a + 1; $('#coTo').value = b; $('#coRev').checked = !!rev; checkORF(); refreshEnzymeHints(); };
+
+    const refreshPreserve = () => {
+      $('#coPres').innerHTML = preserve.length
+        ? preserve.map((p, i) => `<label><span class="mono">${fmt(p.start + 1)}–${fmt(p.end)}</span> <span style="color:var(--muted)">${esc(p.name || '')}</span> <button class="ib dng" data-rmp="${i}">remove</button></label>`).join('')
+        : '<span class="hint">Nothing preserved. Codons in a preserved range are left exactly as they are.</span>';
+    };
+    const refreshEnzymeHints = () => {
+      const s = currentCds();
+      const el = $('#coPresent'); if (!el) return;
+      if (!s) { el.textContent = ''; return; }
+      const present = DNA.ENZYMES.filter(e => e.core >= 6 && CODON.findSite(s, e.site).length).map(e => e.name);
+      el.innerHTML = present.length ? `Sites already inside this region: ${present.map(x => `<a href="#" data-avoid="${esc(x)}">${esc(x)}</a>`).join(', ')}` : 'No common restriction site inside this region.';
+    };
+
+    const run = () => {
+      const organism = val('coOrg');
+      const opts = {
+        organism, algorithm: val('coAlgo'),
+        sourceOrganism: val('coAlgo') === 'harmonised' ? val('coSrc') : null,
+        rareCutoff: Math.max(0, Math.min(0.5, (parseFloat(val('coRare')) || 10) / 100)),
+        avoidEnzymes: [...avoid], addEnzymes: [...add],
+        maxRun: parseInt(val('coRun'), 10) || 0,
+        keepStart: $('#coKeepStart').checked, keepStop: $('#coKeepStop').checked,
+        seed: parseInt(val('coSeed'), 10) || 1
+      };
+      try {
+        if (mode === 'protein') {
+          result = CODON.fromProtein(val('coProt'), opts);
+        } else {
+          const s = regionSeq();
+          if (!s) throw new Error('Enter a range inside the sequence.');
+          const r = CODON.inspectORF(s);
+          if (!r.ok && !$('#coForce').checked) throw new Error(`This is not a clean reading frame (${r.issues.join('; ')}). Fix the range, or tick “optimise anyway”.`);
+          const off = parseInt(val('coFrom'), 10) - 1;
+          opts.preserve = preserve.map(p => $('#coRev').checked
+            ? { start: s.length - (p.end - off), end: s.length - (p.start - off) }
+            : { start: p.start - off, end: p.end - off });
+          result = CODON.optimize(s, opts);
+        }
+      } catch (err) { $('#coRes').innerHTML = `<div class="err">${esc(err.message)}</div>`; result = null; return; }
+      showResult();
+    };
+    const showResult = () => {
+      const r = result, b = r.before, a = r.after;
+      const row = (label, x, y, fmtFn, better) => {
+        const f = fmtFn || (v => v.toFixed(2));
+        return `<tr><td>${label}</td><td>${f(x)}</td><td><b>${f(y)}</b></td><td>${better ? better(x, y) : ''}</td></tr>`;
+      };
+      const arrow = (x, y) => y > x ? '<span style="color:#1a7f37">↑</span>' : (y < x ? '<span style="color:var(--danger)">↓</span>' : '–');
+      const seqHtml = [];
+      for (let i = 0; i < r.seq.length; i += 60) seqHtml.push(esc(String(i + 1).padStart(6) + '  ' + r.seq.slice(i, i + 60)));
+      $('#coRes').innerHTML = `
+        <table class="grid" style="width:auto"><thead><tr><th>Measure</th><th>Before</th><th>After</th><th></th></tr></thead><tbody>
+          ${row('CAI (codon adaptation index)', b.cai, a.cai, v => v.toFixed(3), arrow)}
+          ${row('GC content', b.gc, a.gc, v => v.toFixed(1) + '%')}
+          ${row('GC at third positions', b.gc3, a.gc3, v => v.toFixed(1) + '%')}
+          ${row('Longest single-base run', b.run, a.run, v => String(v))}
+          ${row('Unwanted sites', b.sites, a.sites, v => String(v))}
+        </tbody></table>
+        <div class="hint">${fmt(r.changedCodons)} of ${fmt(r.totalCodons)} codons changed (${(r.changedCodons / r.totalCodons * 100).toFixed(0)}%) for <b>${esc(r.organism.name)}</b>. CAI 1.00 means every codon is the host’s commonest choice.${a.gc3 > 70 ? ' <span style="color:var(--danger)">GC at third positions is very high, which can make the gene hard to synthesise.</span>' : ''}</div>
+        ${r.remaining.length ? `<div class="err">Still present: ${r.remaining.map(x => `${esc(x.name)} ×${x.count}`).join(', ')}</div>` : ''}
+        ${r.log.length ? `<div class="hint">${r.log.map(esc).join('<br>')}</div>` : ''}
+        <div style="margin-top:8px"><b>Optimised sequence</b></div>
+        <div class="aa-box" style="max-height:170px">${seqHtml.join('<br>')}</div>`;
+      $('#coApply').disabled = false;
+      $('#coOpen').disabled = false;
+      $('#coCopy').disabled = false;
+    };
+
+    const algoNote = () => {
+      const a = CODON.ALGORITHMS.find(x => x.key === val('coAlgo'));
+      $('#coAlgoNote').textContent = a ? a.note : '';
+      $('#coSrcRow').style.display = val('coAlgo') === 'harmonised' ? '' : 'none';
+      $('#coRareRow').style.display = val('coAlgo') === 'threshold' ? '' : 'none';
+    };
+
+    const orgOptions = CODON.tables().map(t => `<option value="${t.key}" ${t.key === 'ecoli' ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+    const enzChoices = DNA.ENZYMES.filter(e => e.core >= 6).map(e => e.name);
+    const sel = selLen(d);
+
+    dialog({
+      title: 'Codon Optimisation', wide: true,
+      body: `<div class="form">
+        <label>Optimise</label><div class="row2">
+          <label><input type="radio" name="comode" value="region" checked> a region of ${esc(d.name)}</label>
+          <label><input type="radio" name="comode" value="protein"> a protein sequence</label></div>
+
+        <div class="full" id="coRegionBox"><div class="form" style="margin:0">
+          <label for="coFrom">Coding region</label><div class="row2">
+            <input type="number" id="coFrom" min="1" max="${n}" value="${sel ? d.sel.start + 1 : 1}"> to
+            <input type="number" id="coTo" min="1" max="${n}" value="${sel ? (d.sel.end || n) : Math.min(n, 300)}">
+            <label><input type="checkbox" id="coRev"> reverse strand</label></div>
+          <label>Use</label><div class="row2">
+            <select id="coPick"><option value="">choose a feature or ORF…</option>
+              ${cdsFeatures.map((f, i) => `<option value="f${i}">${esc(f.name)} (${esc(f.type)}, ${fmt(DNA.rlen(f, n))} bp)</option>`).join('')}
+              ${orfs.map((o, i) => `<option value="o${i}">ORF ${fmt(o.start + 1)}–${fmt(o.end)} (${o.aa} aa, ${o.strand > 0 ? 'forward' : 'reverse'})</option>`).join('')}
+            </select></div>
+          <label>Reading frame</label><div class="full" id="coOrf" style="grid-column:2/-1"></div>
+          <label></label><label><input type="checkbox" id="coForce"> Optimise anyway, even if it is not a clean reading frame</label>
+        </div></div>
+
+        <div class="full" id="coProteinBox" style="display:none"><div class="form" style="margin:0">
+          <label for="coProt">Protein</label><textarea id="coProt" rows="4" placeholder="Paste a protein sequence in one-letter code"></textarea>
+        </div></div>
+
+        <label for="coOrg">Target organism</label><select id="coOrg">${orgOptions}</select>
+        <label></label><div class="hint" id="coOrgNote" style="margin:0"></div>
+
+        <label for="coAlgo">Algorithm</label><select id="coAlgo">${CODON.ALGORITHMS.map(a => `<option value="${a.key}" ${a.key === 'threshold' ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>
+        <label></label><div class="hint" id="coAlgoNote" style="margin:0"></div>
+        <div class="full" id="coRareRow"><div class="form" style="margin:0"><label for="coRare">Drop codons below</label><div class="row2"><input type="number" id="coRare" value="10" min="0" max="50"> % of their amino acid</div></div></div>
+        <div class="full" id="coSrcRow" style="display:none"><div class="form" style="margin:0"><label for="coSrc">Source organism</label><select id="coSrc">${CODON.tables().map(t => `<option value="${t.key}" ${t.key === 'human' ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div></div>
+
+        <label>Remove sites</label><div><input type="text" id="coAvoidQ" placeholder="filter enzymes" style="width:150px"><div class="enz-pick" id="coAvoid" style="max-height:92px"></div><div class="hint" id="coPresent" style="margin:2px 0 0"></div></div>
+        <label>Add sites</label><div><input type="text" id="coAddQ" placeholder="filter enzymes" style="width:150px"><div class="enz-pick" id="coAdd" style="max-height:92px"></div><div class="hint" style="margin:2px 0 0">A site is written in only where synonymous codons allow it, so the protein never changes.</div></div>
+
+        <label>Preserve</label><div><div class="fraglist" id="coPres"></div>
+          <div class="row2" style="margin-top:4px"><button class="btn" id="coAddSel" type="button">Add current selection</button><button class="btn" id="coAddFeat" type="button">Add a feature…</button></div></div>
+
+        <label for="coRun">Also</label><div class="row2">
+          break runs longer than <input type="number" id="coRun" value="6" min="0" max="12"> bases
+          <label><input type="checkbox" id="coKeepStart" checked> keep start codon</label>
+          <label><input type="checkbox" id="coKeepStop" checked> keep stop codon</label>
+          <label>seed <input type="number" id="coSeed" value="1" min="1" max="99999" style="width:70px"></label></div>
+
+        <div class="full" id="coRes"></div></div>`,
+      buttons: [
+        { label: 'Close' },
+        { label: 'Copy', id: 'coCopy', disabled: true, act: () => { if (result) copyText(result.seq, 'Copied optimised sequence'); return false; } },
+        { label: 'Open as New Sequence', id: 'coOpen', disabled: true, act: () => { if (!result) return false; closeDialog(); addDoc({ name: (mode === 'protein' ? 'optimised' : d.name + '-opt'), seq: result.seq, circular: false, features: [{ name: 'optimised CDS', type: 'CDS', start: 0, end: result.seq.length, strand: 1 }], primers: [], histLabel: `Codon-optimised for ${result.organism.short}` }); } },
+        { label: 'Replace in Sequence', id: 'coApply', disabled: true, act: () => { applyCodon(); return false; } },
+        { label: 'Optimise', primary: true, act: () => { run(); return false; } }
+      ],
+      onOpen: box => {
+        const mkList = (id, chosen, q) => {
+          const query = (q || '').toUpperCase();
+          box.querySelector('#' + id).innerHTML = enzChoices.filter(x => !query || x.toUpperCase().includes(query))
+            .map(x => `<label><input type="checkbox" value="${x}" ${chosen.has(x) ? 'checked' : ''}> ${x}</label>`).join('');
+        };
+        mkList('coAvoid', avoid, ''); mkList('coAdd', add, '');
+        refreshPreserve(); checkORF(); algoNote(); refreshEnzymeHints();
+        const orgNote = () => { const t = CODON.tables().find(x => x.key === val('coOrg')); $('#coOrgNote').textContent = t ? `${t.source}, ${fmt(t.codons)} codons counted.` : ''; };
+        orgNote();
+        box.addEventListener('change', e => {
+          const t = e.target;
+          if (t.name === 'comode') {
+            mode = t.value;
+            $('#coRegionBox').style.display = mode === 'region' ? '' : 'none';
+            $('#coProteinBox').style.display = mode === 'protein' ? '' : 'none';
+            checkORF();
+          } else if (t.id === 'coFrom' || t.id === 'coTo' || t.id === 'coRev') { checkORF(); refreshEnzymeHints(); }
+          else if (t.id === 'coPick') {
+            const v2 = t.value; if (!v2) return;
+            if (v2[0] === 'f') { const f = cdsFeatures[+v2.slice(1)]; setRange(f.start, f.end, f.strand === -1); }
+            else { const o = orfs[+v2.slice(1)]; setRange(o.start, o.end, o.strand === -1); }
+          }
+          else if (t.id === 'coAlgo') algoNote();
+          else if (t.id === 'coOrg') orgNote();
+          else if (t.closest('#coAvoid')) { avoid = new Set([...box.querySelectorAll('#coAvoid input:checked')].map(i => i.value)); }
+          else if (t.closest('#coAdd')) { add = new Set([...box.querySelectorAll('#coAdd input:checked')].map(i => i.value)); }
+        });
+        box.addEventListener('input', e => {
+          if (e.target.id === 'coAvoidQ') { avoid = new Set([...box.querySelectorAll('#coAvoid input:checked')].map(i => i.value).concat([...avoid])); mkList('coAvoid', avoid, e.target.value); }
+          else if (e.target.id === 'coAddQ') { add = new Set([...box.querySelectorAll('#coAdd input:checked')].map(i => i.value).concat([...add])); mkList('coAdd', add, e.target.value); }
+          else if (e.target.id === 'coProt') checkORF();
+        });
+        box.addEventListener('click', e => {
+          const av = e.target.closest('[data-avoid]');
+          if (av) { e.preventDefault(); avoid.add(av.dataset.avoid); mkList('coAvoid', avoid, val('coAvoidQ')); toast(`${av.dataset.avoid} added to the sites to remove`); return; }
+          const rm = e.target.closest('[data-rmp]');
+          if (rm) { preserve.splice(+rm.dataset.rmp, 1); refreshPreserve(); return; }
+          if (e.target.id === 'coAddSel') {
+            if (!selLen(d)) { toast('Select a region in the sequence first.'); return; }
+            preserve.push({ start: d.sel.start, end: d.sel.end || n, name: 'selection' }); refreshPreserve(); return;
+          }
+          if (e.target.id === 'coAddFeat') {
+            const fs = d.features;
+            if (!fs.length) { toast('This sequence has no features.'); return; }
+            // a small inline chooser avoids opening a second modal on top of this one
+            const cur = $('#coPresPick');
+            if (cur) { cur.remove(); return; }
+            const div = document.createElement('div');
+            div.id = 'coPresPick'; div.className = 'fraglist'; div.style.marginTop = '4px';
+            div.innerHTML = fs.map((f, i) => `<label><button class="ib" data-pf="${i}">${esc(f.name)}</button> <span style="color:var(--muted)">${fmt(f.start + 1)}–${fmt(f.end)}</span></label>`).join('');
+            e.target.parentElement.after(div);
+            div.addEventListener('click', ev => {
+              const b = ev.target.closest('[data-pf]'); if (!b) return;
+              const f = fs[+b.dataset.pf];
+              preserve.push({ start: f.start, end: f.end, name: f.name });
+              div.remove(); refreshPreserve();
+            });
+          }
+        });
+      }
+    });
+
+    function applyCodon() {
+      if (!result) return;
+      if (mode === 'protein') { toast('Use “Open as New Sequence” for a pasted protein.'); return; }
+      const a = parseInt(val('coFrom'), 10) - 1, b = parseInt(val('coTo'), 10);
+      const rev = $('#coRev').checked;
+      const repl = rev ? DNA.rc(result.seq) : result.seq;
+      if (b <= a) { toast('A region that wraps the origin cannot be replaced in place.'); return; }
+      const dd = D();
+      editSeq(dd, a, b - a, repl);
+      dd.features.push({ id: uid(), name: `optimised for ${result.organism.short}`, type: 'CDS', start: a, end: a + repl.length, strand: rev ? -1 : 1, color: '#9fd6b4', notes: `Codon-optimised, CAI ${result.after.cai.toFixed(3)}` });
+      commit(dd, `Codon-optimised ${fmt(result.changedCodons)} codons for ${result.organism.short}`);
+      closeDialog(); renderAll(true);
+      toast(`Replaced ${fmt(b - a)} bp with the optimised sequence`);
+    }
   }
 
   // ================================================================ primer design dialogs

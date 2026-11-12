@@ -23,8 +23,9 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | Enzymes | 효소 77종, 절단 횟수·위치·말단 형태(5′/3′/blunt), 원하는 효소를 골라 지도에 표시 |
 | Features | 추가·편집·삭제, 종류·색·방향 지정, 흔한 서열 자동 인식(T7, lac operator, loxP, His tag 등) |
 | Primers | 선택 영역으로 프라이머 만들기(위/아래 가닥), Tm(nearest-neighbor), GC%, 결합 위치(5′ 꼬리가 있으면 3′ 15 nt로 찾음) |
-| **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
-| **Tools** | **PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
+| **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
+| **Tools** | **코돈 최적화(8개 organism, 알고리즘 4종, 효소 사이트 추가/제거, 보존 영역) · 서열 비교(여러 플라스미드 정렬) · PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
+| **Compare** | **여러 서열을 한 화면에서 비교 · 원형은 회전·역상보까지 맞춰서 정렬 · 치환/삽입/결실을 색으로 표시 · 차이 있는 줄만 보기** |
 | **Alignment** | **.ab1 시퀀싱 결과를 서열에 정렬 · 양쪽 가닥 자동 판별 · 낮은 품질 끝부분 자동 제거 · 크로마토그램 표시 · 차이(치환/결실/삽입) 목록 · 여러 read 비교** |
 | Actions | 제한효소 절단 + 가상 아가로스 겔, 번역(6 frame), 역상보, 원점 변경, 원형/선형 전환 |
 | **인쇄** | **지도·feature 표·프라이머 표·제한효소 목록·전체 서열·정렬 결과를 골라서 인쇄하거나 PDF로 저장** |
@@ -44,6 +45,29 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 
 **시퀀싱 결과 정렬** — Tools → Align Sequencing Traces, 또는 .ab1 파일을 창에 끌어다 놓기. 기준 서열에 맞춰 양쪽 가닥을 다 시도하고, 품질 낮은 끝을 자른 뒤 정렬해서 차이를 모두 표시합니다.
 
+**Golden Gate** — Cloning → Golden Gate. 효소(BsaI 등)를 고르면 각 part의 사이트 개수와 생기는 overhang을 보여줍니다. part는 사이트가 **정확히 2개**여야 하고, 더 있으면 "part 안에 사이트가 있다"고 빨간 글씨로 알려줍니다(먼저 코돈 최적화로 없애면 됩니다). 조립이 끝난 산물에는 그 효소 사이트가 남지 않는데, 이것도 결과 표에서 확인할 수 있습니다.
+
+**서열 비교** — Tools → Compare Sequences. 맨 처음 고른 서열이 기준이 되고 나머지가 거기에 맞춰집니다. 원형 플라스미드는 origin이 달라도, 심지어 역상보로 저장돼 있어도 알아서 맞춥니다. 같은 자리는 점으로, 다른 자리는 색으로 표시합니다.
+
+**코돈 최적화** — Tools → Codon Optimisation. 순서대로 정하시면 됩니다.
+
+1. **무엇을 최적화할지**: 열려 있는 서열의 한 구간, 또는 붙여넣은 단백질 서열
+2. **ORF 확인**: `Use` 드롭다운에서 CDS feature나 자동으로 찾은 ORF를 고르면 범위가 정확히 들어갑니다. 바로 아래에 `✓ Valid reading frame — 287 codons…`처럼 확인 결과가 나오고, 길이가 3의 배수가 아니거나 중간에 종결코돈이 있으면 무엇이 문제인지 알려줍니다
+3. **Organism**: 8종 중 선택. 각 표가 어떤 데이터로 만들어졌는지 함께 표시됩니다
+4. **알고리즘**: 4종 중 선택, 각각 언제 쓰는지 설명이 따라붙습니다
+5. **효소 사이트**: 없앨 사이트와 **넣을** 사이트를 각각 고릅니다. 지금 그 구간에 들어 있는 사이트는 목록으로 보여주고, 클릭하면 바로 "없앨 목록"에 들어갑니다
+6. **보존 영역**: 건드리면 안 되는 구간(선택 영역이나 feature)을 추가하면 그 안의 코돈은 그대로 둡니다
+7. 결과로 CAI·GC·GC3·최장 반복·사이트 수가 **전후 비교**로 나오고, 원래 자리에 바꿔 넣거나 새 탭으로 열 수 있습니다
+
+알고리즘 4종:
+
+| 이름 | 내용 |
+|---|---|
+| Most frequent codon | 항상 그 organism에서 가장 흔한 코돈. CAI가 가장 높지만 같은 코돈이 반복되고 GC가 치우칠 수 있음 |
+| Frequency sampling, rare codons dropped | 기준치(기본 10%) 아래 희귀 코돈을 뺀 뒤 자연 빈도대로 섞음. 일반적인 발현용 기본값 |
+| Frequency sampling | 자연 빈도 그대로 섞음 |
+| Harmonised to the source organism | 원래 organism에서의 희귀/흔함 정도를 목표 organism에서도 비슷하게 맞춤. 번역 속도 리듬이 folding에 중요할 때 |
+
 ## 직접 빌드하기
 
 ```bash
@@ -60,11 +84,28 @@ preload.js      화면에서 쓰는 window.gcHost API
 app/index.html  화면 틀
 app/style.css   스타일
 app/dna.js      DNA 로직 (효소, 번역, Tm, ORF, 파일 형식)
-app/clone.js    클로닝 (제한효소 ligation, Gibson, Gateway)
+app/clone.js    클로닝 (제한효소 ligation, Golden Gate, Gibson, Gateway)
 app/trace.js    .ab1 읽기와 서열 정렬
 app/primer.js   프라이머 설계
+app/msa.js      여러 서열 비교 (앵커 기반 정렬)
+app/codon.js    코돈 최적화
+app/codon-tables.js  코돈 사용표 (자동 생성 파일)
 app/app.js      화면과 상호작용
+tools/build-codon-tables.js  NCBI CDS에서 코돈 사용표를 다시 만드는 스크립트
 ```
+
+## 코돈 사용표에 대하여
+
+`app/codon-tables.js`는 **실제 NCBI 코딩 서열에서 직접 계산한 값**입니다. 손으로 적은 숫자가 아닙니다.
+
+| Organism | 출처 |
+|---|---|
+| Escherichia coli K-12 | 유전체 NC_000913.3의 전체 CDS (4,269개 유전자, 1,328,211 코돈) |
+| Homo sapiens / Mus musculus | RefSeq Select (유전자당 대표 전사체 1개) 598개 |
+| S. cerevisiae, CHO, P. pastoris, Drosophila, Arabidopsis | RefSeq mRNA 481~600개 |
+
+시작·종결 코돈은 선택의 여지가 없으므로 집계에서 뺐고, 길이가 3의 배수가 아니거나 중간에 종결코돈이 있는 불완전한 기록도 제외했습니다.
+다시 만들려면 `node tools/build-codon-tables.js`를 실행하면 됩니다(인터넷 필요, 몇 분 소요).
 
 ## 알아두실 점
 

@@ -235,3 +235,14 @@ svg.chroma { display: block; }
 .pch .btn { margin-left: auto; }
 .form .row2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .form .row2 input[type=number], .form .row2 input[type=text] { width: 80px; flex: none; }
+
+/* ---------- Compare view ---------- */
+.crow { position: relative; border-bottom: 1px solid #eef0f3; padding-bottom: 4px; }
+.crow .num { position: absolute; width: 56px; text-align: right; color: var(--faint); font: 11px/17px var(--f-mono); }
+.crow .cname { position: absolute; left: 4px; color: var(--muted); font: 11px/17px var(--f-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crow .nt { position: absolute; white-space: pre; font: 13px/17px var(--f-mono); color: var(--ink); }
+.crow .nt.alt { color: #46506080; }
+.crow .nt .s { color: #c3c9d3; }
+.crow .nt .m { background: #ffd9d6; color: var(--danger); font-weight: 700; }
+.crow .nt .d { background: #e3e6eb; color: var(--faint); }
+.crow .nt .i { background: #d8f0d8; color: #1a7f37; font-weight: 700; }

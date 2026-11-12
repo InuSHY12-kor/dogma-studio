@@ -223,6 +223,57 @@
     return uniq;
   }
 
+  // ---------------------------------------------------------------- Golden Gate
+  // Type IIS enzymes cut outside their own site, so the piece between two inward-facing
+  // sites keeps no site of its own. That piece is what each part contributes.
+  const TYPE2S = ['BsaI', 'BsmBI', 'BbsI', 'SapI'];
+
+  function hasSite(seq, enzyme) {
+    const e = DNA.ENZ_BY_NAME[enzyme];
+    return DNA.searchDNA(seq, false, e.site).length > 0;
+  }
+  // The fragments of one part that carry no recognition site and have two cut ends.
+  function ggFragments(doc, enzyme) {
+    const sites = DNA.findSites(doc.seq, doc.circular);
+    const frags = cut(doc, sites, [enzyme]);
+    return frags.filter(f => f.left.type !== 'o' && f.right.type !== 'o' && !hasSite(f.seq, enzyme));
+  }
+
+  function goldenGate(parts, enzyme, opts = {}) {
+    if (!DNA.ENZ_BY_NAME[enzyme]) throw new Error(`Unknown enzyme ${enzyme}.`);
+    const chosen = [], notes = [], undomesticated = [];
+    for (const p of parts) {
+      const doc = p.doc || p;
+      const n = (DNA.findSites(doc.seq, doc.circular)[enzyme] || []).length;
+      const all = ggFragments(doc, enzyme);
+      if (!all.length) {
+        throw new Error(n < 2
+          ? `“${doc.name}” has ${n} ${enzyme} site${n === 1 ? '' : 's'}. A Golden Gate part needs two, pointing inward.`
+          : `“${doc.name}” has ${enzyme} sites, but none of its fragments is free of them. Check that the sites point inward.`);
+      }
+      // A part is meant to carry exactly the two flanking sites. Any more sit inside it
+      // and will be cut during the reaction, so they have to be removed first.
+      if (n > 2) {
+        undomesticated.push({ name: doc.name, sites: n });
+        notes.push(`“${doc.name}” has ${n} ${enzyme} sites, so ${n - 2} lie inside the part. Remove them with codon optimisation before assembling.`);
+      }
+      const pick = p.fragment != null ? all[p.fragment] : all.slice().sort((a, b) => b.size - a.size)[0];
+      if (!pick) throw new Error(`“${doc.name}” has no usable fragment.`);
+      if (all.length > 1) notes.push(`“${doc.name}” gave ${all.length} site-free fragments; the ${fmtbp(pick.size)} one was used.`);
+      chosen.push(pick);
+    }
+    // Every junction must use a different overhang, or the order is ambiguous.
+    const ends = chosen.map(f => f.right.x);
+    const dupes = ends.filter((x, i) => ends.indexOf(x) !== i);
+    const products = ligate(chosen, { name: opts.name || 'Golden Gate product' });
+    for (const pr of products) {
+      pr.leftover = DNA.searchDNA(pr.doc.seq, true, DNA.ENZ_BY_NAME[enzyme].site).length;
+      pr.overhangs = pr.chain.map(f => f.right.x);
+    }
+    return { products, parts: chosen, notes, duplicateOverhangs: [...new Set(dupes)], undomesticated, enzyme };
+  }
+  function fmtbp(n) { return n.toLocaleString('en-US') + ' bp'; }
+
   // ---------------------------------------------------------------- Gateway
   // Recombination happens inside a 7 bp core. att1 sites carry TTTGTAC, att2 sites carry the
   // same core in the opposite orientation, so both molecules are cut in the core and swapped.
@@ -293,5 +344,5 @@
     };
   }
 
-  root.CLONE = { cut, ligate, gibson, gateway, findAtt, attSplit, endLabel, sameEnd, Assembly, canonicalCircle, overlapLen, ATT_B };
+  root.CLONE = { cut, ligate, gibson, gateway, findAtt, attSplit, endLabel, sameEnd, Assembly, canonicalCircle, overlapLen, ATT_B, goldenGate, ggFragments, TYPE2S, hasSite };
 })(typeof window !== 'undefined' ? window : globalThis);
