@@ -67,6 +67,7 @@ svg .prim { cursor: pointer; }
         return { id: uid(), name: f.name || f.type, type: f.type || 'misc_feature', start: Math.max(0, Math.min(n, f.start)), end: Math.max(0, Math.min(n, f.end)), strand: f.strand === undefined ? 1 : f.strand, color, notes: f.notes || '' };
       }),
       primers: (src.primers || []).map(p => ({ id: uid(), name: p.name, seq: DNA.clean(p.seq), notes: p.notes || '' })),
+      provenance: src.provenance || null,
       opts: Object.assign(defaultOpts(!!src.circular), SET.mapView || {}, SET.baseColors ? { baseColors: { ...SET.baseColors } } : {}), chosen: [], sel: { start: 0, end: 0 }, anchor: 0, alignments: [], designed: [],
       hist: [], hi: -1, ver: 0, cache: null, dirty: false, path: src.path || null
     };
@@ -1392,7 +1393,85 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ HISTORY
+  // ---------------------------------------------------------------- construction history
+  // A small picture of a sequence, used in the tree so each piece is recognisable.
+  function miniMap(src, W, H) {
+    const n = src.seq ? src.seq.length : (src.length || 0);
+    if (!n) return '';
+    const feats = (src.features || []).filter(f => f.end !== f.start);
+    if (src.circular) {
+      const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 10;
+      const P = (r, a) => `${(cx + r * Math.cos(a - Math.PI / 2)).toFixed(1)},${(cy + r * Math.sin(a - Math.PI / 2)).toFixed(1)}`;
+      const arcs = feats.map(f => {
+        const a1 = f.start / n * TAU, span = Math.max(0.03, DNA.rlen(f, n) / n * TAU), a2 = a1 + span;
+        const lg = span > Math.PI ? 1 : 0;
+        return `<path d="M${P(R + 4, a1)} A${R + 4},${R + 4} 0 ${lg} 1 ${P(R + 4, a2)} L${P(R - 4, a2)} A${R - 4},${R - 4} 0 ${lg} 0 ${P(R - 4, a1)} Z" fill="${f.color || '#c9ced6'}" stroke="rgba(0,0,0,.25)" stroke-width=".6"><title>${esc(f.name)}</title></path>`;
+      }).join('');
+      return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#2f3644" stroke-width="1.6"/>${arcs}</svg>`;
+    }
+    const m = 8, w = W - 2 * m, y = H / 2;
+    const boxes = feats.map(f => {
+      const x1 = m + f.start / n * w, x2 = m + Math.min(n, f.end) / n * w;
+      return `<rect x="${x1.toFixed(1)}" y="${y - 5}" width="${Math.max(1.5, x2 - x1).toFixed(1)}" height="10" fill="${f.color || '#c9ced6'}" stroke="rgba(0,0,0,.25)" stroke-width=".6"><title>${esc(f.name)}</title></rect>`;
+    }).join('');
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><line x1="${m}" y1="${y}" x2="${m + w}" y2="${y}" stroke="#2f3644" stroke-width="1.6"/>${boxes}</svg>`;
+  }
+
+  function provCard(node, depth) {
+    const sizeTxt = `${fmt((node.seq || '').length)} bp`;
+    const kids = node.source ? [node.source] : [];
+    return `<div class="pvnode">
+      <div class="pvcard" data-pv="${esc(node.uid)}">
+        <div class="pvmap">${miniMap(node, 150, node.circular ? 86 : 44)}</div>
+        <div class="pvname">${esc(node.name)}</div>
+        <div class="pvsize">${sizeTxt}${node.circular ? ' · circular' : ''}</div>
+        ${node.features && node.features.length ? `<div class="pvfeat">${node.features.slice(0, 4).map(f => esc(f.name)).join(', ')}${node.features.length > 4 ? ` +${node.features.length - 4}` : ''}</div>` : ''}
+        <button class="btn pvopen" data-open="${esc(node.uid)}">Open</button>
+      </div>
+      ${kids.map(k => `<div class="pvstep"><span class="pvmethod">${esc(k.method)}</span>${k.detail ? `<span class="pvdetail">${esc(k.detail)}</span>` : ''}${k.primers && k.primers.length ? `<span class="pvprimers">${k.primers.map(esc).join(' · ')}</span>` : ''}</div>
+        <div class="pvrow">${(k.inputs || []).map(c => provCard(c, depth + 1)).join('')}</div>`).join('')}
+    </div>`;
+  }
+
+  // Walks the stored tree and gives every node an id so its Open button can find it.
+  function tagProv(node, seen) {
+    node.uid = 'p' + (seen.n++);
+    seen.map[node.uid] = node;
+    if (node.source) for (const c of (node.source.inputs || [])) tagProv(c, seen);
+    return node;
+  }
+
   function renderHistory() {
+    const d = D();
+    if (S.histTab === undefined) S.histTab = d.provenance ? 'tree' : 'edits';
+    const v = $('#view');
+    const tabBar = `<div class="ptools">
+      <div class="seg" style="width:260px"><button data-ht="tree" class="${S.histTab === 'tree' ? 'on' : ''}">How it was made</button><button data-ht="edits" class="${S.histTab === 'edits' ? 'on' : ''}">Edits (${d.hist.length})</button></div>
+      <span class="note">${d.provenance ? esc(d.provenance.method) : 'No construction record — this sequence was opened rather than assembled here.'}</span></div>`;
+    if (S.histTab === 'tree') {
+      if (!d.provenance) {
+        v.innerHTML = `<div class="panel">${tabBar}<div class="empty"><h2>No construction record</h2><p>When a sequence is built here by restriction cloning, Gibson or Golden Gate assembly, Gateway recombination or codon optimisation, this view shows what it was made from: the method, the pieces, the primers, and the sequence of each piece.</p></div></div>`;
+      } else {
+        const seen = { n: 0, map: {} };
+        const root = tagProv(JSON.parse(JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, source: d.provenance })), seen);
+        v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll"><div class="pvtree">${provCard(root, 0)}</div></div></div>`;
+        v.querySelector('.pvtree').onclick = e => {
+          const b = e.target.closest('[data-open]'); if (!b) return;
+          const node = seen.map[b.dataset.open];
+          if (!node || !node.seq) return;
+          addDoc({ name: node.name, seq: node.seq, circular: !!node.circular, features: node.features || [], primers: [], histLabel: 'Opened from the construction history' });
+        };
+      }
+    } else {
+      const t = dt => new Date(dt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll">
+        ${d.hist.map((h, i) => ({ h, i })).reverse().map(({ h, i }) => `<div class="hist-item${i === d.hi ? ' on' : ''}${i > d.hi ? ' future' : ''}" data-h="${i}"><span class="t">${t(h.t)}</span><span>${esc(h.label)}</span><span class="len">${fmt(h.len)} bp</span></div>`).join('')}</div></div>`;
+      v.querySelector('.tscroll').onclick = e => { const it = e.target.closest('[data-h]'); if (!it) return; restore(d, +it.dataset.h); renderAll(); };
+    }
+    v.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-ht]'); if (!b) return; S.histTab = b.dataset.ht; renderView(); };
+  }
+
+  function oldRenderHistory() {
     const d = D(), v = $('#view');
     const t = dt => dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     v.innerHTML = `<div class="panel"><div class="ptools"><span class="note">Click any step to return the sequence to that state. Later steps stay available until you make a new change.</span></div><div class="tscroll">
@@ -1908,6 +1987,20 @@ svg .prim { cursor: pointer; }
     };
   }
 
+  // A record of one piece that went into a construct, kept with its own sequence so the
+  // history stands on its own even after the parent file is closed.
+  function pieceOfFrag(f, detail) {
+    return {
+      name: `${f.doc.name} ${f.lenz}–${f.renz} fragment`, seq: f.seq, circular: false,
+      features: f.doc.features.filter(x => {
+        const n = f.doc.seq.length, rs = ((x.start - f.start) % n + n) % n;
+        return rs + DNA.rlen(x, n) <= f.size;
+      }).map(x => { const n = f.doc.seq.length; const rs = ((x.start - f.start) % n + n) % n; return { ...x, start: rs, end: rs + DNA.rlen(x, n) }; }),
+      detail,
+      source: { method: 'Cut from ' + f.doc.name, detail: `${f.lenz} (${fmt(f.start + 1)}) – ${f.renz} (${fmt(f.end)})`, inputs: [{ name: f.doc.name, seq: f.doc.seq, circular: f.doc.circular, features: f.doc.features }] }
+    };
+  }
+
   // ================================================================ cloning dialogs
   function docOptions(sel) { return S.docs.map((x, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(x.name)} (${fmt(x.seq.length)} bp, ${x.circular ? 'circular' : 'linear'})</option>`).join(''); }
   function cutters(doc) {
@@ -1978,7 +2071,14 @@ svg .prim { cursor: pointer; }
           const b = e.target.closest('[data-mk]'); if (!b) return;
           const p = products[+b.dataset.mk];
           closeDialog();
-          addDoc({ ...p.doc, histLabel: `Ligated ${S.docs[vi].name} with ${S.docs[ii].name}` });
+          addDoc({
+            ...p.doc, histLabel: `Ligated ${S.docs[vi].name} with ${S.docs[ii].name}`,
+            provenance: {
+              method: 'Restriction ligation',
+              detail: p.junctions.join('  ·  '),
+              inputs: p.chain.map((f, k) => pieceOfFrag(f.rev ? { ...f, seq: f.seq } : f, k === 0 ? 'Backbone' : 'Insert' + (f.rev ? ', flipped' : '')))
+            }
+          });
           toast(`Created ${fmt(p.size)} bp construct`);
         });
       }
@@ -1986,7 +2086,7 @@ svg .prim { cursor: pointer; }
   }
 
   function dlgGibson() {
-    let picked = S.docs.map((_, i) => i === S.active), results = [];
+    let picked = S.docs.map((_, i) => i === S.active), results = [], idxUsed = [];
     const pieceOf = i => {
       const d = S.docs[i];
       const useSel = d.circular && selLen(d) > 0 && i === S.active;
@@ -1999,6 +2099,7 @@ svg .prim { cursor: pointer; }
       if (idx.length > 6) { $('#gbres').innerHTML = '<div class="err">Choose at most six pieces.</div>'; return; }
       const min = Math.max(10, Math.min(80, parseInt(val('gbov'), 10) || 20));
       const pieces = idx.map(pieceOf);
+      idxUsed = idx;
       results = CLONE.gibson(pieces, { minOverlap: min, name: 'Assembled construct' });
       if (!results.length) {
         $('#gbres').innerHTML = `<div class="err">These pieces do not share ends of at least ${min} bp, so they cannot be assembled. Gibson assembly needs each piece to end in the same sequence that the next piece begins with — usually added as primer tails.</div>`;
@@ -2019,7 +2120,19 @@ svg .prim { cursor: pointer; }
         box.addEventListener('click', e => {
           const b = e.target.closest('[data-mk]'); if (!b) return;
           const r = results[+b.dataset.mk];
-          closeDialog(); addDoc({ ...r.doc, histLabel: 'Assembled from ' + r.junctions.length + ' pieces' });
+          closeDialog();
+          addDoc({
+            ...r.doc, histLabel: 'Assembled from ' + r.junctions.length + ' pieces',
+            provenance: {
+              method: 'Gibson / overlap assembly',
+              detail: r.junctions.map(j => `${j.from} → ${j.to}: ${j.len} bp overlap`).join('  ·  '),
+              inputs: idxUsed.map(i => {
+                const pc = pieceOf(i);
+                return { name: pc.name, seq: pc.seq, circular: false, features: [], detail: 'Overlap and insert 1..' + pc.seq.length,
+                  source: { method: 'From ' + pc.doc.name, detail: `${fmt(pc.start + 1)}..${fmt(pc.end)}`, inputs: [{ name: pc.doc.name, seq: pc.doc.seq, circular: pc.doc.circular, features: pc.doc.features }] } };
+              })
+            }
+          });
           toast(`Created ${fmt(r.size)} bp construct`);
         });
       }
@@ -2073,7 +2186,19 @@ svg .prim { cursor: pointer; }
         box.addEventListener('click', e => {
           const b = e.target.closest('[data-mk]'); if (!b || !res) return;
           const p = b.dataset.mk === 'p' ? res.product : res.byproduct;
-          closeDialog(); addDoc({ ...p, histLabel: 'Gateway recombination' });
+          const don = S.docs[di], acc = S.docs[ai];
+          closeDialog();
+          addDoc({
+            ...p, histLabel: 'Gateway recombination',
+            provenance: {
+              method: 'Gateway recombination',
+              detail: `Junctions read as ${res.junctions.join(' and ')}; ${fmt(res.insertSize)} bp transferred`,
+              inputs: [
+                { name: don.name, seq: don.seq, circular: don.circular, features: don.features, detail: 'Insert donor' },
+                { name: acc.name, seq: acc.seq, circular: acc.circular, features: acc.features, detail: 'Backbone' }
+              ]
+            }
+          });
           toast(`Created ${fmt(p.seq.length)} bp construct`);
         });
       }
@@ -2143,7 +2268,15 @@ svg .prim { cursor: pointer; }
         box.addEventListener('click', e => {
           const b = e.target.closest('[data-mk]'); if (!b || !result) return;
           const p = result.products[+b.dataset.mk];
-          closeDialog(); addDoc({ ...p.doc, histLabel: `Golden Gate with ${enzyme}` });
+          closeDialog();
+          addDoc({
+            ...p.doc, histLabel: `Golden Gate with ${enzyme}`,
+            provenance: {
+              method: `Golden Gate assembly (${enzyme})`,
+              detail: 'Junction overhangs ' + p.overhangs.join(' · '),
+              inputs: p.chain.map(f => pieceOfFrag(f, `Overhangs ${f.left.x} … ${f.right.x}`))
+            }
+          });
           toast(`Created ${fmt(p.size)} bp construct`);
         });
       }
@@ -2400,7 +2533,21 @@ svg .prim { cursor: pointer; }
       buttons: [
         { label: 'Close' },
         { label: 'Copy', id: 'coCopy', disabled: true, act: () => { if (result) copyText(result.seq, 'Copied optimised sequence'); return false; } },
-        { label: 'Open as New Sequence', id: 'coOpen', disabled: true, act: () => { if (!result) return false; closeDialog(); addDoc({ name: (mode === 'protein' ? 'optimised' : d.name + '-opt'), seq: result.seq, circular: false, features: [{ name: 'optimised CDS', type: 'CDS', start: 0, end: result.seq.length, strand: 1 }], primers: [], histLabel: `Codon-optimised for ${result.organism.short}` }); } },
+        { label: 'Open as New Sequence', id: 'coOpen', disabled: true, act: () => {
+          if (!result) return false;
+          const srcSeq = mode === 'protein' ? '' : regionSeq();
+          closeDialog();
+          addDoc({
+            name: (mode === 'protein' ? 'optimised' : d.name + '-opt'), seq: result.seq, circular: false,
+            features: [{ name: 'optimised CDS', type: 'CDS', start: 0, end: result.seq.length, strand: 1 }], primers: [],
+            histLabel: `Codon-optimised for ${result.organism.short}`,
+            provenance: {
+              method: `Codon optimisation for ${result.organism.name}`,
+              detail: `${result.algorithm} · ${fmt(result.changedCodons)} of ${fmt(result.totalCodons)} codons changed · CAI ${result.before.cai.toFixed(3)} → ${result.after.cai.toFixed(3)}`,
+              inputs: srcSeq ? [{ name: d.name + ' (source region)', seq: srcSeq, circular: false, features: [], detail: `${val('coFrom')}..${val('coTo')}` }] : []
+            }
+          });
+        } },
         { label: 'Replace in Sequence', id: 'coApply', disabled: true, act: () => { applyCodon(); return false; } },
         { label: 'Optimise', primary: true, act: () => { run(); return false; } }
       ],

@@ -458,6 +458,23 @@ ZraI GACGTC 3 3`;
   }
 
   // ---------- File formats ----------
+  const HIST_TAG = 'GeneCanvas-History-v1';
+  function b64encode(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return typeof btoa === 'function' ? btoa(bin) : Buffer.from(bytes).toString('base64');
+  }
+  function b64decode(b64) {
+    if (typeof atob === 'function') {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    }
+    return Buffer.from(b64, 'base64').toString('utf8');
+  }
+
   function parseLocation(loc, n, circular) {
     const strand = /complement/.test(loc) ? -1 : 1;
     const ranges = [];
@@ -485,10 +502,16 @@ ZraI GACGTC 3 3`;
   function parseGenBank(txt) {
     const lines = txt.split(/\r?\n/);
     let name = 'Untitled', circular = false, mode = '', seq = '', cur = null, lastQ = null, definition = '';
+    let histLines = null;
     const raw = [];
     for (const ln of lines) {
       if (ln.startsWith('LOCUS')) { const t = ln.split(/\s+/); name = t[1] || name; circular = /\bcircular\b/i.test(ln); continue; }
-      if (ln.startsWith('DEFINITION')) { definition = ln.slice(12).trim(); continue; }
+      if (ln.startsWith('DEFINITION')) { definition = ln.slice(12).trim(); mode = ''; continue; }
+      if (ln.startsWith('COMMENT')) { mode = 'C'; if (ln.slice(12).trim() === HIST_TAG) histLines = []; continue; }
+      if (mode === 'C') {
+        if (/^\s/.test(ln)) { if (histLines) histLines.push(ln.trim()); continue; }
+        mode = ''; // a new top-level key ends the comment
+      }
       if (ln.startsWith('FEATURES')) { mode = 'F'; continue; }
       if (ln.startsWith('ORIGIN')) { mode = 'O'; continue; }
       if (ln.startsWith('//')) break;
@@ -517,7 +540,11 @@ ZraI GACGTC 3 3`;
       if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) color = null;
       features.push({ name: fname.slice(0, 80), type: f.type, start: loc.start, end: loc.end, strand: loc.strand, color, notes: f.q.note || '' });
     }
-    return { name, seq, circular, features, primers, definition };
+    let provenance = null;
+    if (histLines && histLines.length) {
+      try { provenance = JSON.parse(b64decode(histLines.join(''))); } catch (e) { provenance = null; }
+    }
+    return { name, seq, circular, features, primers, definition, provenance };
   }
 
   function parseFASTA(txt) {
@@ -609,6 +636,12 @@ ZraI GACGTC 3 3`;
     const nm = d.name.replace(/\s+/g, '_').slice(0, 16);
     let s = `LOCUS       ${nm.padEnd(16)} ${String(n).padStart(11)} bp    DNA     ${d.circular ? 'circular' : 'linear  '} SYN ${date}\n`;
     s += `DEFINITION  ${d.name}.\nACCESSION   .\nVERSION     .\nKEYWORDS    GeneCanvas\nSOURCE      synthetic DNA construct\n  ORGANISM  synthetic DNA construct\n`;
+    if (d.provenance) {
+      // Base64 keeps the record on simple ASCII lines that any GenBank reader will skip.
+      const enc = b64encode(JSON.stringify(d.provenance));
+      s += 'COMMENT     ' + HIST_TAG + '\n';
+      for (let i = 0; i < enc.length; i += 68) s += '            ' + enc.slice(i, i + 68) + '\n';
+    }
     s += `FEATURES             Location/Qualifiers\n`;
     s += `     source          1..${n}\n${wrapQual('mol_type', 'other DNA')}\n`;
     const feats = [...d.features];

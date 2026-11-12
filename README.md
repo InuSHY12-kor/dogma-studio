@@ -26,6 +26,8 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
 | **Tools** | **코돈 최적화(8개 organism, 알고리즘 4종, 효소 사이트 추가/제거, 보존 영역) · 서열 비교(여러 플라스미드 정렬) · PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
 | **Compare** | **여러 서열을 한 화면에서 비교 · 원형은 회전·역상보까지 맞춰서 정렬 · 치환/삽입/결실을 색으로 표시 · 차이 있는 줄만 보기** |
+| **Enzymes** | 효소 **203종** · 한 화면에 다 보이는 선택 창 · **나만의 효소 세트 저장**(파일이 아니라 프로그램에 저장돼서 모든 파일에 적용) · 효소/Feature 데이터베이스 열람과 CSV 내보내기 |
+| **Gel** | **아가로스 젤을 별도 탭 문서로** · 0.5~3.0% · TAE/TBE · running 정도 조절 · ladder 15종(NEB, Thermo, Invitrogen, Promega, λ, φX) + **직접 입력한 ladder 저장** · lane 1~20개(개수만큼 젤이 넓어짐) |
 | **Analyze** | **프라이머 구조(헤어핀·self dimer·cross dimer를 ΔG와 그림으로) · RNA 2차 구조(arc 다이어그램, dot-bracket, stem 목록) · 단백질 성질(분자량·pI·흡광계수·hydropathy·전하 곡선·조성) · 외부 구조 예측 툴 연결** |
 | **Alignment** | **.ab1 시퀀싱 결과를 서열에 정렬 · 양쪽 가닥 자동 판별 · 낮은 품질 끝부분 자동 제거 · 크로마토그램 표시 · 차이(치환/결실/삽입) 목록 · 여러 read 비교** |
 | Actions | 제한효소 절단 + 가상 아가로스 겔, 번역(6 frame), 역상보, 원점 변경, 원형/선형 전환 |
@@ -33,6 +35,15 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | History | 모든 변경 기록, 원하는 단계로 되돌리기, Undo/Redo |
 
 ## 기능별 사용법
+
+**효소 세트 저장** — Map/Sequence 탭 왼쪽의 `Choose Enzymes…`, 또는 Analyze → Choose Enzymes. 한 화면에 모든 효소가 보이고 각각 몇 번 자르는지 숫자가 붙습니다. 체크한 뒤 `Save as my set…`으로 이름을 주면 저장되고, **다른 파일을 열어도 그 세트가 그대로 목록에 나옵니다**. 서열에서 자동으로 계산되는 세트(unique cutter, 6+ cutter, Type IIS, blunt 등)도 함께 제공합니다.
+
+**아가로스 젤** — Analyze → New Agarose Gel. 새 탭으로 열립니다. 젤 농도, 버퍼(TAE/TBE), running 정도, lane 개수(1~20)를 고르면 lane 수에 맞춰 젤이 넓어집니다. 각 lane에 ladder나 열려 있는 서열을 넣고, 서열 lane은 `Cut with` 단추로 효소를 골라 digest할 수 있습니다. `Add a ladder…`로 원하는 brand의 band 크기를 직접 입력해 저장하면 그 ladder도 목록에 추가됩니다(`3000*`처럼 별표를 붙이면 진한 기준 band).
+
+**Map 보기 패널** — Map 탭 오른쪽 세로 패널에서 Feature/Primer/효소/ORF 표시를 켜고 끄고, Feature 라벨을 화살표 안쪽/바깥쪽으로 바꾸고, Feature를 backbone 선 위에 붙이고, 눈금자를 끄고, 염기 색을 바꿀 수 있습니다. 염기 색도 프로그램에 저장돼 모든 파일에 적용됩니다.
+
+**제작 이력(History)** — History 탭의 `How it was made`. 이 벡터가 **어떤 기법으로, 어떤 조각이 합쳐져서** 만들어졌는지 트리로 보여줍니다. 각 조각은 미니맵과 크기가 함께 나오고, `Open`을 누르면 그 조각의 **서열이 그대로 새 탭으로 열립니다**. 제한효소 클로닝, Gibson, Golden Gate, Gateway, 코돈 최적화로 만든 결과에 자동으로 기록되며, **GenBank로 저장해도 서열까지 남습니다**(COMMENT에 보관).
+
 
 **NCBI에서 받기** — `Ctrl+D` 또는 툴바의 NCBI 단추. accession 번호를 넣고 Download, 또는 단어를 넣고 Search 후 목록에서 Open.
 
@@ -106,6 +117,7 @@ app/primer.js   프라이머 설계
 app/msa.js      여러 서열 비교 (앵커 기반 정렬)
 app/codon.js    코돈 최적화
 app/struct.js   프라이머 구조, RNA 접기, 단백질 성질
+app/gel.js      아가로스 젤 이동 모델과 ladder 데이터
 app/codon-tables.js  코돈 사용표 (자동 생성 파일)
 app/app.js      화면과 상호작용
 tools/build-codon-tables.js  NCBI CDS에서 코돈 사용표를 다시 만드는 스크립트
