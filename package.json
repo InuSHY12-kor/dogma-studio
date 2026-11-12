@@ -1,0 +1,58 @@
+{
+  "name": "genecanvas",
+  "productName": "GeneCanvas",
+  "version": "0.1.0",
+  "description": "Desktop plasmid and DNA sequence editor: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
+  "main": "main.js",
+  "author": "GeneCanvas",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --x64",
+    "dist:dir": "electron-builder --win --x64 --dir"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "app.genecanvas.desktop",
+    "productName": "GeneCanvas",
+    "copyright": "GeneCanvas",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GeneCanvas",
+      "artifactName": "GeneCanvas-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "GeneCanvas-${version}-portable.${ext}"
+    },
+    "fileAssociations": [
+      { "ext": ["gb", "gbk", "genbank"], "name": "GenBank file", "description": "GenBank DNA sequence" },
+      { "ext": "dna", "name": "DNA sequence file", "description": "DNA sequence file" },
+      { "ext": ["fa", "fasta"], "name": "FASTA file", "description": "FASTA sequence" }
+    ]
+  }
+}
