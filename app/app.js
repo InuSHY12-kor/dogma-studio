@@ -1,7 +1,7 @@
 /* GeneCanvas — application UI */
 (function () {
   'use strict';
-  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON;
+  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON, STRUCT = window.STRUCT;
   const host = window.gcHost || null; // provided by the Electron preload; null in a plain browser
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -388,6 +388,14 @@ svg .prim { cursor: pointer; }
         { label: 'Align Sequencing Traces…', dis: !has, act: openTraces },
         { label: 'Show Alignments', dis: !has, act: () => setView('align') },
         { label: 'Remove All Alignments', dis: !has || !d.alignments.length, act: () => { d.alignments = []; toast('Alignments removed'); renderAll(); } }
+      ] },
+      { label: 'Analyze', items: [
+        { label: 'Primer Structures…', dis: !has || !d.primers.length, act: () => dlgPrimerStruct(null, null) },
+        { label: 'RNA Secondary Structure…', dis: !has, act: dlgRNA },
+        { label: 'Protein Properties…', dis: !has, act: dlgProtein },
+        '-',
+        { label: 'Restriction Digest & Gel…', dis: !has, act: dlgDigest },
+        { label: 'Translate Selection…', dis: !sl, act: dlgTranslate }
       ] },
       { label: 'Actions', items: [
         { label: 'Restriction Digest & Gel…', dis: !has, act: dlgDigest },
@@ -1238,15 +1246,17 @@ svg .prim { cursor: pointer; }
   // ================================================================ PRIMERS TABLE
   function renderPrimers() {
     const d = D(), A = analyze(d), v = $('#view');
-    v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="padd">Add Primer…</button><button class="btn" id="ptop" ${selLen(d) ? '' : 'disabled'}>From Selection (Top)</button><button class="btn" id="pbot" ${selLen(d) ? '' : 'disabled'}>From Selection (Bottom)</button><span class="note">Tm: nearest-neighbour, 50 mM Na⁺, 250 nM primer</span></div>
+    v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="padd">Add Primer…</button><button class="btn" id="ptop" ${selLen(d) ? '' : 'disabled'}>From Selection (Top)</button><button class="btn" id="pbot" ${selLen(d) ? '' : 'disabled'}>From Selection (Bottom)</button><button class="btn" id="pstruct" ${d.primers.length ? '' : 'disabled'}>Structures…</button><span class="note">Tm: nearest-neighbour, 50 mM Na⁺, 250 nM primer</span></div>
       <div class="tscroll">${d.primers.length ? `<table class="grid"><thead><tr><th>Name</th><th>Sequence (5′→3′)</th><th>Length</th><th>Tm</th><th>GC</th><th>Binding sites</th><th></th></tr></thead><tbody>
-      ${d.primers.map(p => { const b = A.psites[p.id] || []; return `<tr data-p="${p.id}"><td><b>${esc(p.name)}</b></td><td class="mono wrap">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${DNA.gcPct(p.seq).toFixed(0)}%</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}${x.full ? '' : ' (3′ 15 nt)'}`).join('<br>') : '<span style="color:var(--danger)">does not bind</span>'}</td><td><button class="ib" data-ed="${p.id}">Edit</button><button class="ib dng" data-del="${p.id}">Delete</button></td></tr>`; }).join('')}
+      ${d.primers.map(p => { const b = A.psites[p.id] || []; return `<tr data-p="${p.id}"><td><b>${esc(p.name)}</b></td><td class="mono wrap">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${DNA.gcPct(p.seq).toFixed(0)}%</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}${x.full ? '' : ' (3′ 15 nt)'}`).join('<br>') : '<span style="color:var(--danger)">does not bind</span>'}</td><td><button class="ib" data-struct="${p.id}">Structure</button><button class="ib" data-ed="${p.id}">Edit</button><button class="ib dng" data-del="${p.id}">Delete</button></td></tr>`; }).join('')}
       </tbody></table>` : `<div class="empty"><h2>No primers yet</h2><p>Select bases and choose Primer from Selection, or add a primer by sequence. Primers with 5′ tails are matched by their 3′ end.</p></div>`}</div></div>`;
     $('#padd').onclick = () => dlgPrimer(null);
     $('#ptop').onclick = () => primerFromSel(1);
     $('#pbot').onclick = () => primerFromSel(-1);
+    $('#pstruct').onclick = () => dlgPrimerStruct(null, null);
     const tb = v.querySelector('tbody'); if (!tb) return;
     tb.onclick = e => {
+      const st = e.target.closest('[data-struct]'); if (st) { dlgPrimerStruct(d.primers.find(p => p.id === +st.dataset.struct), null); return; }
       const ed = e.target.closest('[data-ed]'); if (ed) { dlgPrimer(d.primers.find(p => p.id === +ed.dataset.ed)); return; }
       const del = e.target.closest('[data-del]'); if (del) { removePrimer(+del.dataset.del); return; }
       const tr = e.target.closest('tr[data-p]'); if (!tr) return;
@@ -2436,6 +2446,290 @@ svg .prim { cursor: pointer; }
         <div class="full" id="mtres"></div></div>`,
       buttons: [{ label: 'Close' }, { label: 'Add to Primers', act: () => { if (r) addDesigned([{ name: 'Mut-F', seq: r.fwd.seq, notes: 'Mutagenesis primer' }, { name: 'Mut-R', seq: r.rev.seq, notes: 'Mutagenesis primer' }]); } }, { label: 'Design', primary: true, act: () => { run(); return false; } }],
       onOpen: box => { run(); $('#mtnew').addEventListener('input', run); }
+    });
+  }
+
+  // ================================================================ structure analysis
+  // Links open in the default browser; the Electron main process handles that.
+  function extLink(url, label) { return `<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(label)} ↗</a>`; }
+  function toolLinks(kind, seq) {
+    const rows = kind === 'rna' ? [
+      ['ViennaRNA RNAfold', 'http://rna.tbi.univie.ac.at/cgi-bin/RNAWebSuite/RNAfold.cgi', 'Minimum free energy and base-pair probabilities with the full Turner parameters.'],
+      ['mfold / UNAFold', 'http://www.unafold.org/mfold/applications/rna-folding-form.php', 'The classic Zuker server, with suboptimal structures.'],
+      ['RNAcentral', 'https://rnacentral.org/sequence-search', 'Find out whether the sequence is a known non-coding RNA.']
+    ] : [
+      ['AlphaFold DB', 'https://alphafold.ebi.ac.uk/', 'Predicted 3D structures for most known proteins. Search by name or UniProt accession.'],
+      ['ESMFold (ESM Atlas)', 'https://esmatlas.com/resources?action=fold', 'Folds a pasted sequence directly, with no database entry needed.'],
+      ['SWISS-MODEL', 'https://swissmodel.expasy.org/interactive', 'Homology modelling against solved structures.'],
+      ['InterPro', 'https://www.ebi.ac.uk/interpro/search/sequence/', 'Domains, families and functional sites.'],
+      ['NCBI BLASTp', 'https://blast.ncbi.nlm.nih.gov/Blast.cgi?PAGE=Proteins&PROGRAM=blastp&BLAST_PROGRAMS=blastp&PAGE_TYPE=BlastSearch', 'Find related sequences.']
+    ];
+    return `<div class="hint" style="margin-top:8px"><b>Open in an external tool.</b> These sites take a pasted sequence, so copy it first.</div>
+      <div class="row2" style="margin:4px 0"><button class="btn" id="copySeqBtn">Copy sequence</button><span class="note" id="copySeqNote"></span></div>
+      <table class="grid"><tbody>${rows.map(([n2, u, why]) => `<tr><td style="white-space:nowrap">${extLink(u, n2)}</td><td class="wrap">${esc(why)}</td></tr>`).join('')}</tbody></table>`;
+  }
+  function bindCopySeq(seq, what) {
+    const b = $('#copySeqBtn');
+    if (b) b.onclick = () => { copyText(seq, `Copied ${what}`); const n2 = $('#copySeqNote'); if (n2) n2.textContent = 'Copied. Paste it into the tool you open.'; };
+  }
+
+  // ---------------------------------------------------------------- primer structures
+  function dgClass(dg) { return dg <= -9 ? 'bad' : (dg <= -6 ? 'warn' : 'okdg'); }
+  function dgNote(dg) { return dg <= -9 ? 'strong — likely to interfere' : (dg <= -6 ? 'moderate' : 'weak'); }
+  function dlgPrimerStruct(primer, partner) {
+    const d = D();
+    const list = d.primers;
+    let aId = primer ? primer.id : (list[0] && list[0].id);
+    let bId = partner ? partner.id : (list.find(p => p.id !== aId) || {}).id || '';
+    const render = () => {
+      const a = list.find(p => p.id === aId);
+      if (!a) { $('#psRes').innerHTML = '<div class="hint">This sequence has no primers yet.</div>'; return; }
+      const b = bId ? list.find(p => p.id === bId) : null;
+      const r = STRUCT.primerStructures(a.seq, b ? b.seq : null);
+      const dupBlock = (title, seqA, seqB, dups, note) => {
+        if (!dups.length) return `<h4 class="psh">${esc(title)}</h4><div class="hint">None found.</div>`;
+        return `<h4 class="psh">${esc(title)}</h4>` + dups.map(x => {
+          const dg = STRUCT.duplexDiagram(seqA, seqB, x);
+          return `<div class="psbox"><div class="pshead"><span class="dg ${dgClass(x.dg)}">ΔG ${x.dg.toFixed(2)} kcal/mol</span> <span class="note">${x.pairs} pairs, longest run ${x.longest}${x.end3a || x.end3b ? ` · ${Math.max(x.end3a, x.end3b)} of the last 5 bases paired` : ''} · ${dgNote(x.dg)}</span></div><pre class="psdiag">${esc(dg.top)}\n${esc(dg.bars)}\n${esc(dg.bot)}</pre></div>`;
+        }).join('') + (note ? `<div class="hint">${esc(note)}</div>` : '');
+      };
+      const hpBlock = (title, seq, hps) => {
+        if (!hps.length) return `<h4 class="psh">${esc(title)}</h4><div class="hint">None found.</div>`;
+        return `<h4 class="psh">${esc(title)}</h4>` + hps.map(h => {
+          const g = STRUCT.hairpinDiagram(seq, h);
+          // The stem is drawn as a ladder and the loop hangs off its closed end.
+          const postRev = [...g.post].reverse().join('');
+          const lead = Math.max(g.pre.length, postRev.length);
+          const l1 = "5'-" + g.pre.padStart(lead) + g.left + '\\';
+          const l2 = '   ' + ' '.repeat(lead) + g.bars + ' ' + g.loop;
+          const l3 = "3'-" + postRev.padStart(lead) + g.right + '/';
+          return `<div class="psbox"><div class="pshead"><span class="dg ${dgClass(h.dg)}">ΔG ${h.dg.toFixed(2)} kcal/mol</span> <span class="note">stem ${h.stem} bp, loop ${h.loop} nt, at ${fmt(h.start + 1)}–${fmt(h.end + 1)} · ${dgNote(h.dg)}</span></div><pre class="psdiag">${esc(l1)}\n${esc(l2)}\n${esc(l3)}</pre></div>`;
+        }).join('');
+      };
+      $('#psRes').innerHTML = `
+        <div class="note" style="margin-bottom:6px"><b>${esc(a.name)}</b> <span class="mono">${esc(a.seq)}</span> · ${a.seq.length} nt · Tm ${DNA.tm(a.seq).toFixed(1)} °C</div>
+        ${hpBlock('Hairpins in ' + a.name, a.seq, r.fwd.hairpins)}
+        ${dupBlock('Self-dimers of ' + a.name, a.seq, a.seq, r.fwd.self)}
+        ${b ? `<div class="note" style="margin:10px 0 6px"><b>${esc(b.name)}</b> <span class="mono">${esc(b.seq)}</span> · ${b.seq.length} nt · Tm ${DNA.tm(b.seq).toFixed(1)} °C</div>
+        ${hpBlock('Hairpins in ' + b.name, b.seq, r.rev.hairpins)}
+        ${dupBlock('Self-dimers of ' + b.name, b.seq, b.seq, r.rev.self)}
+        ${dupBlock('Cross-dimers between the two', a.seq, b.seq, r.cross, 'A cross-dimer that pairs the 3′ ends is the one that produces primer-dimer product.')}` : ''}
+        <div class="hint">Free energies use the SantaLucia 1998 nearest-neighbour parameters at 37 °C. A structure weaker than about −6 kcal/mol rarely matters; below about −9 it usually does, especially when the 3′ end is involved.</div>`;
+    };
+    dialog({
+      title: 'Primer Structures', wide: true,
+      body: `<div class="form">
+        <label for="psA">Primer</label><select id="psA">${list.map(p => `<option value="${p.id}" ${p.id === aId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+        <label for="psB">Compare with</label><select id="psB"><option value="">— none —</option>${list.map(p => `<option value="${p.id}" ${String(p.id) === String(bId) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+        <div class="full" id="psRes"></div></div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.addEventListener('change', e => {
+          if (e.target.id === 'psA') aId = +e.target.value;
+          else if (e.target.id === 'psB') bId = e.target.value ? +e.target.value : '';
+          else return;
+          render();
+        });
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- RNA structure
+  function rnaDiagram(res, W) {
+    // An arc diagram: the sequence on a line, each base pair drawn as an arc above it.
+    const n = res.seq.length;
+    const m = 16, w = Math.max(200, W - 2 * m);
+    const x = i => m + (n <= 1 ? 0 : i / (n - 1) * w);
+    const maxSpan = res.pairs.reduce((a, p) => Math.max(a, p[1] - p[0]), 1);
+    const H = Math.min(190, 40 + maxSpan / n * 240);
+    const base = H - 22;
+    const arcs = res.pairs.map(([i, j]) => {
+      const x1 = x(i), x2 = x(j), r = (x2 - x1) / 2;
+      const h = Math.min(base - 6, 10 + (j - i) / maxSpan * (base - 20));
+      return `<path d="M${x1.toFixed(1)},${base} C${x1.toFixed(1)},${(base - h).toFixed(1)} ${x2.toFixed(1)},${(base - h).toFixed(1)} ${x2.toFixed(1)},${base}" fill="none" stroke="#2563c9" stroke-width="1" opacity=".55"/>`;
+    }).join('');
+    const ticks = [];
+    const step = niceStep(n / 8);
+    for (let t = 0; t < n; t += step) ticks.push(`<line x1="${x(t).toFixed(1)}" y1="${base}" x2="${x(t).toFixed(1)}" y2="${base + 4}" stroke="#8d95a3"/><text x="${x(t).toFixed(1)}" y="${base + 15}" font-size="10" fill="#8d95a3" text-anchor="middle">${t + 1}</text>`);
+    const paired = new Array(n).fill(false);
+    for (const [i, j] of res.pairs) { paired[i] = true; paired[j] = true; }
+    const dots = n <= 400 ? res.seq.split('').map((c, i) => `<circle cx="${x(i).toFixed(1)}" cy="${base}" r="1.6" fill="${paired[i] ? '#2563c9' : '#c3c9d3'}"/>`).join('') : '';
+    return `<svg width="${w + 2 * m}" height="${H}" viewBox="0 0 ${w + 2 * m} ${H}"><line x1="${m}" y1="${base}" x2="${m + w}" y2="${base}" stroke="#c6cbd3"/>${arcs}${dots}${ticks.join('')}</svg>`;
+  }
+  function dlgRNA() {
+    const d = D(), n = d.seq.length;
+    const sel = selLen(d);
+    let res = null;
+    const run = () => {
+      const a = parseInt(val('rnFrom'), 10) - 1, b = parseInt(val('rnTo'), 10);
+      if (!(a >= 0 && b >= 1 && a < n && b <= n)) { $('#rnRes').innerHTML = '<div class="err">Enter a range inside the sequence.</div>'; return; }
+      let s = DNA.sub(d.seq, a, b);
+      if ($('#rnRev').checked) s = DNA.rc(s);
+      $('#rnRes').innerHTML = '<div class="hint">Folding…</div>';
+      // let the message paint before the search starts
+      setTimeout(() => {
+        const t0 = Date.now();
+        try { res = STRUCT.rnaFold(s); } catch (err) { $('#rnRes').innerHTML = `<div class="err">${esc(err.message)}</div>${toolLinks('rna', s)}`; bindCopySeq(STRUCT.toRNA(s), 'RNA sequence'); res = null; return; }
+        const ms = Date.now() - t0;
+        const stems = STRUCT.stemList(res.structure);
+        const rows = [];
+        for (let i = 0; i < res.seq.length; i += 60) rows.push(esc(String(a + i + 1).padStart(6) + '  ' + res.seq.slice(i, i + 60)) + '<br>' + esc(' '.repeat(8) + res.structure.slice(i, i + 60)));
+        $('#rnRes').innerHTML = `
+          <div class="pshead"><span class="dg ${res.dg <= -20 ? 'bad' : res.dg <= -8 ? 'warn' : 'okdg'}">ΔG ≈ ${res.dg.toFixed(2)} kcal/mol</span>
+            <span class="note">${fmt(res.seq.length)} nt · ${res.pairs.length} base pairs · ${stems.length} stem${stems.length === 1 ? '' : 's'} · folded in ${ms} ms</span></div>
+          <div id="rnDiag"></div>
+          ${stems.length ? `<table class="grid"><thead><tr><th>Stem</th><th>Pairs</th><th>Positions</th><th>Loop</th></tr></thead><tbody>${stems.slice(0, 20).map((s2, i) => `<tr><td>${i + 1}</td><td>${s2.len} bp</td><td>${fmt(a + s2.i + 1)}–${fmt(a + s2.j + 1)}</td><td>${fmt(s2.j - s2.i - 1 - 2 * (s2.len - 1))} nt</td></tr>`).join('')}</tbody></table>` : '<div class="hint">No stems found.</div>'}
+          <div style="margin-top:8px"><b>Dot-bracket</b></div>
+          <div class="aa-box" style="max-height:150px">${rows.join('<br>')}</div>
+          <div class="hint"><b>These free energies are approximate.</b> The search is a standard minimum-free-energy fold, but it uses a simplified energy model rather than the full Turner parameter set, so treat ΔG as a rough guide and the structure as a starting point. For a number you would publish, fold the sequence with one of the tools below.</div>
+          ${toolLinks('rna', res.seq)}`;
+        $('#rnDiag').innerHTML = rnaDiagram(res, Math.min(760, $('#rnRes').clientWidth - 10));
+        bindCopySeq(res.seq, 'RNA sequence');
+      }, 30);
+    };
+    dialog({
+      title: 'RNA Secondary Structure', wide: true,
+      body: `<div class="form">
+        <label for="rnFrom">Fold</label><div class="row2">
+          <input type="number" id="rnFrom" min="1" max="${n}" value="${sel ? d.sel.start + 1 : 1}"> to
+          <input type="number" id="rnTo" min="1" max="${n}" value="${sel ? (d.sel.end || n) : Math.min(n, 200)}">
+          <label><input type="checkbox" id="rnRev"> reverse strand</label></div>
+        <div class="full hint">T is read as U. Folding is limited to 600 nt here; longer sequences go to an external server.</div>
+        <div class="full" id="rnRes"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Fold', primary: true, act: () => { run(); return false; } }],
+      onOpen: () => run()
+    });
+  }
+
+  // ---------------------------------------------------------------- protein
+  function hydroSVG(vals, W, win) {
+    const m = 34, w = Math.max(200, W - m - 16), H = 150, top = 10, bot = H - 22;
+    const x = i => m + (vals.length <= 1 ? 0 : i / (vals.length - 1) * w);
+    const y = v => bot - (v + 4.5) / 9 * (bot - top);
+    const zero = y(0);
+    const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const area = `M${m},${zero} L${pts.split(' ').join(' L')} L${(m + w).toFixed(1)},${zero} Z`;
+    const ticks = [-4, -2, 0, 2, 4].map(v => `<line x1="${m}" y1="${y(v).toFixed(1)}" x2="${(m + w).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${v === 0 ? '#9aa2ae' : '#e8ebef'}"/><text x="${m - 5}" y="${(y(v) + 3.5).toFixed(1)}" font-size="10" fill="#8d95a3" text-anchor="end">${v}</text>`).join('');
+    const step = niceStep(vals.length / 7);
+    const xt = [];
+    for (let t = 0; t < vals.length; t += step) xt.push(`<text x="${x(t).toFixed(1)}" y="${H - 6}" font-size="10" fill="#8d95a3" text-anchor="middle">${t + 1}</text>`);
+    return `<svg width="${m + w + 16}" height="${H}" viewBox="0 0 ${m + w + 16} ${H}">${ticks}
+      <clipPath id="hcUp"><rect x="${m}" y="${top}" width="${w}" height="${(zero - top).toFixed(1)}"/></clipPath>
+      <clipPath id="hcDn"><rect x="${m}" y="${zero.toFixed(1)}" width="${w}" height="${(bot - zero).toFixed(1)}"/></clipPath>
+      <path d="${area}" fill="#e8a06a" opacity=".55" clip-path="url(#hcUp)"/>
+      <path d="${area}" fill="#8fb3e8" opacity=".55" clip-path="url(#hcDn)"/>
+      <polyline points="${pts}" fill="none" stroke="#2f3644" stroke-width="1"/>${xt.join('')}
+      <text x="${m}" y="${top - 1}" font-size="10" fill="#8d95a3">hydrophobic ↑ · Kyte–Doolittle, window ${win}</text></svg>`;
+  }
+  function chargeSVG(curve, pI, W) {
+    const m = 34, w = Math.max(200, W - m - 16), H = 150, top = 12, bot = H - 22;
+    const lo = Math.min(...curve.map(c => c.charge)), hi = Math.max(...curve.map(c => c.charge));
+    const span = Math.max(2, hi - lo);
+    const x = pH => m + pH / 14 * w;
+    const y = c => bot - (c - lo) / span * (bot - top);
+    const pts = curve.map(c => `${x(c.pH).toFixed(1)},${y(c.charge).toFixed(1)}`).join(' ');
+    const zero = y(0);
+    const xt = [0, 2, 4, 6, 8, 10, 12, 14].map(p => `<text x="${x(p).toFixed(1)}" y="${H - 6}" font-size="10" fill="#8d95a3" text-anchor="middle">${p}</text>`).join('');
+    return `<svg width="${m + w + 16}" height="${H}" viewBox="0 0 ${m + w + 16} ${H}">
+      <line x1="${m}" y1="${zero.toFixed(1)}" x2="${(m + w).toFixed(1)}" y2="${zero.toFixed(1)}" stroke="#9aa2ae"/>
+      <text x="${m - 5}" y="${(zero + 3.5).toFixed(1)}" font-size="10" fill="#8d95a3" text-anchor="end">0</text>
+      <line x1="${x(pI).toFixed(1)}" y1="${top}" x2="${x(pI).toFixed(1)}" y2="${bot}" stroke="#c43c3c" stroke-dasharray="3 2"/>
+      <text x="${(x(pI) + 4).toFixed(1)}" y="${top + 9}" font-size="10" fill="#c43c3c">pI ${pI.toFixed(2)}</text>
+      <polyline points="${pts}" fill="none" stroke="#2563c9" stroke-width="1.4"/>${xt}
+      <text x="${m}" y="${top - 2}" font-size="10" fill="#8d95a3">net charge vs pH</text></svg>`;
+  }
+  function dlgProtein() {
+    const d = D(), n = d.seq.length;
+    const orfs = analyze(d).orfs;
+    const cdsFeatures = d.features.filter(f => f.type === 'CDS' || f.type === 'gene');
+    const sel = selLen(d);
+    let mode = 'region', stats = null;
+    const proteinOf = () => {
+      if (mode === 'paste') return val('prPaste').toUpperCase().replace(/[^A-Z*]/g, '');
+      const a = parseInt(val('prFrom'), 10) - 1, b = parseInt(val('prTo'), 10);
+      if (!(a >= 0 && b >= 1 && a < n && b <= n)) return '';
+      let s = DNA.sub(d.seq, a, b);
+      if ($('#prRev').checked) s = DNA.rc(s);
+      return DNA.translate(s);
+    };
+    const run = () => {
+      const p = proteinOf();
+      if (!p) { $('#prRes').innerHTML = '<div class="err">Choose a coding region, or paste a protein sequence.</div>'; return; }
+      let st;
+      try { st = STRUCT.proteinStats(p); } catch (err) { $('#prRes').innerHTML = `<div class="err">${esc(err.message)}</div>`; return; }
+      stats = st;
+      const internal = p.slice(0, -1).includes('*');
+      const comp = st.composition.filter(c => c.n > 0);
+      const seqRows = [];
+      for (let i = 0; i < st.protein.length; i += 60) seqRows.push(esc(String(i + 1).padStart(5) + '  ' + st.protein.slice(i, i + 60)));
+      $('#prRes').innerHTML = `
+        ${internal ? '<div class="err">This translation contains a stop codon in the middle, so the reading frame is probably wrong.</div>' : ''}
+        ${st.unknown.length ? `<div class="err">Unrecognised letters ignored: ${esc(st.unknown.join(', '))}</div>` : ''}
+        <table class="grid" style="width:auto"><tbody>
+          <tr><td>Length</td><td><b>${fmt(st.length)}</b> amino acids</td></tr>
+          <tr><td>Molecular weight</td><td><b>${(st.mw / 1000).toFixed(2)} kDa</b> (${fmt(Math.round(st.mw))} Da)</td></tr>
+          <tr><td>Isoelectric point</td><td><b>${st.pI.toFixed(2)}</b> <span class="note">(${esc(st.pkaSet)} pKa set)</span></td></tr>
+          <tr><td>Net charge at pH 7</td><td><b>${st.charge7 >= 0 ? '+' : ''}${st.charge7.toFixed(2)}</b></td></tr>
+          <tr><td>Extinction at 280 nm</td><td><b>${fmt(st.extinction.reduced)}</b> M⁻¹cm⁻¹ with free cysteines${st.extinction.cystine !== st.extinction.reduced ? `, <b>${fmt(st.extinction.cystine)}</b> with all cysteines in cystines` : ''}<br><span class="note">A280 of a 1 mg/mL solution: ${st.a280.reduced.toFixed(3)}${st.extinction.cystine !== st.extinction.reduced ? ` / ${st.a280.cystine.toFixed(3)}` : ''} · ${st.extinction.trp} Trp, ${st.extinction.tyr} Tyr, ${st.extinction.cys} Cys</span></td></tr>
+          <tr><td>GRAVY</td><td><b>${st.gravy.toFixed(3)}</b> <span class="note">${st.gravy > 0 ? 'overall hydrophobic' : 'overall hydrophilic'}</span></td></tr>
+          <tr><td>Aliphatic index</td><td><b>${st.aliphatic.toFixed(1)}</b></td></tr>
+        </tbody></table>
+        <div style="margin-top:10px"><b>Hydropathy</b></div><div id="prHydro"></div>
+        <div><b>Charge</b></div><div id="prCharge"></div>
+        <div style="margin-top:8px"><b>Composition</b></div>
+        <table class="grid"><thead><tr><th>Residue</th><th>Count</th><th>%</th><th>Residue</th><th>Count</th><th>%</th></tr></thead><tbody>
+          ${Array.from({ length: Math.ceil(comp.length / 2) }, (_, i) => {
+            const L = comp[i], Rr = comp[i + Math.ceil(comp.length / 2)];
+            const cell = c => c ? `<td>${esc(c.name)} (${c.aa})</td><td>${c.n}</td><td>${c.pct.toFixed(1)}%</td>` : '<td></td><td></td><td></td>';
+            return `<tr>${cell(L)}${cell(Rr)}</tr>`;
+          }).join('')}
+        </tbody></table>
+        <div style="margin-top:8px"><b>Sequence</b></div>
+        <div class="aa-box" style="max-height:130px">${seqRows.join('<br>')}</div>
+        <div class="hint">Mass, extinction coefficient, GRAVY and the aliphatic index are exact calculations. The isoelectric point depends on which pKa set is used, and different tools will differ by a few tenths of a unit. Secondary and three-dimensional structure are not predicted here — use one of the tools below.</div>
+        ${toolLinks('protein', st.protein)}`;
+      $('#prHydro').innerHTML = hydroSVG(STRUCT.hydropathy(st.protein, parseInt(val('prWin'), 10) || 9), Math.min(740, $('#prRes').clientWidth - 10), parseInt(val('prWin'), 10) || 9);
+      $('#prCharge').innerHTML = chargeSVG(STRUCT.chargeCurve(st.protein), st.pI, Math.min(740, $('#prRes').clientWidth - 10));
+      bindCopySeq(st.protein, 'protein sequence');
+    };
+    dialog({
+      title: 'Protein Properties', wide: true,
+      body: `<div class="form">
+        <label>Analyse</label><div class="row2">
+          <label><input type="radio" name="prmode" value="region" checked> a coding region</label>
+          <label><input type="radio" name="prmode" value="paste"> a pasted protein</label></div>
+        <div class="full" id="prRegionBox"><div class="form" style="margin:0">
+          <label for="prFrom">Region</label><div class="row2">
+            <input type="number" id="prFrom" min="1" max="${n}" value="${sel ? d.sel.start + 1 : 1}"> to
+            <input type="number" id="prTo" min="1" max="${n}" value="${sel ? (d.sel.end || n) : Math.min(n, 300)}">
+            <label><input type="checkbox" id="prRev"> reverse strand</label></div>
+          <label>Use</label><select id="prPick"><option value="">choose a feature or ORF…</option>
+            ${cdsFeatures.map((f, i) => `<option value="f${i}">${esc(f.name)} (${esc(f.type)}, ${fmt(DNA.rlen(f, n))} bp)</option>`).join('')}
+            ${orfs.map((o, i) => `<option value="o${i}">ORF ${fmt(o.start + 1)}–${fmt(o.end)} (${o.aa} aa, ${o.strand > 0 ? 'forward' : 'reverse'})</option>`).join('')}</select>
+        </div></div>
+        <div class="full" id="prPasteBox" style="display:none"><div class="form" style="margin:0">
+          <label for="prPaste">Protein</label><textarea id="prPaste" rows="4" placeholder="Paste a protein sequence in one-letter code"></textarea>
+        </div></div>
+        <label for="prWin">Hydropathy window</label><div class="row2"><input type="number" id="prWin" value="9" min="3" max="31"> residues</div>
+        <div class="full" id="prRes"></div></div>`,
+      buttons: [{ label: 'Close' }, { label: 'Analyse', primary: true, act: () => { run(); return false; } }],
+      onOpen: box => {
+        run();
+        box.addEventListener('change', e => {
+          const t = e.target;
+          if (t.name === 'prmode') {
+            mode = t.value;
+            $('#prRegionBox').style.display = mode === 'region' ? '' : 'none';
+            $('#prPasteBox').style.display = mode === 'paste' ? '' : 'none';
+          } else if (t.id === 'prPick') {
+            const v2 = t.value; if (!v2) return;
+            if (v2[0] === 'f') { const f = cdsFeatures[+v2.slice(1)]; $('#prFrom').value = f.start + 1; $('#prTo').value = f.end; $('#prRev').checked = f.strand === -1; }
+            else { const o = orfs[+v2.slice(1)]; $('#prFrom').value = o.start + 1; $('#prTo').value = o.end; $('#prRev').checked = o.strand === -1; }
+            run();
+          } else if (/^(prFrom|prTo|prRev|prWin)$/.test(t.id)) run();
+        });
+      }
     });
   }
 

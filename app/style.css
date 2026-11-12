@@ -246,3 +246,14 @@ svg.chroma { display: block; }
 .crow .nt .m { background: #ffd9d6; color: var(--danger); font-weight: 700; }
 .crow .nt .d { background: #e3e6eb; color: var(--faint); }
 .crow .nt .i { background: #d8f0d8; color: #1a7f37; font-weight: 700; }
+
+/* ---------- Structure analysis ---------- */
+.psh { margin: 12px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.psbox { border: 1px solid var(--border-soft); border-radius: 4px; margin-bottom: 6px; overflow: hidden; }
+.pshead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 5px 8px; background: var(--chrome); }
+.psdiag { margin: 0; padding: 7px 9px; font: 12.5px/1.45 var(--f-mono); white-space: pre; overflow-x: auto; background: var(--win); }
+.dg { font-weight: 700; font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.dg.okdg { background: #e4f1e4; color: #1a7f37; }
+.dg.warn { background: #fdf0dd; color: #a9631b; }
+.dg.bad { background: #fbe0de; color: var(--danger); }
+.dlg a { color: var(--accent); }

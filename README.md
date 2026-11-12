@@ -26,6 +26,7 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
 | **Tools** | **코돈 최적화(8개 organism, 알고리즘 4종, 효소 사이트 추가/제거, 보존 영역) · 서열 비교(여러 플라스미드 정렬) · PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
 | **Compare** | **여러 서열을 한 화면에서 비교 · 원형은 회전·역상보까지 맞춰서 정렬 · 치환/삽입/결실을 색으로 표시 · 차이 있는 줄만 보기** |
+| **Analyze** | **프라이머 구조(헤어핀·self dimer·cross dimer를 ΔG와 그림으로) · RNA 2차 구조(arc 다이어그램, dot-bracket, stem 목록) · 단백질 성질(분자량·pI·흡광계수·hydropathy·전하 곡선·조성) · 외부 구조 예측 툴 연결** |
 | **Alignment** | **.ab1 시퀀싱 결과를 서열에 정렬 · 양쪽 가닥 자동 판별 · 낮은 품질 끝부분 자동 제거 · 크로마토그램 표시 · 차이(치환/결실/삽입) 목록 · 여러 read 비교** |
 | Actions | 제한효소 절단 + 가상 아가로스 겔, 번역(6 frame), 역상보, 원점 변경, 원형/선형 전환 |
 | **인쇄** | **지도·feature 표·프라이머 표·제한효소 목록·전체 서열·정렬 결과를 골라서 인쇄하거나 PDF로 저장** |
@@ -59,6 +60,21 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 6. **보존 영역**: 건드리면 안 되는 구간(선택 영역이나 feature)을 추가하면 그 안의 코돈은 그대로 둡니다
 7. 결과로 CAI·GC·GC3·최장 반복·사이트 수가 **전후 비교**로 나오고, 원래 자리에 바꿔 넣거나 새 탭으로 열 수 있습니다
 
+**프라이머 구조 보기** — Analyze → Primer Structures, 또는 Primers 표에서 `Structure`. 헤어핀, self dimer, cross dimer를 사다리 그림과 ΔG로 보여줍니다.
+
+```
+5'-GCGCGCGC\
+   |||||||| TTTT
+3'-CGCGCGCG/
+   ΔG -11.92 kcal/mol
+```
+
+ΔG는 Tm과 같은 SantaLucia 1998 nearest-neighbor 값에서 계산합니다(37 °C 기준). 대략 −6 kcal/mol보다 약하면 문제되는 일이 드물고, −9보다 강하면 대개 문제가 되며 특히 3′ 끝이 물려 있을 때 그렇습니다. 마지막 5염기 중 몇 개가 짝지었는지도 함께 표시합니다.
+
+**RNA 2차 구조** — Analyze → RNA Secondary Structure. 구간을 정하면 접은 구조를 arc 다이어그램, stem 목록, dot-bracket으로 보여줍니다. T는 U로 읽습니다.
+
+**단백질 성질** — Analyze → Protein Properties. CDS feature나 ORF를 고르거나 단백질 서열을 붙여넣으면 분자량, pI, 280 nm 흡광계수(1 mg/mL A280 포함), 순전하, GRAVY, aliphatic index, Kyte–Doolittle hydropathy 그래프, pH별 전하 곡선, 아미노산 조성을 보여줍니다.
+
 알고리즘 4종:
 
 | 이름 | 내용 |
@@ -89,6 +105,7 @@ app/trace.js    .ab1 읽기와 서열 정렬
 app/primer.js   프라이머 설계
 app/msa.js      여러 서열 비교 (앵커 기반 정렬)
 app/codon.js    코돈 최적화
+app/struct.js   프라이머 구조, RNA 접기, 단백질 성질
 app/codon-tables.js  코돈 사용표 (자동 생성 파일)
 app/app.js      화면과 상호작용
 tools/build-codon-tables.js  NCBI CDS에서 코돈 사용표를 다시 만드는 스크립트
@@ -106,6 +123,21 @@ tools/build-codon-tables.js  NCBI CDS에서 코돈 사용표를 다시 만드는
 
 시작·종결 코돈은 선택의 여지가 없으므로 집계에서 뺐고, 길이가 3의 배수가 아니거나 중간에 종결코돈이 있는 불완전한 기록도 제외했습니다.
 다시 만들려면 `node tools/build-codon-tables.js`를 실행하면 됩니다(인터넷 필요, 몇 분 소요).
+
+## 계산의 근거와 한계
+
+어디까지가 정확한 계산이고 어디부터가 근사인지 구분해 두었습니다.
+
+| 항목 | 상태 |
+|---|---|
+| Tm, 프라이머 헤어핀·dimer ΔG | **정확**. SantaLucia 1998 nearest-neighbor 값에서 계산하며, 출판된 ΔG°37 값과 0.02 kcal/mol 안에서 일치하는 것을 확인했습니다 |
+| 단백질 분자량, 280 nm 흡광계수, GRAVY, aliphatic index | **정확**. 표준 공식 그대로이며 수작업 계산과 대조했습니다 |
+| 단백질 pI | pKa 값 묶음에 따라 달라집니다. EMBOSS 묶음을 쓰며 화면에도 표시합니다. 다른 툴과 0.2~0.5 정도 차이 날 수 있는데 이는 정상입니다 |
+| 코돈 사용표 | **실측 데이터**. NCBI 실제 CDS에서 계산 (아래 표 참고) |
+| **RNA 2차 구조 ΔG** | **근사입니다.** 탐색 알고리즘 자체는 표준 최소자유에너지(Zuker) 방식이지만, 에너지 값은 전체 Turner 파라미터 세트가 아닌 단순화된 모델을 씁니다. 구조의 대략적인 모양을 보는 데는 쓸 만하지만, 논문에 쓸 숫자는 ViennaRNA RNAfold로 확인해 주세요. 앱 안에서도 이 점을 표시하고 링크를 걸어 두었습니다 |
+| 단백질·RNA 3차 구조 | 예측하지 않습니다. AlphaFold DB, ESMFold, SWISS-MODEL 등으로 연결만 합니다 |
+
+검증 삼아 효모 tRNA-Phe를 접어 보면 acceptor stem(1–7 / 66–72)을 정확히 찾습니다. 접기 속도는 100 nt 0.14초, 200 nt 0.5초이며, 길이의 세제곱에 비례하므로 앱 안에서는 600 nt로 제한하고 그보다 길면 외부 서버로 안내합니다.
 
 ## 알아두실 점
 
