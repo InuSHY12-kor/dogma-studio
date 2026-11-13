@@ -120,20 +120,31 @@
   }
 
   const MATCH = 2, MISMATCH = -4, GAP = -6;
-  // Semi-global: the whole read is aligned, the reference may overhang at both ends.
-  function alignWindow(refWin, read) {
+  /* Semi-global: the whole read is aligned, the reference may overhang at both ends.
+   * Only a band around the seed diagonal is filled, since a sequencing read never
+   * drifts far from it; `band` is how many bases of indel are allowed either way.
+   * That turns the work from read length x window length into read length x band. */
+  const NEG = -1e9;
+  function alignWindow(refWin, read, band, diag) {
     const m = read.length, N = refWin.length;
     const W = N + 1;
+    const wide = !band || band * 2 >= N;
     const score = new Int32Array((m + 1) * W);
     const ptr = new Uint8Array((m + 1) * W); // 0 diag, 1 up (gap in ref), 2 left (gap in read)
+    if (!wide) score.fill(NEG);
     for (let j = 0; j <= N; j++) { score[j] = 0; ptr[j] = 2; }       // free leading reference
     for (let i = 1; i <= m; i++) { score[i * W] = GAP * i; ptr[i * W] = 1; }
     for (let i = 1; i <= m; i++) {
       const rowP = (i - 1) * W, row = i * W, rc = read.charCodeAt(i - 1);
-      for (let j = 1; j <= N; j++) {
-        const d = score[rowP + j - 1] + (refWin.charCodeAt(j - 1) === rc ? MATCH : MISMATCH);
-        const u = score[rowP + j] + GAP;
-        const l = score[row + j - 1] + GAP;
+      // the band this row covers, clamped to the window
+      const centre = wide ? 0 : i + (diag || 0);
+      const lo = wide ? 1 : Math.max(1, centre - band);
+      const hi = wide ? N : Math.min(N, centre + band);
+      for (let j = lo; j <= hi; j++) {
+        const dj = score[rowP + j - 1];
+        const d = dj <= NEG ? NEG : dj + (refWin.charCodeAt(j - 1) === rc ? MATCH : MISMATCH);
+        const uj = score[rowP + j], u = uj <= NEG ? NEG : uj + GAP;
+        const lj = score[row + j - 1], l = lj <= NEG ? NEG : lj + GAP;
         let best = d, p = 0;
         if (u > best) { best = u; p = 1; }
         if (l > best) { best = l; p = 2; }
@@ -142,9 +153,11 @@
     }
     // best end position along the last row (free trailing reference)
     let endJ = 0, best = -Infinity;
-    for (let j = 0; j <= N; j++) if (score[m * W + j] >= best) { best = score[m * W + j]; endJ = j; }
+    for (let j = 0; j <= N; j++) { const v = score[m * W + j]; if (v > NEG && v >= best) { best = v; endJ = j; } }
+    if (best === -Infinity) return null;
     let i = m, j = endJ, A = '', B = '';
-    while (i > 0) {
+    let guard = (m + N) * 2 + 10;
+    while (i > 0 && guard-- > 0) {
       const p = ptr[i * W + j];
       if (p === 0 && j > 0) { A += refWin[j - 1]; B += read[i - 1]; i--; j--; }
       else if (p === 1 || j === 0) { A += '-'; B += read[i - 1]; i--; }
@@ -160,16 +173,26 @@
     const trim = opts.trim !== false && read.quals.length ? trimRange(read.quals) : { start: 0, end: read.seq.length, trimmed: false };
     const sub = read.seq.slice(trim.start, trim.end);
     if (sub.length < 25) throw new Error(`“${read.name}” has too little usable sequence to align.`);
-    let best = null;
+    // every candidate placement from both strands, strongest seed first; the first one
+    // that is clearly good enough ends the search, which is the usual case
+    const cands = [];
     for (const strand of [1, -1]) {
       const q = strand === 1 ? sub : DNA.rc(sub);
-      for (const seed of seedOffsets(refFull, q)) {
-        const margin = Math.max(60, Math.round(q.length * 0.15));
-        const from = Math.max(0, seed.d - margin), to = Math.min(refFull.length, seed.d + q.length + margin);
-        if (to - from < q.length * 0.5) continue;
-        const a = alignWindow(refFull.slice(from, to), q);
-        if (!best || a.score > best.a.score) best = { a, strand, from, q };
-      }
+      for (const seed of seedOffsets(refFull, q)) cands.push({ strand, q, seed });
+    }
+    cands.sort((a, b) => b.seed.votes - a.seed.votes);
+    let best = null;
+    const perfect = sub.length * MATCH;
+    for (const c of cands.slice(0, 4)) {
+      const q = c.q;
+      const margin = Math.max(60, Math.round(q.length * 0.15));
+      const from = Math.max(0, c.seed.d - margin), to = Math.min(refFull.length, c.seed.d + q.length + margin);
+      if (to - from < q.length * 0.5) continue;
+      const a = alignWindow(refFull.slice(from, to), q, margin, c.seed.d - from);
+      if (!a) continue;
+      if (!best || a.score > best.a.score) best = { a, strand: c.strand, from, q };
+      // 90% of the best possible score means the placement is certain
+      if (best.a.score > perfect * 0.9) break;
     }
     if (!best) throw new Error(`“${read.name}” does not match this sequence.`);
     const { a, strand, from, q } = best;

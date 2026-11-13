@@ -567,3 +567,17 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .calcdl dt input { width: 92px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .calcdl sup { font-size: 9px; vertical-align: super; }
 .calcfoot { border-top: 1px solid var(--border-soft); margin-top: 8px; padding-top: 8px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+/* Feature dialog: direction buttons and the segment table */
+.dirbtns { display: inline-flex; gap: 3px; }
+.dirb { min-width: 42px; height: 26px; border: 1px solid var(--border); background: var(--win); border-radius: 3px;
+  cursor: pointer; font-size: 14px; line-height: 1; color: var(--muted); }
+.dirb:hover { background: var(--chrome); }
+.dirb.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.segbar { border: 1px solid var(--border-soft); border-radius: 4px; padding: 5px 8px; margin-bottom: 6px; background: var(--chrome); }
+.segbarhead { font-size: 11.5px; color: var(--muted); margin-bottom: 2px; text-align: center; }
+.segtools { display: flex; gap: 5px; margin-bottom: 6px; }
+.segtbl td { padding: 2px 5px; }
+.segtbl input[type=text] { width: 100%; padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
+.segtbl input[type=number] { padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
+.segtbl tr.on > td { background: #e8effb; }

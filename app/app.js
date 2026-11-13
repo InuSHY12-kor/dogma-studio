@@ -260,6 +260,7 @@ svg .prim { cursor: pointer; }
         toast(`Hybridisation: at least ${d.hyb.minMatch} bases, Tm ${d.hyb.minTm} °C`);
       } }],
       onOpen: box => {
+        // the strip at the top of the segment table, as the screenshot shows it
         const upd = () => {
           const probe = { minMatch: parseInt(val('hyM'), 10) || 15, minTm: parseFloat(val('hyT')) || 0 };
           const keep = d.hyb; d.hyb = probe;
@@ -5298,8 +5299,13 @@ svg .prim { cursor: pointer; }
       color: '', notes: '', molecule: 'DNA', translated: (preset.type || '') === 'CDS', frame: 0, matchProtein: false, quals: {},
       code: (d.opts.transCode || '1')
     };
-    const color = cur.color || TYPE_COL[cur.type] || '#c9ced6';
+    const color = cur.color || typeDefColor(cur.type);
     const tOpts = { frame: cur.frame || 0, code: cur.code || '1', startMet: !!cur.startMet, startAt: cur.startAt || 1 };
+    // the segments, edited in place: a feature with none is one segment covering it all
+    let segState = (cur.segs && cur.segs.length ? cur.segs : [{ start: cur.start, end: cur.end }])
+      .map(g => ({ start: g.start, end: g.end, name: g.name || '', color: g.color || '', skip: !!g.skip, startAt: g.startAt }))
+      .sort((a2, b2) => a2.start - b2.start);
+    let segPick = -1;
     const qualText = Object.entries(cur.quals || {}).map(([k, v]) => `${k}=${v}`).join('\n');
     dialog({
       title: isNew ? 'Add Feature' : `Edit Feature “${cur.name}”`, wide: true,
@@ -5311,17 +5317,23 @@ svg .prim { cursor: pointer; }
         <label for="fe">End</label>${point
           ? `<div><input type="number" id="fe" value="${cur.start}" hidden><span class="note">point feature between ${fmt(cur.start)} and ${fmt(cur.start + 1)} — no bases are covered</span></div>`
           : `<input type="number" id="fe" min="1" max="${n}" value="${cur.end === 0 ? n : cur.end}">`}
-        <label for="fd">Direction</label><select id="fd"><option value="1" ${cur.strand === 1 ? 'selected' : ''}>→ Forward</option><option value="-1" ${cur.strand === -1 ? 'selected' : ''}>← Reverse</option><option value="0" ${!cur.strand ? 'selected' : ''}>— Nondirectional</option><option value="2" ${cur.strand === 2 ? 'selected' : ''}>↔ Bidirectional</option></select>
-        <label for="fc">Colour</label><input type="color" id="fc" value="${color}">
+        <label>Direction</label><div class="dirbtns" id="fdb">
+          ${[[0, '\u21a6\u2014\u21a4', 'Nondirectional'], [1, '\u27f6', 'Forward'], [-1, '\u27f5', 'Reverse'], [2, '\u27f7', 'Bidirectional']].map(([v, g, t]) =>
+        `<button type="button" class="dirb${(cur.strand || 0) === v ? ' on' : ''}" data-dir="${v}" title="${t}">${g}</button>`).join('')}
+          <input type="hidden" id="fd" value="${cur.strand || 0}"></div>
         <label>Translation</label><div class="row2">
           <label><input type="checkbox" id="ftr" ${cur.translated ? 'checked' : ''}> Translate this feature in Sequence view</label>
-          <button class="btn" id="ftopt" type="button">Feature Translation Options ▾</button></div>
+          <button class="btn" id="ftopt" type="button">Feature Translation Options\u2026</button></div>
         <div class="full" id="ftopts" hidden style="border:1px solid var(--border-soft);border-radius:3px;padding:8px 10px;background:var(--panel,#fafbfc)"></div>
-        <label>Display</label><label><input type="checkbox" id="fpr" ${cur.priority ? 'checked' : ''}> Prioritise display of this feature in maps</label>
-        ${cur.segs && cur.segs.length > 1 ? `<label>Segments</label><div class="row2"><span class="note">${cur.segs.length} segments, ${exonsOf({ start: cur.start, end: cur.end, segs: cur.segs }, n).introns.length} intron(s)</span><button class="btn" id="fseg" type="button">Edit Segments…</button></div>` : ''}
+        <div class="full" id="fsegWrap"></div>
+        <label for="fc">Colour</label><input type="color" id="fc" value="${color}">
         <label>Matching</label><label><input type="checkbox" id="fmp" ${cur.matchProtein ? 'checked' : ''}> Recognise this feature wherever the <b>protein</b> matches, even if the DNA differs</label>
-        <label for="fno">Note</label><input type="text" id="fno" value="${esc(cur.notes || '')}">
-        <label for="fq">Qualifiers</label><textarea id="fq" rows="3" placeholder="one per line, like  gene=bla">${esc(qualText)}</textarea>
+        <label for="fqk">Qualifier</label><div class="row2">
+          <select id="fqk" style="width:150px">${['/product', '/note', '/gene', '/function', '/standard_name', '/EC_number', '/citation', '/db_xref', '/ribosomal_slippage'].map(q => `<option>${q}</option>`).join('')}</select>
+          <span class="note">=</span></div>
+        <div class="full"><textarea id="fqv" rows="3" placeholder="value for the qualifier above">${esc(cur.quals && cur.quals.product ? cur.quals.product : (cur.notes || ''))}</textarea></div>
+        <label for="fq">All qualifiers</label><textarea id="fq" rows="2" placeholder="one per line, like  gene=bla">${esc(qualText)}</textarea>
+        <label>Display</label><label><input type="checkbox" id="fpr" ${cur.priority ? 'checked' : ''}> Prioritize display of this feature in maps</label>
         <div class="full hint" id="finfo"></div><div class="full err"></div></div>`,
       buttons: [
         ...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => removeFeature(f.id) }]),
@@ -5336,6 +5348,66 @@ svg .prim { cursor: pointer; }
           }
         }],
       onOpen: box => {
+        const drawSegBar = () => {
+          const el = box.querySelector('#fsegBar'); if (!el) return;
+          const lo = Math.min(...segState.map(g => g.start)), hi = Math.max(...segState.map(g => g.end));
+          const span = Math.max(1, hi - lo), W = 470, H = 34;
+          el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+            ${segState.map((g, i) => {
+            const x = (g.start - lo) / span * W, w2 = Math.max(2, (g.end - g.start) / span * W);
+            return `<rect x="${x.toFixed(1)}" y="6" width="${w2.toFixed(1)}" height="16" fill="${g.color || $('#fc').value}" stroke="${i === segPick ? '#2563c9' : 'rgba(0,0,0,.3)'}" stroke-width="${i === segPick ? 2 : 0.8}"/>
+              <text x="${(x + w2 / 2).toFixed(1)}" y="18" font-size="9" text-anchor="middle" fill="#1c2230">${esc((g.name || '').slice(0, 14))}</text>
+              <text x="${x.toFixed(1)}" y="31" font-size="8" fill="#8d95a3">${i + 1}</text>`;
+          }).join('')}
+            <text x="0" y="5" font-size="8" fill="#8d95a3">${fmt(lo + 1)}</text>
+            <text x="${W}" y="5" font-size="8" fill="#8d95a3" text-anchor="end">${fmt(hi)}</text>
+          </svg>`;
+        };
+        const renderSegs = () => {
+          const wrap = box.querySelector('#fsegWrap'); if (!wrap) return;
+          const total = segState.reduce((t, g) => t + (g.end - g.start), 0);
+          wrap.innerHTML = `
+            <div class="segbar"><div class="segbarhead"><b>${fmt(total)} bp</b> &nbsp;/&nbsp; ${segState.length} segment${segState.length === 1 ? '' : 's'}</div>
+              <div id="fsegBar"></div></div>
+            <div class="segtools">
+              <button class="btn" type="button" data-sgact="split" ${segPick < 0 ? 'disabled' : ''}>Split Segment…</button>
+              <button class="btn" type="button" data-sgact="merge" ${segPick < 0 || segState.length < 2 ? 'disabled' : ''}>Merge Segments</button>
+              <button class="btn dng" type="button" data-sgact="del" ${segPick < 0 || segState.length < 2 ? 'disabled' : ''}>Delete Segment</button>
+            </div>
+            <table class="grid segtbl"><thead><tr><th style="width:26px"></th><th>Segment</th><th style="width:150px">Location</th><th style="width:74px">Size (bp)</th><th style="width:52px">Color</th></tr></thead><tbody>
+              ${segState.map((g, i) => `<tr data-sg="${i}"${i === segPick ? ' class="on"' : ''}>
+                <td>${i + 1}</td>
+                <td><input type="text" data-sgi="${i}" data-sgn value="${esc(g.name || '')}" placeholder="${segState.length > 1 ? 'segment ' + (i + 1) : ''}"></td>
+                <td><input type="number" data-sgi="${i}" data-sga value="${g.start + 1}" style="width:62px"> .. <input type="number" data-sgi="${i}" data-sgb value="${g.end}" style="width:62px"></td>
+                <td>${fmt(g.end - g.start)}</td>
+                <td><input type="color" data-sgi="${i}" data-sgc value="${g.color || $('#fc').value}"></td></tr>`).join('')}
+            </tbody></table>`;
+          drawSegBar();
+        };
+        const segAction = a2 => {
+          if (a2 === 'split') {
+            const g = segState[segPick]; if (!g) return;
+            // split where the sequence is selected if that falls inside, else in the middle;
+            // the exact boundary can then be typed into the Location fields
+            const selAt = selLen(d) ? d.sel.start : -1;
+            const at = (selAt > g.start && selAt < g.end) ? selAt : Math.round((g.start + g.end) / 2);
+            if (!(at > g.start && at < g.end)) { toast('That segment is too short to split.'); return; }
+            segState.splice(segPick, 1, { ...g, end: at }, { ...g, start: at, name: '' });
+            segPick = segPick + 1;
+            renderSegs(); upd();
+            toast(`Split at ${fmt(at)} — change the boundary in the Location column if you need to`);
+          } else if (a2 === 'merge') {
+            const i = Math.max(0, segPick);
+            if (i >= segState.length - 1) { toast('Select a segment that has one after it.'); return; }
+            const a3 = segState[i], b3 = segState[i + 1];
+            segState.splice(i, 2, { ...a3, end: b3.end });
+            segPick = i; renderSegs(); upd();
+          } else if (a2 === 'del') {
+            if (segState.length < 2) return;
+            segState.splice(segPick, 1);
+            segPick = -1; renderSegs(); upd();
+          }
+        };
         const upd = () => {
           const a = parseInt(val('fs'), 10), b = parseInt(val('fe'), 10);
           if (!(a >= 1 && b >= 1)) return;
@@ -5365,8 +5437,30 @@ svg .prim { cursor: pointer; }
           } else { readTransOptions(cur, tOpts); optBox.hidden = true; }
           upd();
         };
-        const segBtn = box.querySelector('#fseg');
-        if (segBtn) segBtn.onclick = () => { closeDialog(); editSegments(f, segsOf(f, n), `Edited segments of ${f.name}`); };
+        renderSegs();
+        box.querySelector('#fsegWrap').addEventListener('click', e => {
+          const row = e.target.closest('tr[data-sg]');
+          if (row && !e.target.closest('input')) { segPick = +row.dataset.sg; renderSegs(); return; }
+          const a2 = e.target.closest('[data-sgact]'); if (!a2) return;
+          segAction(a2.dataset.sgact);
+        });
+        box.querySelector('#fsegWrap').addEventListener('input', e => {
+          const t = e.target, i = +t.dataset.sgi;
+          if (isNaN(i)) return;
+          const g = segState[i]; if (!g) return;
+          if (t.dataset.sgn !== undefined) g.name = t.value;
+          else if (t.dataset.sgc !== undefined) g.color = t.value;
+          else if (t.dataset.sga !== undefined) g.start = Math.max(0, (parseInt(t.value, 10) || 1) - 1);
+          else if (t.dataset.sgb !== undefined) g.end = Math.max(1, parseInt(t.value, 10) || 1);
+          if (t.dataset.sga !== undefined || t.dataset.sgb !== undefined) { drawSegBar(); upd(); }
+        });
+        // the dir buttons
+        box.querySelector('#fdb').addEventListener('click', e => {
+          const b2 = e.target.closest('[data-dir]'); if (!b2) return;
+          box.querySelectorAll('[data-dir]').forEach(x => x.classList.toggle('on', x === b2));
+          $('#fd').value = b2.dataset.dir;
+          upd();
+        });
         box.querySelectorAll('input,select').forEach(el => el.addEventListener('input', upd));
         $('#ft').addEventListener('change', () => {
           if (isNew) { $('#fc').value = typeDefColor(val('ft')); $('#ftr').checked = typeAllowsTranslation(val('ft')); }
@@ -5387,12 +5481,18 @@ svg .prim { cursor: pointer; }
         const i = t.indexOf('=');
         if (i > 0) quals[t.slice(0, i).trim()] = t.slice(i + 1).trim();
       }
+      // the qualifier picked in the dropdown wins over the same key in the free list
+      const qk = (val('fqk') || '/note').replace(/^\//, ''), qv = val('fqv').trim();
+      if (qv) quals[qk] = qv;
+      // segment names, colours and ranges as the table has them
+      const segs = segState.length > 1 ? segState.map(g => ({ start: g.start, end: g.end, name: g.name || '', color: g.color || '', skip: !!g.skip, startAt: g.startAt })) : null;
       return {
-        name, type: val('ft'), start: a - 1, end: point ? a - 1 : b, strand: +val('fd'), color: val('fc'),
-        notes: val('fno').trim(), molecule: val('fmol'), translated: $('#ftr').checked,
+        name, type: val('ft'), start: segs ? segs[0].start : a - 1, end: point ? a - 1 : (segs ? segs[segs.length - 1].end : b),
+        strand: +val('fd'), color: val('fc'),
+        notes: qk === 'note' ? qv : (cur.notes || ''), molecule: val('fmol'), translated: $('#ftr').checked,
         frame: tOpts.frame, matchProtein: $('#fmp').checked, quals,
         priority: $('#fpr').checked, code: tOpts.code, startMet: tOpts.startMet, startAt: tOpts.startAt,
-        segs: cur.segs, cleave: cur.cleave, point: point || cur.point
+        segs, cleave: cur.cleave, point: point || cur.point
       };
     }
     function saveMyFeature() {
@@ -5855,12 +5955,35 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ sequencing traces
+  /* Reading and aligning traces one at a time, with a frame between each, so the window
+   * keeps painting and says what it is doing instead of appearing to hang. */
+  async function addTracesInTurn(items) {
+    if (!items.length) return;
+    const many = items.length > 1;
+    for (let i = 0; i < items.length; i++) {
+      if (many) toast(`Aligning ${items[i].name} (${i + 1} of ${items.length})…`, 4000);
+      else toast(`Aligning ${items[i].name}…`, 4000);
+      // let the toast paint before the alignment takes the thread
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+      addTrace(items[i].name, items[i].buf);
+    }
+  }
   function openTraces() {
     const d = D(); if (!d) { toast('Open the reference sequence first.'); return; }
-    if (host && host.openFiles) { host.openFiles().then(files => { for (const f of files || []) { const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); addTrace(f.name, bin.buffer); } }); return; }
+    if (host && host.openFiles) {
+      host.openFiles().then(files => {
+        if (!files || !files.length) return;
+        addTracesInTurn(files.map(f => ({ name: f.name, buf: Uint8Array.from(atob(f.data), c => c.charCodeAt(0)).buffer })));
+      });
+      return;
+    }
     const inp = document.createElement('input');
     inp.type = 'file'; inp.multiple = true; inp.accept = '.ab1,.fa,.fasta,.seq,.txt';
-    inp.onchange = () => { for (const f of inp.files) { const r = new FileReader(); r.onload = () => addTrace(f.name, r.result); r.readAsArrayBuffer(f); } };
+    inp.onchange = async () => {
+      const items = [];
+      for (const f of inp.files) items.push({ name: f.name, buf: await f.arrayBuffer() });
+      addTracesInTurn(items);
+    };
     inp.click();
   }
   function addTrace(name, buf) {
@@ -8923,7 +9046,7 @@ svg .prim { cursor: pointer; }
   function fallbackCopy(t, done) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed'); } ta.remove(); }
 
   let toastT = null;
-  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); }
+  function toast(msg, ms) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms || 2600); }
 
   // ================================================================ global events
   document.addEventListener('mousedown', e => {
