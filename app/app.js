@@ -48,6 +48,63 @@ svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
 svg .orf { stroke: none; cursor: pointer; }
 svg .prim { cursor: pointer; }
 `;
+  /* The standard feature types, as the INSDC defines them for the nucleotide
+   * databases, plus the ones GenBank's protein records use. `scope` says where a type
+   * belongs, which is what the Manage Feature Types table sorts on. */
+  const STD_TYPES = [
+    ['assembly_gap', 'dna'], ['C_region', 'dna'], ['CAAT_signal', 'dna'], ['CDS', 'all'], ['centromere', 'dna'],
+    ['D-loop', 'dna'], ['D_segment', 'dna'], ['enhancer', 'dna'], ['exon', 'dna'], ['gap', 'dna'], ['GC_signal', 'dna'],
+    ['gene', 'all'], ['iDNA', 'dna'], ['intron', 'dna'], ['J_segment', 'dna'], ['LTR', 'dna'], ['mat_peptide', 'all'],
+    ['misc_binding', 'all'], ['misc_difference', 'all'], ['misc_feature', 'all'], ['misc_recomb', 'dna'],
+    ['misc_RNA', 'dna'], ['misc_structure', 'all'], ['mobile_element', 'dna'], ['modified_base', 'dna'],
+    ['mRNA', 'dna'], ['ncRNA', 'dna'], ['N_region', 'dna'], ['old_sequence', 'dna'], ['operon', 'dna'],
+    ['oriT', 'dna'], ['polyA_signal', 'dna'], ['polyA_site', 'dna'], ['precursor_RNA', 'dna'], ['prim_transcript', 'dna'],
+    ['primer_bind', 'dna'], ['promoter', 'dna'], ['propeptide', 'protein'], ['protein_bind', 'all'],
+    ['RBS', 'dna'], ['regulatory', 'dna'], ['repeat_region', 'dna'], ['rep_origin', 'dna'], ['rRNA', 'dna'],
+    ['S_region', 'dna'], ['sig_peptide', 'all'], ['source', 'all'], ['stem_loop', 'dna'], ['STS', 'dna'],
+    ['TATA_signal', 'dna'], ['telomere', 'dna'], ['terminator', 'dna'], ['tmRNA', 'dna'], ['transit_peptide', 'all'],
+    ['tRNA', 'dna'], ['unsure', 'all'], ['V_region', 'dna'], ['V_segment', 'dna'], ['variation', 'all'],
+    ["3'UTR", 'dna'], ["5'UTR", 'dna'],
+    // the kinds GenBank protein records carry
+    ['Region', 'protein'], ['Site', 'protein'], ['Bond', 'protein'], ['Het', 'protein'], ['SecStr', 'protein']
+  ];
+  // The qualifiers a feature type may carry, from the INSDC feature table.
+  const ALL_QUALIFIERS = ['allele', 'altitude', 'anticodon', 'bio_material', 'bound_moiety', 'cell_line', 'cell_type',
+    'chromosome', 'citation', 'clone', 'codon', 'codon_start', 'collected_by', 'collection_date', 'compare', 'country',
+    'cultivar', 'culture_collection', 'db_xref', 'dev_stage', 'direction', 'EC_number', 'ecotype', 'environmental_sample',
+    'estimated_length', 'exception', 'experiment', 'focus', 'frequency', 'function', 'gap_type', 'gene', 'gene_synonym',
+    'germline', 'haplogroup', 'haplotype', 'host', 'identified_by', 'inference', 'isolate', 'isolation_source',
+    'lab_host', 'lat_lon', 'linkage_evidence', 'locus_tag', 'macronuclear', 'map', 'mating_type', 'mobile_element_type',
+    'mod_base', 'mol_type', 'ncRNA_class', 'old_locus_tag', 'operon', 'organelle', 'organism', 'partial', 'PCR_conditions',
+    'PCR_primers', 'phenotype', 'plasmid', 'pop_variant', 'product', 'protein_id', 'proviral', 'pseudo', 'pseudogene',
+    'rearranged', 'recombination_class', 'regulatory_class', 'replace', 'ribosomal_slippage', 'rpt_family', 'rpt_type',
+    'rpt_unit_range', 'rpt_unit_seq', 'satellite', 'segment', 'serotype', 'serovar', 'sex', 'specimen_voucher',
+    'standard_name', 'strain', 'sub_clone', 'submitter_seqid', 'sub_species', 'sub_strain', 'tag_peptide',
+    'tissue_lib', 'tissue_type', 'transgenic', 'translation', 'transl_except', 'transl_table', 'trans_splicing',
+    'type_material', 'variety'];
+  const TRANSLATION_QUALS = ['codon', 'codon_start', 'transl_except', 'transl_table', 'translation'];
+  const customTypes = () => (SET.featureTypes = SET.featureTypes || []);
+  const typeColors = () => (SET.typeColors = SET.typeColors || {});
+  const typeDefColor = t => {
+    const c = customTypes().find(x => x.name === t);
+    if (c) return c.color;
+    return typeColors()[t] || TYPE_COL[t] || '#c9ced6';
+  };
+  const isCustomType = t => customTypes().some(x => x.name === t);
+  const typeAllowsTranslation = t => {
+    const c = customTypes().find(x => x.name === t);
+    if (c) return !!c.translated;
+    return t === 'CDS' || t === 'gene' || t === 'mat_peptide' || t === 'sig_peptide' || t === 'transit_peptide' || t === 'propeptide';
+  };
+  // What the Type menus offer: the standard types, the user's own, and anything a file
+  // brought in that is not in either list.
+  function featureTypeList() {
+    const seen = new Set(), out = [];
+    for (const [t] of STD_TYPES) if (!seen.has(t)) { seen.add(t); out.push(t); }
+    for (const c of customTypes()) if (!seen.has(c.name)) { seen.add(c.name); out.push(c.name); }
+    for (const d of S.docs) for (const f of (d.features || [])) if (f.type && !seen.has(f.type)) { seen.add(f.type); out.push(f.type); }
+    return out.sort((a, b) => a.localeCompare(b));
+  }
   const FEATURE_TYPES = Object.keys(TYPE_COL).filter(t => t !== 'ORF');
   let featPicked = new Set();   // features ticked in the Features table
   // Forward ORFs orange, reverse ORFs green, as the reference tool draws them
@@ -533,6 +590,9 @@ svg .prim { cursor: pointer; }
           { label: 'Hide Selected Features', dis: !has, act: () => setFeatVisible(featPicked.size ? d.features.filter(f => featPicked.has(f.id)) : (targetFeature(d) ? [targetFeature(d)] : []), false) }
         ] },
         '-',
+        { label: 'Add Feature Type…', act: () => dlgFeatureType(null) },
+        { label: 'Manage Feature Types…', act: dlgManageTypes },
+        '-',
         { label: 'Detect Common Features…', dis: !has, act: detectCommon },
         { label: 'Add to Common Features…', dis: !has || !targetFeature(d), act: addToCommon },
         { label: 'Browse Common Features…', act: dlgFeatureDB },
@@ -930,6 +990,307 @@ svg .prim { cursor: pointer; }
       sel = `Selected <b>${fmtc(d, d.sel.start)} – ${fmtc(d, (d.sel.end === 0 ? n : d.sel.end) - 1)}</b> = <b>${fmt(L)} bp</b> &nbsp; GC ${DNA.gcPct(s).toFixed(0)}%` + (L <= 80 ? ` &nbsp; Tm ${DNA.tm(s).toFixed(1)} °C` : '');
     } else sel = `Cursor after base <b>${fmtc(d, d.sel.start - 1)}</b>`;
     st.innerHTML = `<span><b>${esc(d.name)}</b> &nbsp; ${fmt(n)} bp &nbsp; ${d.circular ? 'circular' : 'linear'}</span><span>${sel}</span><span class="r">${S.view === 'seq' ? 'Type A/C/G/T to edit · Shift+arrows extend' : ''}</span>`;
+  }
+
+  /* The Type menu of a feature dialog: recently used types first, then everything,
+   * with the user's own marked as Custom so they stand out. */
+  function typeOptions(selected, scope) {
+    const all = featureTypeList().filter(t => {
+      const c = customTypes().find(x => x.name === t);
+      if (!c) {
+        const std = STD_TYPES.find(([n]) => n === t);
+        if (std && scope && std[1] !== 'all' && std[1] !== scope) return false;
+        return true;
+      }
+      return !scope || !c.scope || c.scope === 'all' || c.scope === scope;
+    });
+    const recent = (SET.recentTypes || []).filter(t => all.includes(t));
+    const mark = t => esc(t) + (isCustomType(t) ? '  (Custom)' : '');
+    let html = '';
+    if (recent.length) html += `<optgroup label="Recent feature types">${recent.map(t => `<option value="${esc(t)}" ${t === selected ? 'selected' : ''}>${mark(t)}</option>`).join('')}</optgroup>`;
+    html += `<optgroup label="All feature types">${all.map(t => `<option value="${esc(t)}" ${t === selected && !recent.includes(t) ? 'selected' : ''}>${mark(t)}</option>`).join('')}</optgroup>`;
+    if (selected && !all.includes(selected)) html = `<option selected>${esc(selected)}</option>` + html;
+    return html;
+  }
+
+  // ================================================================ FEATURE TYPES
+  /* The feature-type database. Standard types cannot be renamed or given qualifiers,
+   * but their default colour can be changed; custom types are the user's own and are
+   * kept with the program, so every file can use them. */
+  function dlgManageTypes() {
+    let show = 'all', sortBy = 'name', desc = false, pick = new Set();
+    const rows = () => {
+      const std = STD_TYPES.map(([name, scope]) => ({ name, scope, custom: false, color: typeDefColor(name), changed: !!typeColors()[name], translated: typeAllowsTranslation(name), desc: '' }));
+      const mine = customTypes().map(c => ({ name: c.name, scope: c.scope || 'all', custom: true, color: c.color, changed: false, translated: !!c.translated, desc: c.description || '', quals: c.quals || [] }));
+      let list = show === 'standard' ? std : (show === 'custom' ? mine : std.concat(mine));
+      const cmp = {
+        name: (a, b) => a.name.localeCompare(b.name),
+        scope: (a, b) => a.scope.localeCompare(b.scope) || a.name.localeCompare(b.name),
+        kind: (a, b) => (a.custom ? 1 : 0) - (b.custom ? 1 : 0) || a.name.localeCompare(b.name)
+      }[sortBy];
+      list.sort(desc ? (a, b) => -cmp(a, b) : cmp);
+      return list;
+    };
+    const SCOPE_TXT = { all: 'All', dna: 'DNA / RNA', protein: 'Protein' };
+    const render = () => {
+      if (!$('#mtT')) return;
+      const list = rows();
+      const arrow = k => sortBy === k ? (desc ? ' ▾' : ' ▴') : '';
+      $('#mtT').innerHTML = `<table class="grid"><thead><tr><th style="width:26px"></th><th style="width:30px"></th>
+          <th class="sort" data-s="name">Feature type${arrow('name')}</th><th class="sort" data-s="scope">Applies to${arrow('scope')}</th>
+          <th class="sort" data-s="kind">Kind${arrow('kind')}</th><th>Translation</th><th>Qualifiers</th><th>Description</th></tr></thead><tbody>
+        ${list.map(t => `<tr data-t="${esc(t.name)}">
+          <td><input type="checkbox" data-tc="${esc(t.name)}" ${pick.has(t.name) ? 'checked' : ''}></td>
+          <td><span class="sw" data-tcol="${esc(t.name)}" style="background:${t.color};cursor:pointer" title="Click to change the default colour"></span></td>
+          <td${t.changed ? ' style="font-style:italic"' : ''}><b>${esc(t.name)}</b></td>
+          <td>${SCOPE_TXT[t.scope] || t.scope}</td>
+          <td>${t.custom ? '<span class="note">Custom</span>' : 'Standard'}</td>
+          <td>${t.translated ? 'allowed' : '—'}</td>
+          <td class="wrap">${t.custom ? esc((t.quals || []).join(', ') || 'label, note') : '<span class="note">standard set</span>'}</td>
+          <td class="wrap">${esc(t.desc)}</td></tr>`).join('')}
+      </tbody></table>`;
+      $('#mtN').textContent = `${list.length} type${list.length === 1 ? '' : 's'}${pick.size ? ` · ${pick.size} selected` : ''}`;
+      for (const id of ['mtEdit', 'mtRemove']) { const b = $('#' + id); if (b) b.disabled = !pick.size; }
+    };
+    dialog({
+      title: 'Manage Feature Types', wide: true,
+      body: `<div class="ecbar">
+          <select id="mtShow"><option value="all">All feature types</option><option value="standard">Standard feature types</option><option value="custom">Custom feature types</option></select>
+          <button class="btn pri" id="mtAdd">Add…</button>
+          <button class="btn" id="mtEdit">Edit…</button>
+          <button class="btn dng" id="mtRemove">Remove</button>
+          <button class="btn" id="mtIO">Import / Export ▾</button>
+          <span class="sp" style="flex:1"></span><span class="note" id="mtN"></span>
+        </div>
+        <div class="tscroll" style="max-height:52vh" id="mtT"></div>
+        <div class="hint">A standard type's name and qualifiers are fixed, but its default colour can be changed; a changed one is shown in italics. A new colour applies to features added afterwards — use Features ▸ Edit Feature to recolour one that already exists.</div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#mtShow').onchange = e => { show = e.target.value; pick.clear(); render(); };
+        const reopen = () => dlgManageTypes();
+        box.querySelector('#mtAdd').onclick = () => dlgFeatureType(null, reopen);
+        box.querySelector('#mtEdit').onclick = () => {
+          const name = [...pick][0];
+          const c = customTypes().find(x => x.name === name);
+          if (c) dlgFeatureType(c, reopen);
+          else pickTypeColor(name, reopen);
+        };
+        box.querySelector('#mtRemove').onclick = async () => {
+          const names = [...pick].filter(isCustomType);
+          const reset = [...pick].filter(n => !isCustomType(n) && typeColors()[n]);
+          if (!names.length && !reset.length) { toast('Only a custom type can be removed; a standard one can have its colour reset.'); return; }
+          SET.featureTypes = customTypes().filter(x => !names.includes(x.name));
+          for (const n of reset) delete typeColors()[n];
+          pick.clear();
+          await saveSettings();
+          render(); renderAll(true);
+          toast(`${names.length ? `${names.length} custom type${names.length === 1 ? '' : 's'} removed` : ''}${names.length && reset.length ? ', ' : ''}${reset.length ? `${reset.length} colour${reset.length === 1 ? '' : 's'} reset` : ''}`);
+        };
+        box.querySelector('#mtIO').onclick = e => {
+          const r = e.target.getBoundingClientRect();
+          showCtx(r.left, r.bottom, [
+            { label: 'Export All Custom Feature Types…', dis: !customTypes().length, act: () => exportTypes(customTypes()) },
+            { label: `Export Selected Custom Feature Types… (${[...pick].filter(isCustomType).length})`, dis: ![...pick].some(isCustomType), act: () => exportTypes(customTypes().filter(x => pick.has(x.name))) },
+            '-',
+            { label: 'Import Custom Feature Types From a List…', act: () => importTypes(reopen) }
+          ]);
+        };
+        box.querySelector('#mtT').addEventListener('click', e => {
+          const sw = e.target.closest('[data-tcol]');
+          if (sw) { pickTypeColor(sw.dataset.tcol, reopen); return; }
+          const ck = e.target.closest('[data-tc]');
+          if (ck) { if (ck.checked) pick.add(ck.dataset.tc); else pick.delete(ck.dataset.tc); render(); return; }
+          const th = e.target.closest('th.sort');
+          if (th) { if (sortBy === th.dataset.s) desc = !desc; else { sortBy = th.dataset.s; desc = false; } render(); }
+        });
+        box.querySelector('#mtT').addEventListener('dblclick', e => {
+          const tr = e.target.closest('tr[data-t]'); if (!tr) return;
+          const c = customTypes().find(x => x.name === tr.dataset.t);
+          if (c) dlgFeatureType(c, reopen); else pickTypeColor(tr.dataset.t, reopen);
+        });
+      }
+    });
+  }
+  // The colour editor for one type, offering a palette and a free choice.
+  function pickTypeColor(name, done) {
+    const PALETTE = ['#f4c95d', '#7cc37a', '#e06b63', '#f0e27a', '#c9ced6', '#8fb3e8', '#69c4c6', '#c69be0',
+      '#e8a06a', '#a3d56f', '#f2a3c9', '#a8a8de', '#9fd6b4', '#d8d8d8', '#f6d98a', '#b4d4f0'];
+    const cur = typeDefColor(name);
+    dialog({
+      title: `Default Colour — ${name}`,
+      body: `<div class="form">
+        <label>Palette</label><div class="row2" style="flex-wrap:wrap;gap:4px">${PALETTE.map(c => `<button class="swbtn" data-pc="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>
+        <label for="tcC">Any colour</label><input type="color" id="tcC" value="${cur}">
+        <div class="full hint">The new colour is used for features of this type added from now on.</div></div>`,
+      buttons: [
+        ...(isCustomType(name) ? [] : [{ label: 'Reset to default', act: async () => { delete typeColors()[name]; await saveSettings(); renderAll(true); closeDialog(); if (done) done(); } }]),
+        { label: 'Cancel' },
+        { label: 'OK', primary: true, act: async () => {
+          const c = val('tcC');
+          const custom = customTypes().find(x => x.name === name);
+          if (custom) custom.color = c; else typeColors()[name] = c;
+          await saveSettings();
+          renderAll(true);
+          closeDialog();
+          if (done) done();
+        } }],
+      onOpen: box => {
+        box.querySelectorAll('[data-pc]').forEach(b => b.onclick = () => { box.querySelector('#tcC').value = b.dataset.pc; });
+      }
+    });
+  }
+  /* Create or edit a custom feature type: its name, default colour, description,
+   * whether it may be translated, and which qualifiers it carries. label and note are
+   * always there; turning translation on adds the qualifiers translation needs. */
+  function dlgFeatureType(existing, done) {
+    const isNew = !existing;
+    const cur = existing || { name: '', color: '#9fd6b4', description: '', translated: false, scope: 'dna', quals: [] };
+    let assigned = ['label', 'note', ...(cur.quals || []).filter(q => q !== 'label' && q !== 'note')];
+    const avail = () => ALL_QUALIFIERS.filter(q => !assigned.includes(q));
+    const render = () => {
+      if (!$('#ftAvail')) return;
+      $('#ftAvail').innerHTML = avail().map(q => `<option value="${esc(q)}">${esc(q)}</option>`).join('');
+      $('#ftAssigned').innerHTML = assigned.map(q => `<option value="${esc(q)}" ${q === 'label' || q === 'note' ? 'class="fixed"' : ''}>${esc(q)}${q === 'label' || q === 'note' ? ' (always)' : ''}</option>`).join('');
+    };
+    dialog({
+      title: isNew ? 'Add Feature Type' : `Edit Feature Type “${cur.name}”`, wide: true,
+      body: `<div class="form">
+        <label for="ftN">Name</label><input type="text" id="ftN" value="${esc(cur.name)}" placeholder="no spaces — they become underscores">
+        <label for="ftC">Default colour</label><input type="color" id="ftC" value="${cur.color}">
+        <label for="ftS">Applies to</label><select id="ftS"><option value="dna" ${cur.scope === 'dna' ? 'selected' : ''}>DNA / RNA</option><option value="protein" ${cur.scope === 'protein' ? 'selected' : ''}>Protein</option><option value="all" ${cur.scope === 'all' ? 'selected' : ''}>All</option></select>
+        <label for="ftD">Description</label><input type="text" id="ftD" value="${esc(cur.description || '')}">
+        <label></label><label><input type="checkbox" id="ftT" ${cur.translated ? 'checked' : ''}> Allow translation in Sequence view</label>
+        <label>Qualifiers</label><div class="row2" style="align-items:stretch">
+          <div style="flex:1"><div class="note">Available</div><select id="ftAvail" multiple size="9" style="width:100%"></select></div>
+          <div style="display:flex;flex-direction:column;justify-content:center;gap:4px">
+            <button class="btn" id="ftAdd" type="button">Add →</button>
+            <button class="btn" id="ftRem" type="button">← Remove</button>
+          </div>
+          <div style="flex:1"><div class="note">Assigned</div><select id="ftAssigned" multiple size="9" style="width:100%"></select></div>
+        </div>
+        <div class="full hint">label and note are always present and cannot be removed. Turning translation on adds ${TRANSLATION_QUALS.join(', ')}.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: isNew ? 'Add' : 'Save', primary: true, act: async () => {
+        const name = val('ftN').trim().replace(/\s+/g, '_');
+        if (!name) return showErr('Give the type a name.');
+        if (!/^[A-Za-z0-9_'-]+$/.test(name)) return showErr('A type name may hold letters, digits, underscores, apostrophes and hyphens.');
+        if (STD_TYPES.some(([t]) => t === name)) return showErr(`“${name}” is a standard feature type already.`);
+        if (isNew && isCustomType(name)) return showErr(`“${name}” is already one of your types.`);
+        const translated = $('#ftT').checked;
+        const quals = [...new Set([...assigned, ...(translated ? TRANSLATION_QUALS : [])])];
+        const entry = { name, color: val('ftC'), description: val('ftD').trim(), translated, scope: val('ftS'), quals };
+        if (isNew) customTypes().push(entry);
+        else Object.assign(existing, entry);
+        rememberType(name);
+        await saveSettings();
+        renderAll(true);
+        closeDialog();
+        if (done) done();
+        toast(`Feature type “${name}” ${isNew ? 'added' : 'saved'}`);
+      } }],
+      onOpen: box => {
+        render();
+        box.querySelector('#ftAdd').onclick = () => {
+          assigned = [...assigned, ...[...box.querySelector('#ftAvail').selectedOptions].map(o => o.value)];
+          render();
+        };
+        box.querySelector('#ftRem').onclick = () => {
+          const drop = [...box.querySelector('#ftAssigned').selectedOptions].map(o => o.value).filter(q => q !== 'label' && q !== 'note');
+          assigned = assigned.filter(q => !drop.includes(q));
+          render();
+        };
+        box.querySelector('#ftT').onchange = e => { if (e.target.checked) { assigned = [...new Set([...assigned, ...TRANSLATION_QUALS])]; render(); } };
+        box.querySelector('#ftN').oninput = e => { const p2 = e.target.selectionStart; e.target.value = e.target.value.replace(/\s+/g, '_'); e.target.setSelectionRange(p2, p2); };
+      }
+    });
+  }
+  function rememberType(t) {
+    SET.recentTypes = [t, ...(SET.recentTypes || []).filter(x => x !== t)].slice(0, 8);
+  }
+  // Custom types travel as a small CSV, which is what the reference tool shares between users.
+  function exportTypes(list) {
+    if (!list.length) { toast('No custom types to export.'); return; }
+    const esc2 = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+    const rows = [['name', 'color', 'scope', 'translated', 'description', 'qualifiers'].join(',')];
+    for (const t of list) rows.push([t.name, t.color, t.scope || 'dna', t.translated ? 'yes' : 'no', t.description || '', (t.quals || []).join(' ')].map(esc2).join(','));
+    const csv = rows.join('\n') + '\n';
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'feature-types.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p2 => { if (p2) toast('Exported ' + p2.split(/[\\/]/).pop()); });
+    else downloadText('feature-types.csv', csv);
+  }
+  async function importTypes(done) {
+    let text = null;
+    if (host && host.openFiles) {
+      const files = await host.openFiles();
+      if (!files || !files.length) return;
+      text = files[0].content;
+    } else {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,.txt';
+      text = await new Promise(res => { inp.onchange = () => { const f = inp.files[0]; if (!f) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(f); }; inp.click(); });
+    }
+    if (!text) return;
+    const lines = String(text).split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) return toast('That file is empty.');
+    const split = l => {
+      const out = []; let cur2 = '', q = false;
+      for (let i = 0; i < l.length; i++) {
+        const c = l[i];
+        if (q) { if (c === '"' && l[i + 1] === '"') { cur2 += '"'; i++; } else if (c === '"') q = false; else cur2 += c; }
+        else if (c === '"') q = true;
+        else if (c === ',') { out.push(cur2); cur2 = ''; }
+        else cur2 += c;
+      }
+      out.push(cur2); return out;
+    };
+    const head = split(lines[0]).map(h => h.trim().toLowerCase());
+    const col = k => head.indexOf(k);
+    let added = 0, skipped = 0;
+    for (const line of lines.slice(head.includes('name') ? 1 : 0)) {
+      const f = split(line);
+      const name = (col('name') >= 0 ? f[col('name')] : f[0] || '').trim().replace(/\s+/g, '_');
+      if (!name || STD_TYPES.some(([t]) => t === name) || isCustomType(name)) { skipped++; continue; }
+      customTypes().push({
+        name,
+        color: (col('color') >= 0 ? f[col('color')] : '') || '#9fd6b4',
+        scope: (col('scope') >= 0 ? f[col('scope')] : '') || 'dna',
+        translated: /^(yes|true|1)$/i.test(col('translated') >= 0 ? f[col('translated')] : ''),
+        description: (col('description') >= 0 ? f[col('description')] : '') || '',
+        quals: ['label', 'note', ...((col('qualifiers') >= 0 ? f[col('qualifiers')] : '') || '').split(/[\s;]+/).filter(Boolean)]
+      });
+      added++;
+    }
+    await saveSettings();
+    renderAll(true);
+    if (done) done();
+    toast(`${added} feature type${added === 1 ? '' : 's'} imported${skipped ? `, ${skipped} skipped (already known)` : ''}`);
+  }
+  /* A file may carry a type GeneCanvas has never seen. This offers the same choice
+   * the reference tool does: keep it as a custom type, or fall back to misc_feature. */
+  function checkUnknownTypes(d) {
+    const known = new Set([...STD_TYPES.map(([t]) => t), ...customTypes().map(c => c.name)]);
+    const unknown = [...new Set(d.features.map(f => f.type).filter(t => t && !known.has(t)))];
+    if (!unknown.length) return;
+    dialog({
+      title: unknown.length === 1 ? 'Unknown Feature Type' : 'Unknown Feature Types',
+      body: `<div class="form">
+        <div class="full">${esc(d.name)} uses ${unknown.length === 1 ? 'a feature type' : 'feature types'} this copy of GeneCanvas does not know:</div>
+        <div class="full"><ul style="margin:4px 0 8px 18px">${unknown.map(t => `<li><b class="mono">${esc(t)}</b> — ${d.features.filter(f => f.type === t).length} feature(s)</li>`).join('')}</ul></div>
+        <div class="full hint">Keeping them adds each one as a custom feature type, so other files can use it too.</div></div>`,
+      buttons: [
+        { label: 'Change to misc_feature', act: () => {
+          let n2 = 0;
+          for (const f of d.features) if (unknown.includes(f.type)) { f.type = 'misc_feature'; n2++; }
+          commit(d, `Changed ${n2} unknown feature type${n2 === 1 ? '' : 's'} to misc_feature`);
+          renderAll(true);
+        } },
+        { label: 'Keep as Custom Types', primary: true, act: async () => {
+          for (const t of unknown) if (!isCustomType(t)) customTypes().push({ name: t, color: typeDefColor(t), scope: isProt(d) ? 'protein' : 'dna', translated: false, description: `From ${d.name}`, quals: ['label', 'note'] });
+          await saveSettings();
+          renderAll(true);
+          closeDialog();
+          toast(`${unknown.length} custom feature type${unknown.length === 1 ? '' : 's'} added`);
+        } }]
+    });
   }
 
   // ================================================================ INFO PANEL
@@ -3242,7 +3603,7 @@ svg .prim { cursor: pointer; }
       title: `Edit ${list.length} Feature${list.length === 1 ? '' : 's'}`, wide: true,
       body: `<div class="form">
         <div class="full note">${esc(list.map(f => f.name).slice(0, 8).join(', '))}${list.length > 8 ? ` and ${list.length - 8} more` : ''}</div>
-        <label></label><label><input type="checkbox" id="efCT"> Set the type to <select id="efT">${FEATURE_TYPES.map(t => `<option>${t}</option>`).join('')}</select></label>
+        <label></label><label><input type="checkbox" id="efCT"> Set the type to <select id="efT">${typeOptions('', 'dna')}</select></label>
         <label></label><label><input type="checkbox" id="efCC"> Set the colour to <input type="color" id="efC" value="#c9ced6"></label>
         <label></label><label><input type="checkbox" id="efCD"> Set the direction to <select id="efD"><option value="1">→ forward</option><option value="-1">← reverse</option><option value="0">— nondirectional</option><option value="2">↔ bidirectional</option></select></label>
         <label></label><label><input type="checkbox" id="efCR"> <select id="efR"><option value="1">Translate</option><option value="0">Do not translate</option></select> these features in Sequence view</label>
@@ -3804,7 +4165,7 @@ svg .prim { cursor: pointer; }
     const d = D();
     const nf = {
       id: uid(), name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand,
-      color: f.color || (f.type === 'CDS' ? CDS_PALETTE[d.features.filter(x => x.type === 'CDS').length % CDS_PALETTE.length] : (TYPE_COL[f.type] || '#c9ced6')),
+      color: f.color || (f.type === 'CDS' && !typeColors()['CDS'] ? CDS_PALETTE[d.features.filter(x => x.type === 'CDS').length % CDS_PALETTE.length] : typeDefColor(f.type)),
       notes: f.notes || '', molecule: f.molecule || 'DNA',
       translated: f.translated !== undefined ? !!f.translated : (f.type === 'CDS'),
       frame: f.frame || 0, matchProtein: !!f.matchProtein, quals: f.quals || {},
@@ -3813,7 +4174,7 @@ svg .prim { cursor: pointer; }
     };
     if (f.segs && f.segs.length > 1) nf.segs = f.segs.map(g => ({ start: g.start, end: g.end, name: g.name || '', color: g.color || '', skip: !!g.skip, startAt: g.startAt }));
     if (f.cleave && f.cleave.length) nf.cleave = f.cleave.slice();
-    d.features.push(nf); commit(d, `Added feature ${nf.name}`); renderAll(true);
+    d.features.push(nf); rememberType(nf.type); commit(d, `Added feature ${nf.name}`); renderAll(true);
     return nf;
   }
   function removeFeature(id) {
@@ -3987,7 +4348,7 @@ svg .prim { cursor: pointer; }
       title: isNew ? 'Add Feature' : `Edit Feature “${cur.name}”`, wide: true,
       body: `<div class="form">
         <label for="fn">Name</label><input type="text" id="fn" value="${esc(cur.name)}">
-        <label for="ft">Type</label><select id="ft">${FEATURE_TYPES.map(t => `<option ${t === cur.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label for="ft">Type</label><select id="ft">${typeOptions(cur.type, 'dna')}</select>
         <label for="fmol">Molecule</label><select id="fmol">${MOLECULES.map(m => `<option ${m === (cur.molecule || 'DNA') ? 'selected' : ''}>${m}</option>`).join('')}</select>
         <label for="fs">Start</label><input type="number" id="fs" min="1" max="${n}" value="${cur.start + 1}">
         <label for="fe">End</label>${point
@@ -4051,7 +4412,7 @@ svg .prim { cursor: pointer; }
         if (segBtn) segBtn.onclick = () => { closeDialog(); editSegments(f, segsOf(f, n), `Edited segments of ${f.name}`); };
         box.querySelectorAll('input,select').forEach(el => el.addEventListener('input', upd));
         $('#ft').addEventListener('change', () => {
-          if (isNew) { $('#fc').value = TYPE_COL[val('ft')] || '#c9ced6'; $('#ftr').checked = val('ft') === 'CDS'; }
+          if (isNew) { $('#fc').value = typeDefColor(val('ft')); $('#ftr').checked = typeAllowsTranslation(val('ft')); }
           upd();
         });
         upd();
@@ -5603,7 +5964,7 @@ svg .prim { cursor: pointer; }
       body: `<div class="form">
         <label for="pfk">Kind</label><select id="pfk">${PROT_KINDS.map(([v, t]) => `<option value="${v}" ${pkind(cur) === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <label for="pfn">Name</label><input type="text" id="pfn" value="${esc(cur.name)}">
-        <label for="pft">Type</label><select id="pft">${FEATURE_TYPES.map(t => `<option ${t === cur.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label for="pft">Type</label><select id="pft">${typeOptions(cur.type, 'protein')}</select>
         <label data-only="region">Subtype</label><div data-only="region"><select id="pfsub">${REGION_SUBTYPES.map(t => `<option value="${esc(t)}" ${t === (cur.subtype || '') ? 'selected' : ''}>${t || 'no subtype'}</option>`).join('')}</select></div>
         <label for="pfs">From</label><input type="number" id="pfs" min="1" max="${n}" value="${cur.start + 1}">
         <label for="pfe" data-only="region,bond">To</label><div data-only="region,bond"><input type="number" id="pfe" min="1" max="${n}" value="${cur.end}"></div>
@@ -6212,7 +6573,7 @@ svg .prim { cursor: pointer; }
   // ================================================================ stored settings
   // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
   const SETTINGS_KEY = 'genecanvas.settings';
-  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [] };
+  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [], featureTypes: [], typeColors: {}, recentTypes: [] };
   let SET = { ...DEFAULT_SETTINGS };
 
   async function loadSettings() {
@@ -6495,6 +6856,7 @@ svg .prim { cursor: pointer; }
           toast(`Saved “${name}” for all DNA files`);
         }
         renderMenuState();
+        closeDialog();
       } }]
     });
   }
@@ -7227,8 +7589,10 @@ svg .prim { cursor: pointer; }
       else src = DNA.parseAny(typeof data === 'string' ? data : new TextDecoder().decode(data), name);
       src.path = path && /\.(gb|gbk|genbank|gbff)$/i.test(path) ? path : null;
       if (path && !src.path) src.histLabel = 'Imported ' + name;
-      addDoc(src);
+      const doc = addDoc(src);
       toast(`Opened ${name} — ${fmt(src.seq.length)} bp, ${src.features.length} features`);
+      // a file may carry a feature type this copy does not know about
+      setTimeout(() => checkUnknownTypes(doc), 150);
     } catch (err) {
       dialog({ title: 'Could Not Open File', body: `<p>${esc(name)}</p><p class="err">${esc(err.message)}</p><p class="hint">GeneCanvas opens GenBank (.gb, .gbk), FASTA (.fa, .fasta), .dna and plain-text sequences.</p>`, buttons: [{ label: 'OK', primary: true }] });
     }
@@ -7429,5 +7793,5 @@ svg .prim { cursor: pointer; }
     if (it.dis) throw new Error('Disabled: ' + itemLabel);
     return it.act();
   }
-  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings };
+  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings, checkUnknownTypes, loadContent };
 })();

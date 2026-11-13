@@ -497,3 +497,5 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .infopanel .iitem { padding: 4px 6px; border: 1px solid var(--border-soft); border-radius: 3px; background: var(--chrome); line-height: 1.35; }
 .iitem.on { border-color: var(--accent); background: #e8effb; cursor: default; }
 .iitem { cursor: default; }
+.swbtn { width: 24px; height: 20px; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; padding: 0; }
+.swbtn:hover { outline: 2px solid var(--accent); }
