@@ -6,6 +6,10 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = n => Number(n).toLocaleString('en-US');
+  // The number shown for a base. Normally the 1-based position; a linear sequence may
+  // carry the coordinates of a larger one, set through View > Set Origin.
+  const coord = (d, p0) => p0 + (d && d.numFrom ? d.numFrom : 1);
+  const fmtc = (d, p0) => fmt(coord(d, p0));
   const TAU = Math.PI * 2;
 
   const TYPE_COL = {
@@ -58,6 +62,11 @@ svg .prim { cursor: pointer; }
       transMode: 'orfs',        // orfs | top3 | bottom3 | all6 | +1 | +2 | +3 | -1 | -2 | -3
       aa3: false, transCode: '1', orfStarts: ['ATG'], orfStrands: 'both',
       colorScheme: 'none', protScheme: 'none',
+      seqFormat: 'default',     // default | compact | plain
+      blockSize: 0,             // 0 none, 3 codons, 10 decades
+      lineWidth: 0,             // 0 = wrap to window, otherwise a fixed number of bases
+      showLocations: true,      // coordinates beside enzyme and primer names
+      showMinimap: false,
       labelMode: 'auto',      // auto | inside | outside
       featOnLine: false,      // draw every feature on the backbone instead of in its own lane
       showRuler: true,
@@ -435,6 +444,24 @@ svg .prim { cursor: pointer; }
         { label: 'Show ORFs', chk: has && d.opts.showORFs, dis: !has, act: () => setOpt('showORFs', !d.opts.showORFs) },
         { label: 'Translation Options…', dis: !has, act: dlgTranslationOptions },
         { label: 'Use 3-Letter Amino Acid Codes', chk: has && d.opts.aa3, dis: !has, act: () => setOpt('aa3', !d.opts.aa3) },
+        '-',
+        { label: 'Sequence Format', items: [
+          { label: 'Default', chk: has && (d.opts.seqFormat || 'default') === 'default', dis: !has, act: () => setOpt('seqFormat', 'default') },
+          { label: 'Compact', chk: has && d.opts.seqFormat === 'compact', dis: !has, act: () => setOpt('seqFormat', 'compact') },
+          { label: 'Plain text', chk: has && d.opts.seqFormat === 'plain', dis: !has, act: () => setOpt('seqFormat', 'plain') },
+          '-',
+          { label: 'No blocks', chk: has && !d.opts.blockSize, dis: !has, act: () => setOpt('blockSize', 0) },
+          { label: 'Blocks of 3', chk: has && d.opts.blockSize === 3, dis: !has, act: () => setOpt('blockSize', 3) },
+          { label: 'Blocks of 10', chk: has && d.opts.blockSize === 10, dis: !has, act: () => setOpt('blockSize', 10) },
+          '-',
+          { label: 'Wrap to Window', chk: has && !d.opts.lineWidth, dis: !has, act: () => setOpt('lineWidth', 0) },
+          { label: 'Fixed Line Width…', chk: has && !!d.opts.lineWidth, dis: !has, act: dlgLineWidth }
+        ] },
+        { label: 'Show Minimap', chk: has && d.opts.showMinimap, dis: !has, act: () => setOpt('showMinimap', !d.opts.showMinimap) },
+        { label: 'Show Locations', chk: has && d.opts.showLocations !== false, dis: !has, act: () => setOpt('showLocations', d.opts.showLocations === false) },
+        '-',
+        { label: 'Set Origin…', dis: !has, act: dlgSetOrigin },
+        { label: 'Flip (Reverse Complement the View)', dis: !has, act: revCompAll },
         '-',
         { label: 'Show Colours', items: [
           ...SCHEMES.map(([k, t]) => ({ label: t, chk: has && (d.opts.colorScheme || 'none') === k, dis: !has, act: () => { d.opts.colorScheme = k; if (k === 'nt') d.opts.baseColors.enabled = true; renderAll(true); } })),
@@ -866,8 +893,8 @@ svg .prim { cursor: pointer; }
     let sel;
     if (L) {
       const s = selSeq(d);
-      sel = `Selected <b>${fmt(d.sel.start + 1)} – ${fmt(d.sel.end === 0 ? n : d.sel.end)}</b> = <b>${fmt(L)} bp</b> &nbsp; GC ${DNA.gcPct(s).toFixed(0)}%` + (L <= 80 ? ` &nbsp; Tm ${DNA.tm(s).toFixed(1)} °C` : '');
-    } else sel = `Cursor after base <b>${fmt(d.sel.start)}</b>`;
+      sel = `Selected <b>${fmtc(d, d.sel.start)} – ${fmtc(d, (d.sel.end === 0 ? n : d.sel.end) - 1)}</b> = <b>${fmt(L)} bp</b> &nbsp; GC ${DNA.gcPct(s).toFixed(0)}%` + (L <= 80 ? ` &nbsp; Tm ${DNA.tm(s).toFixed(1)} °C` : '');
+    } else sel = `Cursor after base <b>${fmtc(d, d.sel.start - 1)}</b>`;
     st.innerHTML = `<span><b>${esc(d.name)}</b> &nbsp; ${fmt(n)} bp &nbsp; ${d.circular ? 'circular' : 'linear'}</span><span>${sel}</span><span class="r">${S.view === 'seq' ? 'Type A/C/G/T to edit · Shift+arrows extend' : ''}</span>`;
   }
 
@@ -898,6 +925,47 @@ svg .prim { cursor: pointer; }
     else if (S.view === 'align') renderAlign();
     else if (S.view === 'compare') renderCompare();
     else if (S.view === 'hist') renderHistory();
+  }
+
+  function dlgLineWidth() {
+    const d = D();
+    dialog({
+      title: 'Fixed Line Width',
+      body: `<div class="form">
+        <label for="lwN">Bases per line</label><input type="number" id="lwN" value="${d.opts.lineWidth || 60}" min="10" max="300" style="width:90px">
+        <div class="full hint">Set this to wrap at the same place however wide the window is, which keeps a printed or copied view consistent. Choose Wrap to Window to go back.</div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        setOpt('lineWidth', Math.max(10, Math.min(300, parseInt(val('lwN'), 10) || 60)));
+      } }]
+    });
+  }
+  /* Set Origin: for a circular sequence this rotates the molecule, which is what the
+   * existing Set Origin at Cursor does. For a linear one nothing can be rotated, so the
+   * numbering is offset instead, which is how the reference tool lets a linear sequence carry the
+   * coordinates of a larger one (a gene within a chromosome, with negative positions
+   * upstream of it). */
+  function dlgSetOrigin() {
+    const d = D(), n = d.seq.length;
+    dialog({
+      title: 'Set Origin',
+      body: `<div class="form">
+        ${d.circular ? `<label for="soP">Rotate so that this base becomes 1</label><input type="number" id="soP" value="${d.sel.start + 1}" min="1" max="${n}" style="width:100px">
+          <div class="full hint">The sequence is rotated, and every feature, primer and site moves with it.</div>`
+        : `<label for="soN">Number the first base</label><input type="number" id="soN" value="${d.numFrom || 1}" style="width:110px">
+          <div class="full hint">A linear sequence cannot be rotated, so this only changes the numbering. Set it to the coordinate the first base has in a larger sequence; a number below 1 gives negative coordinates upstream, as a promoter region is usually numbered.</div>`}
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        if (d.circular) {
+          const p = Math.max(1, Math.min(n, parseInt(val('soP'), 10) || 1));
+          d.sel = { start: p - 1, end: p - 1 };
+          setOrigin();
+        } else {
+          d.numFrom = parseInt(val('soN'), 10) || 1;
+          renderAll(true);
+          toast(d.numFrom === 1 ? 'Numbering starts at 1' : `The first base is numbered ${fmt(d.numFrom)}`);
+        }
+      } }]
+    });
   }
 
   // ---------------------------------------------------------------- focus on region
@@ -1233,7 +1301,7 @@ svg .prim { cursor: pointer; }
       if (s.cut == null) return;
       const a = ang(s.cut);
       g.push(`<line class="ecut" x1="${fmtP(P(R - 7, a)).replace(',', '" y1="')}" x2="${fmtP(P(R + 7, a)).replace(',', '" y2="')}"/>`);
-      labels.push({ a, text: `${e.name} (${fmt(s.cut)})`, cls: 'e' + (e.unique ? ' u' : '') + (enzHi(d).includes(e.name) ? ' hl' : ''), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer) });
+      labels.push({ a, text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, cls: 'e' + (e.unique ? ' u' : '') + (enzHi(d).includes(e.name) ? ' hl' : ''), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer) });
     });
     // label layout
     const sp = 14;
@@ -1306,7 +1374,7 @@ svg .prim { cursor: pointer; }
     for (const e of enz) e.sites.forEach((s, i) => {
       if (s.cut == null) return;
       if (fo && !DNA.overlaps({ start: s.pos, end: (s.pos + s.len) % n || n }, fo, n)) return;
-      elabels.push({ x: X(s.cut), text: `${e.name} (${fmt(s.cut)})`, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) });
+      elabels.push({ x: X(s.cut), text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) });
     });
     elabels.sort((a, b) => a.x - b.x);
     const rowEnd = [];
@@ -1330,7 +1398,7 @@ svg .prim { cursor: pointer; }
     for (let k = 0; o.showRuler && k <= vLen; k += step) {
       const t = fo ? ((v0 + k) % n) + 1 : k;
       const x = X(fo ? v0 + k : k);
-      g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${fmt(t || 1)}</text>`);
+      g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${d.numFrom ? fmt((t || 1) - 1 + d.numFrom) : fmt(t || 1)}</text>`);
     }
     let y = baseY + 32;
     const laneH = 30;
@@ -1494,7 +1562,23 @@ svg .prim { cursor: pointer; }
     const hadFocus = !!old && document.activeElement === old;
     const f = S.find;
     const dz = D(), showFocus = !!(S.zoomCtl || focusOf(dz));
-    v.innerHTML = findBarHTML(f) + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>` + (showFocus ? focusBarHTML(dz) : '');
+    const fmtMode = dz.opts.seqFormat || 'default';
+    if (fmtMode === 'plain') {
+      // Plain text: the bases and nothing else, ready to copy out.
+      const per = dz.opts.lineWidth || 60;
+      const rows2 = [];
+      for (let i = 0; i < dz.seq.length; i += per) {
+        rows2.push(String(i + 1).padStart(8) + '  ' + blockPlain(disp(dz, dz.seq.slice(i, i + per)), dz.opts.blockSize));
+      }
+      v.innerHTML = findBarHTML(f) + `<div class="seqscroll" id="seqscroll" tabindex="0"><pre class="plainseq">${esc(rows2.join('\n'))}</pre></div>` + (showFocus ? focusBarHTML(dz) : '');
+      bindFind();
+      if (showFocus) bindFocusBar(dz);
+      S.seq = null;
+      return;
+    }
+    v.innerHTML = findBarHTML(f)
+      + (dz.opts.showMinimap ? `<div class="seqmini" id="seqmini">${focusMiniHTML(dz)}</div>` : '')
+      + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>` + (showFocus ? focusBarHTML(dz) : '');
     buildSeqRows();
     const sc = $('#seqscroll');
     if (keepScroll) sc.scrollTop = prevTop;
@@ -1509,7 +1593,10 @@ svg .prim { cursor: pointer; }
     const d = D(), A = analyze(d), n = d.seq.length, o = d.opts;
     const sc = $('#seqscroll'), host = $('#seqrows');
     const G = 78;
-    const bpr = Math.max(10, Math.floor((sc.clientWidth - G - 30) / CW / 10) * 10);
+    // Wrap to window, or a fixed number of bases per line when one is set.
+    const bpr = o.lineWidth
+      ? Math.max(10, o.lineWidth)
+      : Math.max(10, Math.floor((sc.clientWidth - G - 30) / CW / 10) * 10);
     // enzyme cuts
     const cuts = [];
     for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) }); });
@@ -1565,7 +1652,8 @@ svg .prim { cursor: pointer; }
 
     const rows = [], html = [];
     const comp = o.showComp;
-    const NT_H = 17, RULER_H = 15, NUM_H = 13, AA_H = 15;
+    const compact = (o.seqFormat || 'default') === 'compact';
+    const NT_H = 17, RULER_H = compact ? 0 : 15, NUM_H = 13, AA_H = 15;
     const fo = focusOf(d);
     const rowFrom = fo ? Math.floor(fo.start / bpr) * bpr : 0;
     const rowTo = fo ? Math.min(n, Math.ceil((fo.start + DNA.rlen(fo, n)) / bpr) * bpr) : n;
@@ -1574,7 +1662,7 @@ svg .prim { cursor: pointer; }
       const parts = [];
       // --- enzyme labels stacked above the strands
       const lineEnd = [];
-      const myCuts = cuts.filter(c => c.pos >= rs && (c.pos < re || (re === n && c.pos === n)));
+      const myCuts = compact ? [] : cuts.filter(c => c.pos >= rs && (c.pos < re || (re === n && c.pos === n)));
       for (const c of myCuts) {
         const x = (c.pos - rs) * CW, w = c.name.length * 6.6 + 6;
         let l = 0; while (lineEnd[l] !== undefined && lineEnd[l] > x - 1) l++;
@@ -1587,18 +1675,20 @@ svg .prim { cursor: pointer; }
         parts.push(`<div class="enz${c.u ? ' u' : ''}${c.hl ? ' hl' : ''}" data-k="${c.k}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
       }
       // --- top strand, tick ruler, bottom strand
-      parts.push(`<div class="num" style="top:${y0 + 1}px">${fmt(rs + 1)}</div>`);
-      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${paintBases(disp(d, d.seq.slice(rs, re)), o, d, rs, 1)}</div>`);
+      parts.push(`<div class="num" style="top:${y0 + 1}px">${fmtc(d, rs)}</div>`);
+      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${blocked(paintBases(disp(d, d.seq.slice(rs, re)), o, d, rs, 1), o, rs)}</div>`);
       const rulerTop = y0 + NT_H;
-      let ruler = '';
-      for (let p = rs; p < re; p++) ruler += ((p + 1) % 10 === 0) ? '+' : '-';
-      parts.push(`<div class="tick" style="left:${G}px;top:${rulerTop}px">${ruler}</div>`);
+      if (!compact) {
+        let ruler = '';
+        for (let p = rs; p < re; p++) ruler += ((p + 1) % 10 === 0) ? '+' : '-';
+        parts.push(`<div class="tick" style="left:${G}px;top:${rulerTop}px">${blocked(ruler, o, rs)}</div>`);
+      }
       let y = rulerTop + RULER_H;
-      if (comp && !isRNA(d)) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${paintBases(DNA.comp(d.seq.slice(rs, re)), o, d, rs, -1)}</div>`); y += NT_H; }
+      if (comp && !isRNA(d)) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${blocked(paintBases(DNA.comp(d.seq.slice(rs, re)), o, d, rs, -1), o, rs)}</div>`); y += NT_H; }
       const strandBottom = y;
       y += 2;
       // --- features, each translated one carrying its own residue numbering above it
-      const rsegs = segsAll.filter(s => s.a < re && s.b > rs).map(s => ({ ...s, x1: Math.max(s.a, rs), x2: Math.min(s.b, re) })).sort((p, q) => p.x1 - q.x1 || (q.x2 - q.x1) - (p.x2 - p.x1));
+      const rsegs = compact ? [] : segsAll.filter(s => s.a < re && s.b > rs).map(s => ({ ...s, x1: Math.max(s.a, rs), x2: Math.min(s.b, re) })).sort((p, q) => p.x1 - q.x1 || (q.x2 - q.x1) - (p.x2 - p.x1));
       const laneEnd = [], laneTrans = [];
       for (const s of rsegs) {
         let l = 0; while (laneEnd[l] !== undefined && laneEnd[l] > s.x1) l++;
@@ -1642,7 +1732,7 @@ svg .prim { cursor: pointer; }
         if (a.res % 5 === 0) parts.push(`<div class="aanum" style="left:${x - CW * 1.5}px;top:${laneNum[l]}px;width:${CW * 6}px">${a.res}</div>`);
       }
       // reading-frame rows, drawn below the features
-      if (frameRows.length) {
+      if (frameRows.length && !compact) {
         y += 2;
         for (const fr of frameRows) {
           for (const a of (fr.buckets[ri] || [])) {
@@ -1698,6 +1788,31 @@ svg .prim { cursor: pointer; }
     }
     return '';
   }
+  /* Blocks of 3 or 10: a thin gap is drawn every N bases by wrapping each block in a
+   * span, which keeps the row the same width as the ruler above it. The markup may
+   * already carry colour spans, so the text is walked rather than cut blindly. */
+  // Blocks of N in the plain-text format, where the gaps are real spaces.
+  function blockPlain(str, size) {
+    if (!size) return str;
+    let out = '';
+    for (let i = 0; i < str.length; i += size) out += (i ? ' ' : '') + str.slice(i, i + size);
+    return out;
+  }
+
+  function blocked(html, o, rs) {
+    const size = o.blockSize | 0;
+    if (!size) return html;
+    let out = '', count = rs % size, depth = 0;
+    for (let i = 0; i < html.length; i++) {
+      const ch = html[i];
+      if (ch === '<') { const end = html.indexOf('>', i); out += html.slice(i, end + 1); depth += html[i + 1] === '/' ? -1 : 1; i = end; continue; }
+      if (ch === '&') { const end = html.indexOf(';', i); out += html.slice(i, end + 1); i = end; count++; }
+      else { out += ch; count++; }
+      if (count % size === 0) out += '<i class="blk"></i>';
+    }
+    return out;
+  }
+
   function paintBases(str, o, d, absStart, strand) {
     const scheme = o.colorScheme || (o.baseColors && o.baseColors.enabled ? 'nt' : 'none');
     const fg = scheme === 'nt' ? (o.baseColors || {}) : (scheme === 'gc' ? GC_COL : (scheme === 'purine' ? PP_COL : null));

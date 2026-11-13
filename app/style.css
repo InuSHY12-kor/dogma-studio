@@ -449,3 +449,9 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .pvstep.on { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .pvprimers a { color: var(--accent); text-decoration: none; }
 .pvprimers a:hover { text-decoration: underline; }
+
+/* Display options: block gaps, the sequence minimap, the plain-text format */
+.srow .nt i.blk, .srow .tick i.blk { display: inline-block; width: .5ch; font-style: normal; }
+.seqmini { flex: none; padding: 4px 10px 2px; border-bottom: 1px solid var(--border-soft); background: var(--chrome); cursor: ew-resize; }
+.seqmini svg { display: block; }
+.plainseq { font: 13px/1.6 var(--f-mono); white-space: pre; padding: 10px 14px; margin: 0; }
