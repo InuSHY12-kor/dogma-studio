@@ -455,3 +455,11 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .seqmini { flex: none; padding: 4px 10px 2px; border-bottom: 1px solid var(--border-soft); background: var(--chrome); cursor: ew-resize; }
 .seqmini svg { display: block; }
 .plainseq { font: 13px/1.6 var(--f-mono); white-space: pre; padding: 10px 14px; margin: 0; }
+
+/* Protein annotations: sites above the sequence, bonds as loops, and the minimap */
+.srow .pabove { position: absolute; left: 0; right: 0; height: 16px; }
+.srow .psite { position: absolute; top: 2px; font: 9px/10px var(--f-ui); color: #b8860b; cursor: pointer; }
+.srow .pbond { position: absolute; top: 4px; height: 8px; border: 1.5px solid #7b4fa8; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
+.srow .pbond.out { width: 0; height: 12px; border: none; border-left: 1.5px solid #7b4fa8; border-radius: 0; }
+.protmini { flex: none; padding: 4px 10px 6px; border-top: 1px solid var(--border-soft); background: var(--chrome); cursor: ew-resize; }
+.protmini svg { display: block; }

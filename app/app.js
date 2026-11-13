@@ -656,7 +656,10 @@ svg .prim { cursor: pointer; }
         { label: 'Properties', act: () => setView('prop') },
         { label: 'Properties in a Window…', act: dlgProtein },
         '-',
-        { label: 'Add Region…', act: () => dlgProtFeature(null) },
+        { label: 'Add Region…', act: () => dlgProtFeature(null, { pkind: 'region' }) },
+        { label: 'Add Site…', act: () => dlgProtFeature(null, { pkind: 'site' }) },
+        { label: 'Add Bond…', act: () => dlgProtFeature(null, { pkind: 'bond' }) },
+        { label: 'Set Amino Acid Colour…', act: dlgSetAAColor },
         { label: 'Copy Sequence', act: () => copyText(hasSel ? d.prot.slice(sel.a, sel.b) : d.prot, 'Copied protein sequence') },
         { label: 'Export FASTA…', act: exportFasta },
         '-',
@@ -4965,32 +4968,90 @@ svg .prim { cursor: pointer; }
   }
 
   // A feature editor for protein documents, where positions are residues.
-  function dlgProtFeature(f) {
+  /* Protein annotations come in three kinds, as the reference tool draws them:
+   *   region  one or more contiguous residues, a coloured bar, optionally a subtype
+   *   site    one residue, or a scattered group, marked above the sequence
+   *   bond    a covalent link, drawn as a loop within the protein or a line out of it */
+  const PROT_KINDS = [['region', 'Region'], ['site', 'Site'], ['bond', 'Bond']];
+  const REGION_SUBTYPES = ['', 'mature peptide', 'pro protein', 'signal peptide', 'transit peptide'];
+  const pkind = f => f.pkind || 'region';
+  function dlgProtFeature(f, preset) {
     const d = D(), n = d.prot.length;
     const isNew = !f;
     const { a, b } = protSel(d);
-    const cur = f || { name: 'New region', type: 'misc_feature', start: a, end: b > a ? b : Math.min(n, a + 10), color: '#8fb3e8', notes: '' };
+    const cur = f || {
+      name: 'New ' + ((preset && preset.pkind) || 'region'), type: 'misc_feature', pkind: (preset && preset.pkind) || 'region',
+      start: a, end: b > a ? b : Math.min(n, a + ((preset && preset.pkind) === 'site' ? 1 : 10)),
+      color: '#8fb3e8', notes: '', subtype: '', residues: '', partner: ''
+    };
+    const k = () => val('pfk');
+    const sync = () => {
+      const kk = k();
+      document.querySelectorAll('#dlg [data-only]').forEach(el => {
+        el.style.display = el.dataset.only.split(',').includes(kk) ? '' : 'none';
+      });
+    };
     dialog({
-      title: isNew ? 'Add Region' : `Edit Region “${cur.name}”`,
+      title: isNew ? 'Add Protein Annotation' : `Edit “${cur.name}”`, wide: true,
       body: `<div class="form">
+        <label for="pfk">Kind</label><select id="pfk">${PROT_KINDS.map(([v, t]) => `<option value="${v}" ${pkind(cur) === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <label for="pfn">Name</label><input type="text" id="pfn" value="${esc(cur.name)}">
         <label for="pft">Type</label><select id="pft">${FEATURE_TYPES.map(t => `<option ${t === cur.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label data-only="region">Subtype</label><div data-only="region"><select id="pfsub">${REGION_SUBTYPES.map(t => `<option value="${esc(t)}" ${t === (cur.subtype || '') ? 'selected' : ''}>${t || 'no subtype'}</option>`).join('')}</select></div>
         <label for="pfs">From</label><input type="number" id="pfs" min="1" max="${n}" value="${cur.start + 1}">
-        <label for="pfe">To</label><input type="number" id="pfe" min="1" max="${n}" value="${cur.end}">
+        <label for="pfe" data-only="region,bond">To</label><div data-only="region,bond"><input type="number" id="pfe" min="1" max="${n}" value="${cur.end}"></div>
+        <label data-only="site">Other residues</label><div data-only="site"><input type="text" id="pfres" value="${esc(cur.residues || '')}" placeholder="e.g. 45, 78, 102 — a scattered site"></div>
+        <label data-only="bond">Partner</label><div data-only="bond"><input type="text" id="pfpar" value="${esc(cur.partner || '')}" placeholder="leave empty for a bond inside this protein"></div>
         <label for="pfc">Colour</label><input type="color" id="pfc" value="${cur.color}">
         <label for="pfno">Note</label><input type="text" id="pfno" value="${esc(cur.notes || '')}">
+        <div class="full hint" data-only="site">A site marks one residue, or several that are not next to each other; list the others by position.</div>
+        <div class="full hint" data-only="bond">A bond inside the protein is drawn as a loop between its two ends. Naming a partner makes it a bond to another molecule, drawn as a line.</div>
         <div class="full err"></div></div>`,
-      buttons: [...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => { d.features = d.features.filter(x => x.id !== f.id); commit(d, `Deleted region ${f.name}`); renderAll(true); } }]), { label: 'Cancel' }, {
+      buttons: [...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => { d.features = d.features.filter(x => x.id !== f.id); commit(d, `Deleted ${pkind(f)} ${f.name}`); renderAll(true); } }]), { label: 'Cancel' }, {
         label: isNew ? 'Add' : 'Save', primary: true, act: () => {
-          const name = val('pfn').trim(), x = parseInt(val('pfs'), 10), y = parseInt(val('pfe'), 10);
+          const name = val('pfn').trim(), kk = k();
+          const x = parseInt(val('pfs'), 10);
+          let y = kk === 'site' ? x : parseInt(val('pfe'), 10);
           if (!name) return showErr('Enter a name.');
-          if (!(x >= 1 && y > x - 1 && y <= n)) return showErr(`Positions must run upward inside 1–${fmt(n)}.`);
-          const nf = { name, type: val('pft'), start: x - 1, end: y, strand: 0, color: val('pfc'), notes: val('pfno').trim(), molecule: 'protein', translated: false, frame: 0, matchProtein: true, quals: {} };
-          if (isNew) { d.features.push({ id: uid(), ...nf }); commit(d, `Added region ${name}`); }
-          else { Object.assign(f, nf); commit(d, `Edited region ${name}`); }
+          if (!(x >= 1 && x <= n)) return showErr(`The position must be inside 1–${fmt(n)}.`);
+          if (kk !== 'site' && !(y > x - 1 && y <= n)) return showErr(`Positions must run upward inside 1–${fmt(n)}.`);
+          const extra = [];
+          if (kk === 'site') for (const t of val('pfres').split(/[^0-9]+/)) { const v2 = parseInt(t, 10); if (v2 >= 1 && v2 <= n) extra.push(v2 - 1); }
+          const nf = {
+            name, type: val('pft'), pkind: kk, start: x - 1, end: kk === 'site' ? x : y, strand: 0,
+            color: val('pfc'), notes: val('pfno').trim(), molecule: 'protein', translated: false, frame: 0,
+            matchProtein: true, quals: {},
+            subtype: kk === 'region' ? val('pfsub') : '',
+            residues: extra, partner: kk === 'bond' ? val('pfpar').trim() : ''
+          };
+          if (isNew) { d.features.push({ id: uid(), ...nf }); commit(d, `Added ${kk} ${name}`); }
+          else { Object.assign(f, nf); commit(d, `Edited ${kk} ${name}`); }
           renderAll(true);
         }
-      }]
+      }],
+      onOpen: box => { sync(); box.querySelector('#pfk').addEventListener('change', sync); }
+    });
+  }
+  // Set Amino Acid Colour: paints the selected residues of a protein document.
+  function dlgSetAAColor() {
+    const d = D(); const { a, b } = protSel(d);
+    if (b <= a) { toast('Select the residues to colour first.'); return; }
+    dialog({
+      title: 'Set Amino Acid Colour',
+      body: `<div class="form">
+        <label>Residues</label><div>${fmt(a + 1)} – ${fmt(b)} (${fmt(b - a)} aa)</div>
+        <label for="aacC">Colour</label><input type="color" id="aacC" value="#ffe9a8">
+        <div class="full hint">Custom colours are kept with the file and shown when the colour scheme is set to Custom amino acid colours.</div></div>`,
+      buttons: [
+        { label: 'Remove Colour', act: () => { d.colors = (d.colors || []).filter(r => !(a < r.end && r.start < b)); commit(d, 'Removed a custom colour'); renderAll(true); } },
+        { label: 'Cancel' },
+        { label: 'OK', primary: true, act: () => {
+          d.colors = d.colors || [];
+          d.colors.push({ start: a, end: b, color: val('aacC') });
+          d.opts.protScheme = 'custom';
+          commit(d, `Coloured residues ${fmt(a + 1)}–${fmt(b)}`);
+          renderAll(true);
+        } }]
     });
   }
 
@@ -5018,6 +5079,8 @@ svg .prim { cursor: pointer; }
    * hydrophobic order of Zhao and London (2006). */
   const PROT_SCHEMES = [
     ['none', 'No colours'],
+    ['custom', 'Custom amino acid colours'],
+    ['history', 'History colours'],
     ['zappo', 'Physicochemical properties (Zappo)'],
     ['clustal', 'Properties + conservation (Clustal X)'],
     ['dnastar', 'Chemical properties (DNASTAR categories)'],
@@ -5075,43 +5138,117 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // The minimap under a protein sequence: its regions, and the stretch now on screen.
+  function protMiniHTML(d) {
+    const n = d.prot.length, W = 1000, H = 20;
+    const regions = d.features.filter(f => pkind(f) === 'region' && !f.hidden);
+    const vis = S.protVisible || { a: 0, b: n };
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="#e8ebef"/>
+      <rect x="${(vis.a / n * W).toFixed(1)}" y="0" width="${Math.max(2, (vis.b - vis.a) / n * W).toFixed(1)}" height="${H}" fill="#ffffff"/>
+      ${regions.map(f => `<rect x="${(f.start / n * W).toFixed(1)}" y="4" width="${Math.max(1, (f.end - f.start) / n * W).toFixed(1)}" height="12" fill="${f.color}" opacity=".85"><title>${esc(f.name)} ${fmt(f.start + 1)}..${fmt(f.end)}</title></rect>`).join('')}
+      <line x1="${(vis.a / n * W).toFixed(1)}" y1="${H - 1}" x2="${(vis.b / n * W).toFixed(1)}" y2="${H - 1}" stroke="#c0392b" stroke-width="2"/>
+    </svg>`;
+  }
   function renderProtSeq() {
-    const d = D(), v = $('#view'), p = d.prot;
-    const per = 60;
+    const d = D(), v = $('#view'), p = d.prot, o = d.opts;
+    const aa3 = !!o.aa3;
+    const per = o.lineWidth === -1 ? p.length : (o.lineWidth || 60);
+    const show = { region: o.showFeat !== false, site: o.showSites !== false, bond: o.showBonds !== false };
+    const W = aa3 ? CW * 3 : CW;                     // width of one residue on screen
+    const letter = i => aa3 ? (DNA.AA3[p[i]] || 'Xaa') : p[i];
+    const compact = (o.seqFormat || 'default') === 'compact';
+    const blk = o.blockSize | 0;
+    const feats = d.features.filter(f => !f.hidden);
+    const colourAt = i => {
+      if (o.protScheme === 'custom') { for (const r of (d.colors || [])) if (i >= r.start && i < r.end) return r.color; return ''; }
+      if (o.protScheme === 'history') { for (const r of (d.changed || [])) if (i >= r.start && i < r.end) return '#ffd9d9'; return ''; }
+      return '';
+    };
     const rows = [];
     for (let i = 0; i < p.length; i += per) {
-      const chunk = p.slice(i, i + per);
+      const end = Math.min(p.length, i + per), chunk = p.slice(i, end);
       let marks = '';
-      for (let k = 0; k < chunk.length; k++) marks += ((i + k + 1) % 10 === 0) ? '+' : '-';
-      const bars = d.features.filter(f => f.start < i + chunk.length && f.end > i).map(f => {
-        const x1 = Math.max(f.start, i) - i, x2 = Math.min(f.end, i + chunk.length) - i;
-        return `<div class="fbar" data-fid="${f.id}" title="${esc(f.name)} ${fmt(f.start + 1)}..${fmt(f.end)}" style="left:${(78 + x1 * CW).toFixed(1)}px;top:0;width:${((x2 - x1) * CW).toFixed(1)}px;height:14px;background:${f.color}">${(x2 - x1) * CW > f.name.length * 6.4 + 16 ? esc(f.name) : ''}</div>`;
-      }).join('');
-      rows.push(`<div class="srow" style="height:${bars ? 76 : 58}px">
-        <div class="num" style="top:5px">${fmt(i + 1)}</div>
-        <div class="nt" style="left:78px;top:4px">${paintProtein(chunk, d.opts.protScheme)}</div>
-        <div class="tick" style="left:78px;top:21px">${marks}</div>
-        <div class="selov" hidden style="top:3px;height:18px"></div>
-        ${bars ? `<div style="position:absolute;left:0;top:40px;right:0;height:14px">${bars}</div>` : ''}
+      for (let k2 = 0; k2 < chunk.length; k2++) marks += ((i + k2 + 1) % 10 === 0) ? '+' : '-';
+      // the residues themselves, coloured by the chosen scheme or by a custom range
+      let txt;
+      if (compact && show.region) {
+        // compact format colours the text by the largest overlapping region
+        let out = '';
+        for (let k2 = 0; k2 < chunk.length; k2++) {
+          const at = i + k2;
+          const over = feats.filter(f => pkind(f) === 'region' && at >= f.start && at < f.end)
+            .sort((x, y) => (y.end - y.start) - (x.end - x.start))[0];
+          out += over
+            ? `<span style="color:${over.color};font-weight:600" title="${esc(over.name)} ${fmt(over.start + 1)}..${fmt(over.end)}">${esc(letter(at))}</span>`
+            : esc(letter(at));
+          if (blk && (at + 1) % blk === 0) out += '<i class="blk"></i>';
+        }
+        txt = out;
+      } else {
+        let out = '';
+        for (let k2 = 0; k2 < chunk.length; k2++) {
+          const at = i + k2, bg = colourAt(at);
+          const base = (o.protScheme && PROT_COL[o.protScheme]) ? paintProtein(p[at], o.protScheme).replace(/>([^<]*)</, (m2, g1) => '>' + esc(letter(at)) + '<') : esc(letter(at));
+          out += bg ? `<span style="background:${bg}">${base}</span>` : base;
+          if (blk && (at + 1) % blk === 0) out += '<i class="blk"></i>';
+        }
+        txt = out;
+      }
+      // region bars, sites above, bonds as loops
+      let bars = '', above = '';
+      if (!compact) {
+        bars = feats.filter(f => pkind(f) === 'region' && show.region && f.start < end && f.end > i).map(f => {
+          const x1 = Math.max(f.start, i) - i, x2 = Math.min(f.end, end) - i;
+          const lbl = o.showRegionLabels === false ? '' : ((x2 - x1) * W > f.name.length * 6.4 + 16 ? esc(f.name) : '');
+          return `<div class="fbar" data-fid="${f.id}" title="${esc(f.name)}${f.subtype ? ' · ' + esc(f.subtype) : ''} ${fmt(f.start + 1)}..${fmt(f.end)}" style="left:${(78 + x1 * W).toFixed(1)}px;top:0;width:${((x2 - x1) * W).toFixed(1)}px;height:14px;background:${f.color}">${lbl}</div>`;
+        }).join('');
+        if (show.site) for (const f of feats.filter(x => pkind(x) === 'site')) {
+          for (const at of [f.start, ...(f.residues || [])]) {
+            if (at < i || at >= end) continue;
+            above += `<div class="psite" data-fid="${f.id}" title="${esc(f.name)} · residue ${fmt(at + 1)}" style="left:${(78 + (at - i) * W + W / 2 - 4).toFixed(1)}px">▼</div>`;
+          }
+        }
+        if (show.bond) for (const f of feats.filter(x => pkind(x) === 'bond')) {
+          const a2 = f.start, b2 = f.end - 1;
+          if (f.partner) {
+            if (a2 >= i && a2 < end) above += `<div class="pbond out" data-fid="${f.id}" title="${esc(f.name)} → ${esc(f.partner)}" style="left:${(78 + (a2 - i) * W + W / 2).toFixed(1)}px"></div>`;
+          } else if (a2 < end && b2 >= i) {
+            const x1 = 78 + (Math.max(a2, i) - i) * W + W / 2, x2 = 78 + (Math.min(b2, end - 1) - i) * W + W / 2;
+            above += `<div class="pbond" data-fid="${f.id}" title="${esc(f.name)} · ${fmt(a2 + 1)}–${fmt(b2 + 1)}" style="left:${x1.toFixed(1)}px;width:${Math.max(6, x2 - x1).toFixed(1)}px"></div>`;
+          }
+        }
+      }
+      const topPad = above ? 16 : 0;
+      const h = compact ? 24 : (topPad + (bars ? 76 : 58));
+      rows.push(`<div class="srow" data-i="${i / per}" style="height:${h}px">
+        ${above ? `<div class="pabove" style="top:0">${above}</div>` : ''}
+        <div class="num" style="top:${topPad + 5}px">${fmt(i + 1)}</div>
+        <div class="nt" style="left:78px;top:${topPad + 4}px">${txt}</div>
+        ${compact || o.showRuler === false ? '' : `<div class="tick" style="left:78px;top:${topPad + 21}px">${marks}</div>`}
+        <div class="selov" hidden style="top:${topPad + 3}px;height:18px"></div>
+        ${bars ? `<div style="position:absolute;left:0;top:${topPad + 40}px;right:0;height:14px">${bars}</div>` : ''}
       </div>`);
     }
     v.innerHTML = `<div class="panel"><div class="ptools">
         <span class="note">${fmt(p.length)} amino acids</span>
         <label class="inl">Colours <select id="pScheme">${PROT_SCHEMES.map(([k, t]) => `<option value="${k}" ${d.opts.protScheme === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         <button class="btn" id="pKey" ${d.opts.protScheme === 'none' ? 'disabled' : ''}>Colour Key…</button>
+        <button class="btn" id="pDisp">Display ▾</button>
         <button class="btn" id="pSelAll">Select all</button>
         <button class="btn" id="pCopy">Copy</button>
         <button class="btn" id="pProps">Properties…</button>
-      </div><div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows">${rows.join('')}</div></div></div>`;
+      </div><div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows">${rows.join('')}</div></div>
+      ${o.showMinimap ? `<div class="protmini" id="protmini">${protMiniHTML(d)}</div>` : ''}</div>`;
     const sc = $('#seqscroll');
-    S.seq = { rows: [], G: 78, bpr: per, els: [...sc.querySelectorAll('.srow')], prot: true };
+    S.seq = { rows: [], G: 78, bpr: per, row0: 0, els: [...sc.querySelectorAll('.srow')], prot: true, W };
     const paint = () => {
       const { a, b } = protSel(d);
       S.seq.els.forEach((el, i) => {
         const rs = i * per, re = rs + per;
         const ov = el.querySelector('.selov');
         const x1 = Math.max(a, rs), x2 = Math.min(b, re);
-        if (x2 > x1) { ov.hidden = false; ov.style.left = (78 + (x1 - rs) * CW) + 'px'; ov.style.width = ((x2 - x1) * CW) + 'px'; }
+        if (x2 > x1) { ov.hidden = false; ov.style.left = (78 + (x1 - rs) * W) + 'px'; ov.style.width = ((x2 - x1) * W) + 'px'; }
         else ov.hidden = true;
       });
     };
@@ -5119,7 +5256,7 @@ svg .prim { cursor: pointer; }
     let drag = false;
     const posAt = (e, row) => {
       const i = S.seq.els.indexOf(row), r = row.getBoundingClientRect();
-      return Math.max(0, Math.min(p.length, i * per + Math.round((e.clientX - r.left - 78) / CW)));
+      return Math.max(0, Math.min(p.length, i * per + Math.round((e.clientX - r.left - 78) / W)));
     };
     sc.addEventListener('mousedown', e => {
       const row = e.target.closest('.srow'); if (!row) return;
@@ -5137,10 +5274,79 @@ svg .prim { cursor: pointer; }
     window.addEventListener('mouseup', () => { drag = false; });
     $('#pScheme').onchange = e => { d.opts.protScheme = e.target.value; renderAll(true); };
     $('#pKey').onclick = () => dlgProtColorKey(d.opts.protScheme);
+    // The Display menu, which carries the options the guide puts behind that button.
+    $('#pDisp').onclick = e => {
+      const r = e.target.getBoundingClientRect(), o2 = d.opts;
+      const t = (label, on, act) => ({ label: (on ? '\u2713 ' : '\u2003') + label, act });
+      showCtx(r.left, r.bottom, [
+        t('Show Region features', o2.showFeat !== false, () => { o2.showFeat = o2.showFeat === false; renderAll(true); }),
+        t('Show Region labels', o2.showRegionLabels !== false, () => { o2.showRegionLabels = o2.showRegionLabels === false; renderAll(true); }),
+        t('Show Site features', o2.showSites !== false, () => { o2.showSites = o2.showSites === false; renderAll(true); }),
+        t('Show Bond features', o2.showBonds !== false, () => { o2.showBonds = o2.showBonds === false; renderAll(true); }),
+        t('Show numbering', o2.showRuler !== false, () => { o2.showRuler = o2.showRuler === false; renderAll(true); }),
+        '-',
+        t('Use 3-letter amino acid codes', !!o2.aa3, () => { o2.aa3 = !o2.aa3; renderAll(true); }),
+        t('Compact format', (o2.seqFormat || 'default') === 'compact', () => { o2.seqFormat = (o2.seqFormat || 'default') === 'compact' ? 'default' : 'compact'; renderAll(true); }),
+        t('Blocks of 10', o2.blockSize === 10, () => { o2.blockSize = o2.blockSize === 10 ? 0 : 10; renderAll(true); }),
+        t('Show minimap', !!o2.showMinimap, () => { o2.showMinimap = !o2.showMinimap; renderAll(true); }),
+        '-',
+        t('Wrap to window', !o2.lineWidth, () => { o2.lineWidth = 0; renderAll(true); }),
+        t('Unwrapped (one line)', o2.lineWidth === -1, () => { o2.lineWidth = -1; renderAll(true); }),
+        { label: '\u2003Fixed line width\u2026', act: () => dlgLineWidth() },
+        '-',
+        { label: '\u2003Set Amino Acid Colour\u2026', act: dlgSetAAColor },
+        { label: '\u2003Add Site\u2026', act: () => dlgProtFeature(null, { pkind: 'site' }) },
+        { label: '\u2003Add Bond\u2026', act: () => dlgProtFeature(null, { pkind: 'bond' }) }
+      ]);
+    };
+    // the minimap: click or drag to select, and it marks what is on screen
+    const mini = $('#protmini');
+    if (mini) {
+      const svg2 = mini.querySelector('svg');
+      const at = ev => { const r2 = svg2.getBoundingClientRect(); return Math.max(0, Math.min(p.length, Math.round((ev.clientX - r2.left) / r2.width * p.length))); };
+      let mdrag = null;
+      svg2.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        const q = at(ev);
+        const reg = d.features.filter(f => pkind(f) === 'region' && q >= f.start && q < f.end)
+          .sort((x, y) => (x.end - x.start) - (y.end - y.start))[0];
+        if (reg) { d.sel = { start: reg.start, end: reg.end }; d.anchor = reg.start; }
+        else { d.sel = { start: q, end: q }; d.anchor = q; }
+        mdrag = { anchor: d.anchor, at };
+        paint(); renderStatus(); scrollProtTo(d.sel.start);
+      });
+      window.addEventListener('mousemove', ev => {
+        if (!mdrag) return;
+        const q = mdrag.at(ev);
+        d.sel = { start: Math.min(mdrag.anchor, q), end: Math.max(mdrag.anchor, q) };
+        paint(); renderStatus();
+      });
+      window.addEventListener('mouseup', () => { if (mdrag) { mdrag = null; renderView(true); } });
+    }
+    // remember which residues are on screen, so the minimap can mark them
+    const track = () => {
+      const first = S.seq.els.find(el => el.offsetTop + el.offsetHeight > sc.scrollTop);
+      const last = [...S.seq.els].reverse().find(el => el.offsetTop < sc.scrollTop + sc.clientHeight);
+      if (!first || !last) return;
+      const a2 = (+first.dataset.i) * per, b2 = Math.min(p.length, ((+last.dataset.i) + 1) * per);
+      const prev = S.protVisible;
+      S.protVisible = { a: a2, b: b2 };
+      if (mini && (!prev || prev.a !== a2 || prev.b !== b2)) mini.innerHTML = protMiniHTML(d);
+    };
+    sc.addEventListener('scroll', track);
+    track();
     $('#pSelAll').onclick = () => { d.sel = { start: 0, end: p.length }; d.anchor = 0; paint(); renderStatus(); };
     $('#pCopy').onclick = () => { const { a, b } = protSel(d); copyText(b > a ? p.slice(a, b) : p, 'Copied protein sequence'); };
     $('#pProps').onclick = () => { S.view = 'prop'; renderAll(); };
     sc.addEventListener('dblclick', e => { const f = e.target.closest('[data-fid]'); if (f) dlgProtFeature(d.features.find(x => x.id === +f.dataset.fid)); });
+  }
+
+  function scrollProtTo(pos) {
+    const V = S.seq, sc = $('#seqscroll'); if (!V || !sc || !V.els) return;
+    const i = Math.max(0, Math.min(V.els.length - 1, Math.floor(pos / V.bpr)));
+    const el = V.els[i]; if (!el) return;
+    if (el.offsetTop < sc.scrollTop || el.offsetTop + el.offsetHeight > sc.scrollTop + sc.clientHeight)
+      sc.scrollTop = Math.max(0, el.offsetTop - sc.clientHeight / 3);
   }
 
   function renderProtProps() {
