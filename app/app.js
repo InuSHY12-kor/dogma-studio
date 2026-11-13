@@ -113,7 +113,7 @@ svg .prim { cursor: pointer; }
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
 
   // ---------------------------------------------------------------- state
-  const S = { docs: [], active: -1, view: 'map', zoom: 1, sideHidden: false, seq: null, mapGeom: null, find: { q: '', mode: 'dna', res: [], i: -1, maxErr: 1, gaps: false, recent: [] } };
+  const S = { docs: [], active: -1, view: 'map', zoom: 1, sideShown: false, seq: null, mapGeom: null, find: { q: '', mode: 'dna', res: [], i: -1, maxErr: 1, gaps: false, recent: [] } };
   let UID = 1; const uid = () => UID++;
   const D = () => S.docs[S.active] || null;
 
@@ -596,7 +596,7 @@ svg .prim { cursor: pointer; }
         { label: 'Rotate Map…', key: 'Ctrl+Alt+R', dis: !has || !d.circular, act: dlgRotateMap },
         '-',
         { label: 'Toolbar', items: [
-          { label: 'Show Side Panel', chk: !S.sideHidden, act: () => { S.sideHidden = !S.sideHidden; renderAll(); } },
+          { label: 'Show Details Panel', chk: !!S.sideShown, act: () => { S.sideShown = !S.sideShown; renderAll(); } },
           { label: 'Show Top Toolbar', chk: !S.toolbarHidden, act: () => { S.toolbarHidden = !S.toolbarHidden; applyChrome(); } },
           '-',
           { label: 'Icons and Text', chk: (SET.toolbarStyle || 'both') === 'both', act: () => { SET.toolbarStyle = 'both'; saveSettings(); applyChrome(); } },
@@ -606,7 +606,7 @@ svg .prim { cursor: pointer; }
         ] },
         { label: 'Font Size', items: FONT_SIZES.map(px => ({ label: px + ' px', chk: (SET.fontSize || 13) === px, act: () => setFontSize(px) })) },
         '-',
-        { label: 'Show Side Panel', chk: !S.sideHidden, act: () => { S.sideHidden = !S.sideHidden; renderAll(); } },
+        { label: 'Show Details Panel', chk: !!S.sideShown, act: () => { S.sideShown = !S.sideShown; renderAll(); } },
         { label: 'Info Panel', chk: !!S.infoShown, dis: !has, act: () => { S.infoShown = !S.infoShown; renderAll(true); } },
         { label: 'Zoom In', key: 'Ctrl++', dis: !has, act: () => zoom(1.25) },
         { label: 'Zoom Out', key: 'Ctrl+-', dis: !has, act: () => zoom(0.8) },
@@ -962,14 +962,14 @@ svg .prim { cursor: pointer; }
       b('rc', 'Rev Comp', 'rc', { dis: !has }),
       b('origin', 'Origin', 'origin', { dis: !has || !d.circular, title: 'Set origin at cursor' }),
       '<div class="tbsep"></div>',
-      b('side', 'Panel', 'side', { on: !S.sideHidden, title: 'Show or hide the side panel' })
+      b('side', 'Details', 'side', { on: !!S.sideShown, title: 'Show or hide the details panel' })
     ].join('');
   }
   const TB_ACT = {
     new: () => dlgNew(), open: () => openFiles(), save: () => saveDoc(false), undo, redo, find: () => openFind(),
     circ: () => setOpt('mapMode', 'circular', true), lin: () => setOpt('mapMode', 'linear', true),
     feat: () => dlgFeature(null), primer: () => (selLen(D()) ? primerFromSel(1) : dlgPrimer(null)), enz: () => setView('enz'), gel: () => dlgDigest(),
-    tr: () => dlgTranslate(), rc: () => revCompSel(), origin: () => setOrigin(), side: () => { S.sideHidden = !S.sideHidden; renderAll(); },
+    tr: () => dlgTranslate(), rc: () => revCompSel(), origin: () => setOrigin(), side: () => { S.sideShown = !S.sideShown; renderAll(); },
     ncbi: () => dlgNCBI(), print: () => dlgPrint(), clone: () => dlgRestrictionClone(), design: () => dlgDesignPCR(), align: () => openTraces()
   };
 
@@ -982,7 +982,7 @@ svg .prim { cursor: pointer; }
   const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['compare', 'Compare', 'compare'], ['hist', 'History', 'hist']];
   function renderViewTabs() {
     const vt = $('#viewtabs');
-    vt.classList.toggle('noside', S.sideHidden || !(S.view === 'map' || S.view === 'seq'));
+    vt.classList.toggle('noside', !S.sideShown || !(S.view === 'map' || S.view === 'seq'));
     vt.innerHTML = D() && !isGel(D()) ? viewsFor(D()).map(([k, l, ic]) => `<button class="vt${S.view === k ? ' on' : ''}" data-v="${k}">${icon(ic)}${l}</button>`).join('') : '';
   }
   function setView(v) { const dd = D(); if (!dd || isGel(dd)) return; if (!viewsFor(dd).some(x => x[0] === v)) v = viewsFor(dd)[0][0]; S.view = v; renderAll(); if (v === 'seq') setTimeout(() => { scrollSeqTo(D().sel.start); $('#seqscroll') && $('#seqscroll').focus(); }, 0); }
@@ -997,31 +997,12 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- side panel
   function renderSide() {
     const side = $('#side'), d = D();
-    const show = d && isNuc(d) && !S.sideHidden && (S.view === 'map' || S.view === 'seq');
+    const show = d && isNuc(d) && S.sideShown && (S.view === 'map' || S.view === 'seq');
     side.classList.toggle('hidden', !show);
     if (!show) return;
     const o = d.opts, n = d.seq.length, L = selLen(d), A = analyze(d);
     const chk = (k, label) => `<label><input type="checkbox" data-o="${k}" ${o[k] ? 'checked' : ''}> ${label}</label>`;
-    let h = `<h4>Map</h4><div class="seg"><button data-mm="circular" class="${o.mapMode === 'circular' ? 'on' : ''}">Circular</button><button data-mm="linear" class="${o.mapMode === 'linear' ? 'on' : ''}">Linear</button></div>`;
-    h += `<h4>Enzymes</h4><select id="side-enz">
-      <option value="unique6" ${o.enzMode === 'unique6' ? 'selected' : ''}>Unique 6+ cutters</option>
-      <option value="unique" ${o.enzMode === 'unique' ? 'selected' : ''}>All unique cutters</option>
-      <option value="dual6" ${o.enzMode === 'dual6' ? 'selected' : ''}>Unique &amp; dual 6+ cutters</option>
-      <option value="chosen" ${o.enzMode === 'chosen' ? 'selected' : ''}>Chosen enzymes (${d.chosen.length})</option>
-      <option value="none" ${o.enzMode === 'none' ? 'selected' : ''}>None</option></select>
-      <button class="btn" id="side-pick" style="width:100%;margin-top:4px">Choose Enzymes…</button>`;
-    h += `<h4>Show</h4>${chk('showFeat', 'Features')}${chk('showPrimers', 'Primers')}${chk('showORFs', 'ORFs')}
-      <div class="row2" style="padding-left:22px">min <input type="number" id="side-orfmin" min="20" max="2000" step="10" value="${o.orfMin}"> aa</div>
-      ${chk('showTrans', 'Translations')}
-      <div class="row2" style="padding-left:22px"><select id="side-trans">${TRANS_MODES.map(([k, t]) => `<option value="${k}" ${o.transMode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-      <div class="row2" style="padding-left:22px">${chk('aa3', '3-letter codes')}</div>
-      <div class="row2" style="padding-left:22px"><button class="btn" id="side-transopt" type="button">Translation Options…</button></div>
-      ${chk('showComp', 'Complementary strand')}
-      <h4>Colours</h4>
-      <div class="row2"><select id="side-colors">${SCHEMES.map(([k, t]) => `<option value="${k}" ${(o.colorScheme || 'none') === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-      <div class="row2"><button class="btn" id="side-setcol" type="button" ${L ? '' : 'disabled'}>Set DNA Colour…</button><button class="btn" id="side-basecol" type="button">Base Colours…</button></div>
-      ${(d.colors || []).length ? `<div class="row2"><span class="note">${d.colors.length} custom region${d.colors.length === 1 ? '' : 's'}</span><button class="ib dng" id="side-clearcol" type="button">Clear all</button></div>` : ''}`;
-    h += `<h4>Selection</h4>`;
+    let h = `<h4>Selection</h4>`;
     if (L) {
       const s = selSeq(d), a = d.sel.start + 1, b = d.sel.end === 0 ? n : d.sel.end;
       h += `<dl class="kv"><dt>Range</dt><dd>${fmt(a)} – ${fmt(b)}</dd><dt>Length</dt><dd>${fmt(L)} bp</dd><dt>GC</dt><dd>${DNA.gcPct(s).toFixed(1)} %</dd>`;
@@ -2571,48 +2552,309 @@ svg .prim { cursor: pointer; }
     if (showFocus) bindFocusBar(d);
   }
 
-  // ---------------------------------------------------------------- map view panel
+  // ---------------------------------------------------------------- map view side strip
+  /* Everything that used to live in the left panel now hangs off this strip: each row is
+   * an icon that toggles the thing on and off, and a small chevron that opens the rest of
+   * that group's settings beside it. The glyphs follow the reference tool's side toolbar. */
   const MS_ICONS = {
-    feat: '<path d="M3 9h12l4 3-4 3H3z"/>',
-    primer: '<path d="M3 12h13"/><path d="m12 8 4 4-4 4"/>',
-    enz: '<path d="M6 4l12 16M18 4 6 20"/>',
-    orf: '<path d="M4 12h12"/><path d="M16 9l4 3-4 3"/><circle cx="6" cy="12" r="2"/>',
-    label: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h10"/>',
-    online: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16" stroke-dasharray="2 2"/>',
-    ruler: '<rect x="3" y="9" width="18" height="6" rx="1"/><path d="M7 9v3M11 9v3M15 9v3M19 9v3"/>',
-    paint: '<path d="M6 3h9v6H6z"/><path d="M12 9v4a2 2 0 0 1-2 2H9v6"/>'
+    enz: '<path d="M6 4v7h7" stroke-width="1.8"/><path d="M12 11h6" stroke-width="1.8"/><path d="M18 11v9" stroke-width="1.8"/><text x="4" y="22" font-size="7.5" stroke="none" fill="currentColor" font-family="Georgia,serif">SalI</text>',
+    feat: '<path d="M3 8h12l5 4-5 4H3z" stroke-width="1.5"/>',
+    primer: '<path d="M3 9h11" stroke-width="1.6"/><path d="m11 6 4 3-4 3" stroke-width="1.6" fill="none"/><path d="M21 16H10" stroke-width="1.6"/><path d="m13 13-4 3 4 3" stroke-width="1.6" fill="none"/>',
+    orf: '<path d="M3 7h10l3 2.5-3 2.5H3z" stroke-width="1.3"/><path d="M21 17H11l-3-2.5L11 12h10z" stroke-width="1.3"/>',
+    paint: '<rect x="3" y="5" width="4.5" height="14" rx="1"/><rect x="9.75" y="5" width="4.5" height="14" rx="1"/><rect x="16.5" y="5" width="4.5" height="14" rx="1"/>',
+    num: '<text x="2" y="17" font-size="11" stroke="none" fill="currentColor" font-family="Segoe UI, Arial">(123)</text>',
+    align: '<path d="M3 6h18M3 10h13M3 14h18M3 18h9" stroke-width="1.6"/>',
+    split: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M12 4v16"/>'
   };
-  function mapSideHTML() {
-    const d = D(); if (!d) return '';
-    const o = d.opts;
-    const b = (k, on, title, act) => `<button class="msb${on ? ' on' : ''}" data-ms="${act}" title="${esc(title)}"><svg viewBox="0 0 24 24">${MS_ICONS[k]}</svg></button>`;
-    return `<div class="mapside" id="mapside">
-      ${b('feat', o.showFeat, 'Show features', 'showFeat')}
-      ${b('primer', o.showPrimers, 'Show primers', 'showPrimers')}
-      ${b('enz', o.enzMode !== 'none', 'Show enzyme sites', 'enz')}
-      ${b('orf', o.showORFs, 'Show open reading frames', 'showORFs')}
-      <div class="mssep"></div>
-      ${b('label', o.labelMode !== 'auto', `Feature labels: ${o.labelMode}`, 'label')}
-      ${b('online', o.featOnLine, 'Draw features on the backbone', 'featOnLine')}
-      ${b('ruler', o.showRuler, 'Show the position ruler', 'showRuler')}
-      <div class="mssep"></div>
-      ${b('paint', o.baseColors.enabled, 'Colour the bases', 'colors')}
-    </div>`;
+  // The groups, in the order the strip shows them.
+  function msGroups(d) {
+    const o = d.opts, A = analyze(d), n = d.seq.length;
+    return [
+      {
+        key: 'enz', icon: 'enz', title: 'Enzyme sites',
+        on: () => o.enzMode !== 'none',
+        toggle: () => { o.enzMode = o.enzMode === 'none' ? (d.chosen.length ? 'chosen' : 'unique6') : 'none'; },
+        sub: () => `${o.enzMode === 'none' ? 'hidden' : (d.chosen.length && o.enzMode === 'chosen' ? d.chosen.length + ' chosen' : o.enzMode)}`,
+        panel: () => `
+          <h5>Enzyme set</h5>
+          <select data-msv="enzMode">
+            <option value="unique6" ${o.enzMode === 'unique6' ? 'selected' : ''}>Unique 6+ cutters</option>
+            <option value="unique" ${o.enzMode === 'unique' ? 'selected' : ''}>All unique cutters</option>
+            <option value="dual6" ${o.enzMode === 'dual6' ? 'selected' : ''}>Unique &amp; dual 6+ cutters</option>
+            <option value="chosen" ${o.enzMode === 'chosen' ? 'selected' : ''}>Chosen enzymes (${d.chosen.length})</option>
+            <option value="none" ${o.enzMode === 'none' ? 'selected' : ''}>None</option>
+          </select>
+          ${Object.keys(SET.enzymeSets || {}).length ? `<h5>Saved sets</h5><select data-msact="useSet"><option value="">— pick a saved set —</option>${Object.keys(SET.enzymeSets).sort().map(k => `<option value="${esc(k)}">${esc(k)} (${SET.enzymeSets[k].length})</option>`).join('')}</select>` : ''}
+          <div class="msbtns">
+            <button class="btn" data-msact="choose">Choose Enzymes…</button>
+            <button class="btn" data-msact="enzSets">Manage Sets…</button>
+          </div>
+          <div class="msbtns">
+            <button class="btn" data-msact="noncut">Noncutters…</button>
+            <button class="btn" data-msact="enzdb">Enzyme Database…</button>
+          </div>
+          ${enzHidden(d).length ? `<div class="msnote">${enzHidden(d).length} hidden individually <button class="ib" data-msact="showAllEnz">show all</button></div>` : ''}
+          <div class="msnote">${Object.keys(A.sites).length} enzymes cut this sequence</div>`
+      },
+      {
+        key: 'feat', icon: 'feat', title: 'Features',
+        on: () => o.showFeat,
+        toggle: () => { o.showFeat = !o.showFeat; },
+        sub: () => `${d.features.filter(f => !f.hidden).length}`,
+        panel: () => `
+          <h5>Labels</h5>
+          <select data-msv="labelMode">
+            <option value="auto" ${o.labelMode === 'auto' ? 'selected' : ''}>Inside or outside, whichever fits</option>
+            <option value="inside" ${o.labelMode === 'inside' ? 'selected' : ''}>Inside only</option>
+            <option value="outside" ${o.labelMode === 'outside' ? 'selected' : ''}>Outside only</option>
+          </select>
+          <label class="mschk"><input type="checkbox" data-msb="featOnLine" ${o.featOnLine ? 'checked' : ''}> Draw features on the backbone</label>
+          <div class="msbtns">
+            <button class="btn" data-msact="addFeat">Add Feature…</button>
+            <button class="btn" data-msact="detect">Detect Common…</button>
+          </div>
+          <div class="msbtns">
+            <button class="btn" data-msact="featTable">Features Table</button>
+            <button class="btn" data-msact="featdb">Feature Database…</button>
+          </div>
+          <div class="msnote">${d.features.length} features${d.features.filter(f => f.hidden).length ? `, ${d.features.filter(f => f.hidden).length} hidden` : ''}</div>`
+      },
+      {
+        key: 'primer', icon: 'primer', title: 'Primers',
+        on: () => o.showPrimers,
+        toggle: () => { o.showPrimers = !o.showPrimers; },
+        sub: () => `${d.primers.filter(p => !p.hidden).length}`,
+        panel: () => `
+          <div class="msbtns">
+            <button class="btn" data-msact="addPrimer">Add Primer…</button>
+            <button class="btn" data-msact="primerTable">Primers Table</button>
+          </div>
+          <div class="msbtns">
+            <button class="btn" data-msact="hyb">Hybridization…</button>
+            <button class="btn" data-msact="primerdb">Primer Database…</button>
+          </div>
+          <div class="msnote">${d.primers.length} primers${d.primers.filter(p => p.hidden).length ? `, ${d.primers.filter(p => p.hidden).length} hidden` : ''}</div>`
+      },
+      {
+        key: 'orf', icon: 'orf', title: 'Open reading frames and translations',
+        on: () => o.showORFs || (o.showTrans && o.transMode !== 'orfs'),
+        toggle: () => { o.showORFs = !o.showORFs; o.showTrans = true; d.cache = null; },
+        sub: () => `${A.orfs.length}`,
+        panel: () => `
+          <label class="mschk"><input type="checkbox" data-msb="showORFs" ${o.showORFs ? 'checked' : ''}> Show ORFs</label>
+          <div class="msrow2">min <input type="number" data-msn="orfMin" min="20" max="2000" step="10" value="${o.orfMin}"> aa</div>
+          <label class="mschk"><input type="checkbox" data-msb="showTrans" ${o.showTrans ? 'checked' : ''}> Show translations</label>
+          <select data-msv="transMode">${TRANS_MODES.map(([k, t]) => `<option value="${k}" ${o.transMode === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <label class="mschk"><input type="checkbox" data-msb="aa3" ${o.aa3 ? 'checked' : ''}> 3-letter amino acid codes</label>
+          <div class="msbtns"><button class="btn" data-msact="transopt">Translation Options…</button></div>
+          <div class="msnote">${A.orfs.length} ORFs of ${o.orfMin} aa or more</div>`
+      },
+      {
+        key: 'color', icon: 'paint', title: 'Colours',
+        on: () => (o.colorScheme || 'none') !== 'none',
+        toggle: () => { o.colorScheme = (o.colorScheme || 'none') === 'none' ? 'nt' : 'none'; if (o.colorScheme === 'nt') o.baseColors.enabled = true; },
+        sub: () => (o.colorScheme || 'none') === 'none' ? 'off' : (SCHEMES.find(x => x[0] === o.colorScheme) || [, ''])[1].split(' ')[0],
+        panel: () => `
+          <h5>Scheme</h5>
+          <select data-msv="colorScheme">${SCHEMES.map(([k, t]) => `<option value="${k}" ${(o.colorScheme || 'none') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <div class="msbtns">
+            <button class="btn" data-msact="setcol" ${selLen(d) ? '' : 'disabled'}>Set DNA Colour…</button>
+            <button class="btn" data-msact="basecol">Base Colours…</button>
+          </div>
+          ${(d.colors || []).length ? `<div class="msnote">${d.colors.length} custom region${d.colors.length === 1 ? '' : 's'} <button class="ib dng" data-msact="clearcol">clear all</button></div>` : ''}
+          <label class="mschk"><input type="checkbox" data-msb="showGC" ${o.showGC ? 'checked' : ''}> GC content plot</label>
+          <div class="msbtns"><button class="btn" data-msact="gcopt">GC Plot Options…</button></div>`
+      },
+      {
+        key: 'num', icon: 'num', title: 'Numbering and line layout',
+        on: () => o.showRuler !== false,
+        toggle: () => { o.showRuler = o.showRuler === false; },
+        sub: () => o.lineWidth ? `${o.lineWidth} bp` : 'wrap',
+        panel: () => `
+          <label class="mschk"><input type="checkbox" data-msb="showRuler" ${o.showRuler !== false ? 'checked' : ''}> Show the position ruler</label>
+          <label class="mschk"><input type="checkbox" data-msb="showLocations" ${o.showLocations !== false ? 'checked' : ''}> Show coordinates beside names</label>
+          <label class="mschk"><input type="checkbox" data-msb="showMinimap" ${o.showMinimap ? 'checked' : ''}> Show the minimap</label>
+          <label class="mschk"><input type="checkbox" data-msb="showComp" ${o.showComp ? 'checked' : ''}> Complementary strand</label>
+          <h5>Bases per line</h5>
+          <select data-msact="lineWidth">
+            <option value="0" ${!o.lineWidth ? 'selected' : ''}>Wrap to the window</option>
+            ${[30, 60, 80, 100, 120].map(v => `<option value="${v}" ${o.lineWidth === v ? 'selected' : ''}>${v} bases</option>`).join('')}
+          </select>
+          <h5>Blocks</h5>
+          <select data-msv="blockSize">
+            <option value="0" ${!o.blockSize ? 'selected' : ''}>No blocks</option>
+            <option value="3" ${o.blockSize === 3 ? 'selected' : ''}>Blocks of 3</option>
+            <option value="10" ${o.blockSize === 10 ? 'selected' : ''}>Blocks of 10</option>
+          </select>
+          <h5>Format</h5>
+          <select data-msv="seqFormat">
+            <option value="default" ${(o.seqFormat || 'default') === 'default' ? 'selected' : ''}>Default</option>
+            <option value="compact" ${o.seqFormat === 'compact' ? 'selected' : ''}>Compact</option>
+            <option value="plain" ${o.seqFormat === 'plain' ? 'selected' : ''}>Plain text</option>
+          </select>
+          <div class="msbtns"><button class="btn" data-msact="origin">Set Origin…</button></div>`
+      },
+      {
+        key: 'align', icon: 'align', title: 'Sequencing alignments',
+        on: () => (d.alignments || []).length > 0,
+        toggle: () => { setView('align'); },
+        sub: () => `${(d.alignments || []).length}`,
+        panel: () => `
+          <div class="msbtns">
+            <button class="btn" data-msact="alignOpen">Align Traces…</button>
+            <button class="btn" data-msact="alignView">Alignment Tab</button>
+          </div>
+          ${(d.alignments || []).length ? `<div class="msbtns"><button class="btn dng" data-msact="alignClear">Remove all alignments</button></div>
+            <div class="msnote">${d.alignments.map(a => esc(a.read.name)).slice(0, 6).join('<br>')}</div>`
+          : '<div class="msnote">No traces aligned yet. Open a .ab1 file, or drop one onto the window.</div>'}`
+      },
+      {
+        key: 'split', icon: 'split', title: 'Split the window',
+        on: () => !!S.split,
+        toggle: () => { S.split = S.split ? null : 'v'; },
+        sub: () => S.split === 'v' ? 'side' : (S.split === 'h' ? 'stack' : 'off'),
+        panel: () => `
+          <h5>Split</h5>
+          <select data-msact="split">
+            <option value="" ${!S.split ? 'selected' : ''}>No split</option>
+            <option value="v" ${S.split === 'v' ? 'selected' : ''}>Side by side</option>
+            <option value="h" ${S.split === 'h' ? 'selected' : ''}>Top and bottom</option>
+          </select>
+          <h5>Map</h5>
+          <select data-msv="mapMode">
+            <option value="circular" ${o.mapMode === 'circular' ? 'selected' : ''}>Circular</option>
+            <option value="linear" ${o.mapMode === 'linear' ? 'selected' : ''}>Linear</option>
+          </select>
+          <div class="msbtns">
+            <button class="btn" data-msact="focus">Focus on Region</button>
+            <button class="btn" data-msact="rotate" ${d.circular ? '' : 'disabled'}>Rotate Map…</button>
+          </div>`
+      }
+    ];
   }
+  function mapSideHTML() {
+    const d = D(); if (!d || !isNuc(d)) return '';
+    return `<div class="mapside" id="mapside">${msGroups(d).map(g => `
+      <div class="msrow${g.on() ? ' on' : ''}">
+        <button class="msb" data-ms="${g.key}" data-mstip="${esc(g.title)}"><svg viewBox="0 0 24 24">${MS_ICONS[g.icon]}</svg></button>
+        <button class="mschev" data-mschev="${g.key}" data-mstip="${esc(g.title)} — more"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></button>
+      </div>`).join('')}</div>`;
+  }
+  // The popover beside the strip, and a tooltip that keeps clear of the pointer.
   function bindMapSide() {
     const el = $('#mapside'); if (!el) return;
+    const close = () => { const p = $('#mspop'); if (p) { p.hidden = true; p.innerHTML = ''; } };
     el.onclick = e => {
-      const btn = e.target.closest('[data-ms]'); if (!btn) return;
-      const d = D(), o = d.opts, a = btn.dataset.ms;
-      if (a === 'enz') o.enzMode = o.enzMode === 'none' ? 'unique6' : 'none';
-      else if (a === 'label') o.labelMode = o.labelMode === 'auto' ? 'inside' : (o.labelMode === 'inside' ? 'outside' : 'auto');
-      else if (a === 'colors') { dlgBaseColors(); return; }
-      else o[a] = !o[a];
+      const chev = e.target.closest('[data-mschev]');
+      const btn = e.target.closest('[data-ms]');
+      const d = D(); if (!d) return;
+      const key = chev ? chev.dataset.mschev : (btn && btn.dataset.ms);
+      if (!key) return;
+      const g = msGroups(d).find(x => x.key === key); if (!g) return;
+      if (chev) { openMsPanel(g, chev); return; }
+      close();
+      g.toggle();
       d.cache = null;
       renderAll(true);
-      if (a === 'label') toast('Feature labels: ' + d.opts.labelMode);
+    };
+    el.addEventListener('mouseover', e => {
+      const b = e.target.closest('[data-mstip]'); if (!b) return;
+      showMsTip(b, b.dataset.mstip);
+    });
+    el.addEventListener('mouseout', e => { if (e.target.closest('[data-mstip]')) hideMsTip(); });
+    document.addEventListener('mousedown', e => {
+      const p = $('#mspop');
+      if (!p || p.hidden) return;
+      if (p.contains(e.target) || (el && el.contains(e.target))) return;
+      close();
+    }, { capture: true });
+  }
+  /* The tooltip sits to the left of the strip, level with the icon, so the pointer never
+   * covers it — a native title would appear under the cursor. */
+  function showMsTip(btn, text) {
+    let t = $('#mstip');
+    if (!t) { t = document.createElement('div'); t.id = 'mstip'; t.className = 'mstip'; document.body.appendChild(t); }
+    t.textContent = text;
+    t.hidden = false;
+    const strip = $('#mapside');
+    const r = btn.getBoundingClientRect(), tr = t.getBoundingClientRect();
+    const left = strip ? strip.getBoundingClientRect().left : r.left;
+    t.style.left = Math.max(6, left - tr.width - 10) + 'px';
+    t.style.top = Math.round(r.top + r.height / 2 - tr.height / 2) + 'px';
+  }
+  function hideMsTip() { const t = $('#mstip'); if (t) t.hidden = true; }
+  function openMsPanel(g, anchor) {
+    let p = $('#mspop');
+    if (!p) { p = document.createElement('div'); p.id = 'mspop'; p.className = 'mspop'; document.body.appendChild(p); }
+    hideMsTip();
+    p.innerHTML = `<div class="mshead">${esc(g.title)}<button class="ib" data-msclose>✕</button></div><div class="msbody">${g.panel()}</div>`;
+    p.hidden = false;
+    // anchored to the left edge of the whole strip, so the panel never covers the icons
+    const strip = $('#mapside');
+    const r = anchor.getBoundingClientRect();
+    const sr = strip ? strip.getBoundingClientRect() : r;
+    const pr = p.getBoundingClientRect();
+    p.style.left = Math.max(6, sr.left - pr.width - 8) + 'px';
+    p.style.top = Math.max(6, Math.min(window.innerHeight - pr.height - 8, r.top - 6)) + 'px';
+    p.onclick = e => {
+      if (e.target.closest('[data-msclose]')) { p.hidden = true; p.innerHTML = ''; return; }
+      const a = e.target.closest('[data-msact]');
+      if (a && a.tagName === 'BUTTON') { msAction(a.dataset.msact, p); return; }
+    };
+    p.onchange = e => {
+      const d = D(); if (!d) return;
+      const o = d.opts;
+      const t = e.target;
+      if (t.dataset.msv) {
+        const k = t.dataset.msv;
+        o[k] = /^\d+$/.test(t.value) ? +t.value : t.value;
+        if (k === 'colorScheme' && t.value === 'nt') o.baseColors.enabled = true;
+        if (k === 'transMode') { o.showTrans = true; if (t.value === 'orfs') o.showORFs = true; }
+      } else if (t.dataset.msb) o[t.dataset.msb] = t.checked;
+      else if (t.dataset.msn) o[t.dataset.msn] = Math.max(1, parseInt(t.value, 10) || 1);
+      else if (t.dataset.msact) { msAction(t.dataset.msact, p, t.value); return; }
+      d.cache = null;
+      renderAll(true);
+      const g2 = msGroups(d).find(x => x.key === g.key);
+      if (g2 && !$('#mspop').hidden) $('#mspop .msbody').innerHTML = g2.panel();
     };
   }
+  function msAction(a, pop, value) {
+    const d = D(); if (!d) return;
+    const o = d.opts;
+    const done = () => { if (pop) { pop.hidden = true; pop.innerHTML = ''; } };
+    const acts = {
+      choose: () => { done(); dlgEnzymeChooser(); },
+      enzSets: () => { done(); dlgEnzymeSets(); },
+      noncut: () => { done(); dlgNoncutters(); },
+      enzdb: () => { done(); dlgEnzymeDB(); },
+      showAllEnz: () => { enzHidden(d).length = 0; renderAll(true); },
+      useSet: () => { if (value) { d.chosen = SET.enzymeSets[value].slice(); o.enzMode = 'chosen'; renderAll(true); } },
+      addFeat: () => { done(); dlgFeature(null); },
+      detect: () => { done(); detectCommon(); },
+      featTable: () => { done(); setView('feat'); },
+      featdb: () => { done(); dlgFeatureDB(); },
+      addPrimer: () => { done(); dlgPrimer(null); },
+      primerTable: () => { done(); setView('primer'); },
+      hyb: () => { done(); dlgHybridization(); },
+      primerdb: () => { done(); dlgPrimerDB(); },
+      transopt: () => { done(); dlgTranslationOptions(); },
+      setcol: () => { done(); dlgSetDnaColor(); },
+      basecol: () => { done(); dlgBaseColors(); },
+      clearcol: () => { d.colors = []; commit(d, 'Cleared custom colours'); renderAll(true); },
+      gcopt: () => { done(); dlgGCRange(); },
+      origin: () => { done(); dlgSetOrigin(); },
+      lineWidth: () => { o.lineWidth = +value || 0; renderAll(true); },
+      alignOpen: () => { done(); openTraces(); },
+      alignView: () => { done(); setView('align'); },
+      alignClear: () => { d.alignments = []; renderAll(true); toast('Alignments removed'); },
+      split: () => { S.split = value || null; renderAll(true); },
+      focus: () => { done(); focusOnSelection(); },
+      rotate: () => { done(); dlgRotateMap(); }
+    };
+    if (acts[a]) acts[a]();
+  }
+
   function dlgBaseColors() {
     const d = D(), c = d.opts.baseColors;
     dialog({
@@ -3080,13 +3322,15 @@ svg .prim { cursor: pointer; }
     }
     v.innerHTML = findBarHTML(f)
       + (dz.opts.showMinimap ? `<div class="seqmini" id="seqmini">${focusMiniHTML(dz)}</div>` : '')
-      + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>` + (showFocus ? focusBarHTML(dz) : '');
+      + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>` + (showFocus ? focusBarHTML(dz) : '')
+      + mapSideHTML();
     buildSeqRows();
     const sc = $('#seqscroll');
     if (keepScroll) sc.scrollTop = prevTop;
     if (hadFocus) sc.focus({ preventScroll: true });
     bindSeq(sc);
     bindFind();
+    bindMapSide();
     if (showFocus) bindFocusBar(dz);
     runFind(false);
   }

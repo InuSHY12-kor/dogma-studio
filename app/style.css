@@ -282,12 +282,6 @@ svg.chroma { display: block; }
 .cut-site i { color: var(--danger); font-style: normal; }
 
 /* ---------- Map view panel ---------- */
-.mapside { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 2px; padding: 4px; background: var(--win); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 10px rgba(20, 30, 50, .12); z-index: 5; }
-.msb { width: 30px; height: 28px; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; background: none; border-radius: 4px; color: var(--muted); padding: 0; }
-.msb svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.msb:hover { background: var(--hover); color: var(--ink); }
-.msb.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.mssep { height: 1px; background: var(--border-soft); margin: 3px 1px; }
 .dtab.gel .nm::before { content: "▤ "; color: var(--muted); }
 .ptools label { display: inline-flex; align-items: center; gap: 4px; }
 .ptools select { padding: 2px 4px; }
@@ -525,3 +519,36 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .pdbitem:hover { background: var(--chrome); }
 .pdbitem.on { background: #e8effb; color: #11306e; font-weight: 600; }
 .plabel { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 10.5px; color: #1c2230; }
+
+/* ---------------------------------------------------------------- side strip */
+.mapside { position: absolute; right: 8px; top: 8px; z-index: 6; display: flex; flex-direction: column; gap: 2px;
+  background: var(--win); border: 1px solid var(--border); border-radius: 5px; padding: 3px; box-shadow: 0 2px 10px rgba(20,30,50,.10); }
+.mapside .msrow { display: flex; align-items: center; border-radius: 4px; }
+.mapside .msrow.on { background: #e8effb; }
+.mapside .msb { width: 30px; height: 28px; display: grid; place-items: center; border: none; background: none; cursor: pointer; color: var(--muted); border-radius: 4px 0 0 4px; padding: 0; }
+.mapside .msrow.on .msb { color: var(--accent); }
+.mapside .msb:hover { background: var(--chrome); }
+.mapside .msb svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mapside .mschev { width: 14px; height: 28px; display: grid; place-items: center; border: none; background: none; cursor: pointer; color: var(--faint); border-radius: 0 4px 4px 0; padding: 0; }
+.mapside .mschev:hover { background: var(--chrome); color: var(--accent); }
+.mapside .mschev svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.mstip { position: fixed; z-index: 70; background: #2f3644; color: #fff; font: 11.5px/1.4 var(--f-ui); padding: 3px 8px;
+  border-radius: 4px; pointer-events: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.mstip[hidden] { display: none; }
+
+.mspop { position: fixed; z-index: 65; width: 268px; background: var(--win); border: 1px solid var(--border);
+  border-radius: 5px; box-shadow: 0 8px 26px rgba(20,30,50,.20); font-size: 12px; }
+.mspop[hidden] { display: none; }
+.mspop .mshead { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border-soft);
+  background: var(--chrome); font-weight: 600; border-radius: 5px 5px 0 0; }
+.mspop .mshead .ib { margin-left: auto; }
+.mspop .msbody { padding: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 70vh; overflow: auto; }
+.mspop h5 { margin: 2px 0 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+.mspop select, .mspop input[type=number] { width: 100%; padding: 3px 5px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
+.mspop .mschk { display: flex; align-items: center; gap: 6px; }
+.mspop .msrow2 { display: flex; align-items: center; gap: 6px; padding-left: 20px; color: var(--muted); }
+.mspop .msrow2 input { width: 70px; }
+.mspop .msbtns { display: flex; gap: 5px; }
+.mspop .msbtns .btn { flex: 1; min-width: 0; font-size: 11.5px; padding: 3px 6px; }
+.mspop .msnote { color: var(--muted); font-size: 11px; line-height: 1.45; }
