@@ -57,6 +57,7 @@ svg .prim { cursor: pointer; }
       orfMin: 100, showTrans: true, enzMode: 'unique6', showComp: true,
       transMode: 'orfs',        // orfs | top3 | bottom3 | all6 | +1 | +2 | +3 | -1 | -2 | -3
       aa3: false, transCode: '1', orfStarts: ['ATG'], orfStrands: 'both',
+      colorScheme: 'none', protScheme: 'none',
       labelMode: 'auto',      // auto | inside | outside
       featOnLine: false,      // draw every feature on the backbone instead of in its own lane
       showRuler: true,
@@ -427,6 +428,13 @@ svg .prim { cursor: pointer; }
         { label: 'Show ORFs', chk: has && d.opts.showORFs, dis: !has, act: () => setOpt('showORFs', !d.opts.showORFs) },
         { label: 'Translation Options…', dis: !has, act: dlgTranslationOptions },
         { label: 'Use 3-Letter Amino Acid Codes', chk: has && d.opts.aa3, dis: !has, act: () => setOpt('aa3', !d.opts.aa3) },
+        '-',
+        { label: 'Show Colours', items: [
+          ...SCHEMES.map(([k, t]) => ({ label: t, chk: has && (d.opts.colorScheme || 'none') === k, dis: !has, act: () => { d.opts.colorScheme = k; if (k === 'nt') d.opts.baseColors.enabled = true; renderAll(true); } })),
+          '-',
+          { label: 'Set DNA Colour…', dis: !sl, act: dlgSetDnaColor },
+          { label: 'Base Colours…', dis: !has, act: dlgBaseColors }
+        ] },
         { label: 'Show Translations', chk: has && d.opts.showTrans, dis: !has, act: () => setOpt('showTrans', !d.opts.showTrans) },
         { label: 'Show Complementary Strand', chk: has && d.opts.showComp, dis: !has, act: () => setOpt('showComp', !d.opts.showComp) },
         '-',
@@ -808,7 +816,11 @@ svg .prim { cursor: pointer; }
       <div class="row2" style="padding-left:22px"><select id="side-trans">${TRANS_MODES.map(([k, t]) => `<option value="${k}" ${o.transMode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="row2" style="padding-left:22px">${chk('aa3', '3-letter codes')}</div>
       <div class="row2" style="padding-left:22px"><button class="btn" id="side-transopt" type="button">Translation Options…</button></div>
-      ${chk('showComp', 'Complementary strand')}`;
+      ${chk('showComp', 'Complementary strand')}
+      <h4>Colours</h4>
+      <div class="row2"><select id="side-colors">${SCHEMES.map(([k, t]) => `<option value="${k}" ${(o.colorScheme || 'none') === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="row2"><button class="btn" id="side-setcol" type="button" ${L ? '' : 'disabled'}>Set DNA Colour…</button><button class="btn" id="side-basecol" type="button">Base Colours…</button></div>
+      ${(d.colors || []).length ? `<div class="row2"><span class="note">${d.colors.length} custom region${d.colors.length === 1 ? '' : 's'}</span><button class="ib dng" id="side-clearcol" type="button">Clear all</button></div>` : ''}`;
     h += `<h4>Selection</h4>`;
     if (L) {
       const s = selSeq(d), a = d.sel.start + 1, b = d.sel.end === 0 ? n : d.sel.end;
@@ -1427,13 +1439,13 @@ svg .prim { cursor: pointer; }
       }
       // --- top strand, tick ruler, bottom strand
       parts.push(`<div class="num" style="top:${y0 + 1}px">${fmt(rs + 1)}</div>`);
-      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${paintBases(disp(d, d.seq.slice(rs, re)), o)}</div>`);
+      parts.push(`<div class="nt" style="left:${G}px;top:${y0}px">${paintBases(disp(d, d.seq.slice(rs, re)), o, d, rs, 1)}</div>`);
       const rulerTop = y0 + NT_H;
       let ruler = '';
       for (let p = rs; p < re; p++) ruler += ((p + 1) % 10 === 0) ? '+' : '-';
       parts.push(`<div class="tick" style="left:${G}px;top:${rulerTop}px">${ruler}</div>`);
       let y = rulerTop + RULER_H;
-      if (comp && !isRNA(d)) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${paintBases(DNA.comp(d.seq.slice(rs, re)), o)}</div>`); y += NT_H; }
+      if (comp && !isRNA(d)) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${paintBases(DNA.comp(d.seq.slice(rs, re)), o, d, rs, -1)}</div>`); y += NT_H; }
       const strandBottom = y;
       y += 2;
       // --- features, each translated one carrying its own residue numbering above it
@@ -1505,17 +1517,84 @@ svg .prim { cursor: pointer; }
 
   // Wraps each base in a coloured span, but only while base colouring is switched on,
   // since a span per base is wasted work otherwise.
-  function paintBases(str, o) {
-    if (!o.baseColors || !o.baseColors.enabled) return str;
-    let out = '', run = '', cur = '';
-    for (const ch of str) {
-      const c = o.baseColors[ch] || 'inherit';
-      if (c === cur) { run += ch; continue; }
-      if (run) out += `<span style="color:${cur}">${run}</span>`;
-      cur = c; run = ch;
+  /* Colour schemes for a nucleotide sequence. "nt" uses the colours of the four peaks
+   * in an ABI chromatogram, which is also what the base-colour editor sets; "gc" and
+   * "purine" group the bases by base pairing and by ring chemistry; "custom" paints the
+   * ranges the user coloured by hand; "history" marks what the last edit changed. */
+  const GC_COL = { G: '#1f6fb4', C: '#1f6fb4', A: '#d2812a', T: '#d2812a', U: '#d2812a' };
+  const PP_COL = { A: '#7b4fa8', G: '#7b4fa8', C: '#2e9e4f', T: '#2e9e4f', U: '#2e9e4f' };
+  const SCHEMES = [
+    ['none', 'No colours'],
+    ['nt', 'Nucleotide colours'],
+    ['gc', 'GC content'],
+    ['purine', 'Purine / pyrimidine'],
+    ['custom', 'Custom DNA colours'],
+    ['history', 'History colours']
+  ];
+  // The background colour for one base at absolute position p, or '' for none.
+  function baseBg(d, p, strand) {
+    const o = d.opts;
+    if (o.colorScheme === 'custom') {
+      for (const r of (d.colors || [])) {
+        if (r.strand && r.strand !== strand && r.strand !== 2) continue;
+        if (DNA.overlaps({ start: p, end: (p + 1) % (d.seq.length || 1) || d.seq.length }, r, d.seq.length)) return r.color;
+      }
+      return '';
     }
-    if (run) out += `<span style="color:${cur}">${run}</span>`;
+    if (o.colorScheme === 'history') {
+      for (const r of (d.changed || [])) if (p >= r.start && p < r.end) return '#ffd9d9';
+      return '';
+    }
+    return '';
+  }
+  function paintBases(str, o, d, absStart, strand) {
+    const scheme = o.colorScheme || (o.baseColors && o.baseColors.enabled ? 'nt' : 'none');
+    const fg = scheme === 'nt' ? (o.baseColors || {}) : (scheme === 'gc' ? GC_COL : (scheme === 'purine' ? PP_COL : null));
+    const bgOn = (scheme === 'custom' && d && (d.colors || []).length) || (scheme === 'history' && d && (d.changed || []).length);
+    if (!fg && !bgOn) return str;
+    let out = '', run = '', curF = '', curB = '';
+    const flush = () => {
+      if (!run) return;
+      const st = (curF && curF !== 'inherit' ? `color:${curF};` : '') + (curB ? `background:${curB};` : '');
+      out += st ? `<span style="${st}">${run}</span>` : run;
+      run = '';
+    };
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      const f = fg ? (fg[ch] || 'inherit') : '';
+      const bg = bgOn ? baseBg(d, (absStart + i) % d.seq.length, strand) : '';
+      if (f === curF && bg === curB) { run += ch; continue; }
+      flush(); curF = f; curB = bg; run = ch;
+    }
+    flush();
     return out;
+  }
+  // Set DNA Color: paint the selection, on one strand or both.
+  function dlgSetDnaColor() {
+    const d = D();
+    if (!selLen(d)) { toast('Select the region to colour first.'); return; }
+    const a = d.sel.start, b = d.sel.end;
+    dialog({
+      title: 'Set DNA Colour',
+      body: `<div class="form">
+        <label>Region</label><div>${fmt(a + 1)} – ${fmt(b)} (${fmt(selLen(d))} bp)</div>
+        <label for="dcC">Colour</label><input type="color" id="dcC" value="#ffe9a8">
+        <label for="dcS">Strands</label><select id="dcS"><option value="2">Both strands</option><option value="1">Top strand</option><option value="-1">Bottom strand</option></select>
+        <div class="full hint">Custom colours are saved with the file. Choosing a colour switches the display to “Custom DNA colours”.</div></div>`,
+      buttons: [
+        { label: 'Remove Colour from Region', act: () => {
+          d.colors = (d.colors || []).filter(r => !DNA.overlaps(r, { start: a, end: b }, d.seq.length));
+          commit(d, `Removed custom colour from ${fmt(a + 1)}–${fmt(b)}`); renderAll(true);
+        } },
+        { label: 'Cancel' },
+        { label: 'OK', primary: true, act: () => {
+          d.colors = d.colors || [];
+          d.colors.push({ start: a, end: b, color: val('dcC'), strand: +val('dcS') });
+          d.opts.colorScheme = 'custom';
+          commit(d, `Coloured ${fmt(a + 1)}–${fmt(b)}`); renderAll(true);
+          toast(`${fmt(selLen(d) || b - a)} bp coloured`);
+        } }]
+    });
   }
   function updateSeqSel() {
     const d = D(), V = S.seq; if (!V || !d) return;
@@ -2419,6 +2498,27 @@ svg .prim { cursor: pointer; }
     return node;
   }
 
+  /* History colours: the bases one step changed, found by comparing that step's stored
+   * snapshot with the one before it. Clicking the step's name in History view turns them
+   * on, which is how the reference tool shows what an operation touched. */
+  function showHistoryColors(d, i) {
+    if (i <= 0) { d.changed = []; d.opts.colorScheme = 'none'; renderAll(true); toast('The first step is the file as it was opened.'); return; }
+    let a, b;
+    try { a = JSON.parse(d.hist[i - 1].snap).seq; b = JSON.parse(d.hist[i].snap).seq; }
+    catch (e) { toast('That step cannot be compared.'); return; }
+    // the span between the first and last difference, from both ends
+    let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let q = 0; while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
+    if (p >= b.length - q) { d.changed = []; d.opts.colorScheme = 'none'; renderAll(true); toast(`“${d.hist[i].label}” did not change any bases.`); return; }
+    // the change is shown on the current sequence, so only mark it when that step is the one in view
+    if (d.hi !== i) restore(d, i);
+    d.changed = [{ start: p, end: b.length - q }];
+    d.opts.colorScheme = 'history';
+    S.view = 'seq';
+    renderAll(true);
+    toast(`“${d.hist[i].label}” changed ${fmt(b.length - q - p)} base${b.length - q - p === 1 ? '' : 's'} at ${fmt(p + 1)}`);
+  }
+
   function renderHistory() {
     const d = D();
     if (S.histTab === undefined) S.histTab = d.provenance ? 'tree' : 'edits';
@@ -2443,8 +2543,14 @@ svg .prim { cursor: pointer; }
     } else {
       const t = dt => new Date(dt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll">
-        ${d.hist.map((h, i) => ({ h, i })).reverse().map(({ h, i }) => `<div class="hist-item${i === d.hi ? ' on' : ''}${i > d.hi ? ' future' : ''}" data-h="${i}"><span class="t">${t(h.t)}</span><span>${esc(h.label)}</span><span class="len">${fmt(h.len)} bp</span></div>`).join('')}</div></div>`;
-      v.querySelector('.tscroll').onclick = e => { const it = e.target.closest('[data-h]'); if (!it) return; restore(d, +it.dataset.h); renderAll(); };
+        ${d.hist.map((h, i) => ({ h, i })).reverse().map(({ h, i }) => `<div class="hist-item${i === d.hi ? ' on' : ''}${i > d.hi ? ' future' : ''}" data-h="${i}"><span class="t">${t(h.t)}</span><span class="hlbl" data-hc="${i}" title="Colour the bases this step changed">${esc(h.label)}</span><span class="len">${fmt(h.len)} bp</span></div>`).join('')}</div>
+        <div class="hint">Click a step to go back to it, or click its name to colour the bases that step changed.</div></div>`;
+      v.querySelector('.tscroll').onclick = e => {
+        const hc = e.target.closest('[data-hc]');
+        if (hc) { showHistoryColors(d, +hc.dataset.hc); return; }
+        const it = e.target.closest('[data-h]'); if (!it) return;
+        restore(d, +it.dataset.h); renderAll();
+      };
     }
     v.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-ht]'); if (!b) return; S.histTab = b.dataset.ht; renderView(); };
   }
@@ -4280,6 +4386,69 @@ svg .prim { cursor: pointer; }
 
   // ================================================================ protein documents
   function protSel(d) { return { a: Math.min(d.sel.start, d.sel.end), b: Math.max(d.sel.start, d.sel.end) }; }
+  /* Protein colouring schemes. Zappo and Clustal X use the published palettes; the
+   * DNASTAR entry follows the side-chain categories the guide lists, with colours of
+   * our own, and Transmembrane Tendency shades the residues along the hydrophilic to
+   * hydrophobic order of Zhao and London (2006). */
+  const PROT_SCHEMES = [
+    ['none', 'No colours'],
+    ['zappo', 'Physicochemical properties (Zappo)'],
+    ['clustal', 'Properties + conservation (Clustal X)'],
+    ['dnastar', 'Chemical properties (DNASTAR categories)'],
+    ['tm', 'Transmembrane tendency (Zhao & London)']
+  ];
+  const PROT_COL = (() => {
+    const mk = groups => { const m = {}; for (const [col, res] of groups) for (const r of res) m[r] = col; return m; };
+    const zappo = mk([
+      ['#ffafaf', 'ILVAM'], ['#ffc800', 'FWY'], ['#6464ff', 'KRH'], ['#ff0000', 'DE'],
+      ['#00ff00', 'STNQ'], ['#ff00ff', 'PG'], ['#ffff00', 'C']
+    ]);
+    const clustal = mk([
+      ['#80a0f0', 'AILMFWVC'], ['#f01505', 'KR'], ['#c048c0', 'ED'], ['#15c015', 'NQST'],
+      ['#f09048', 'G'], ['#c0c000', 'P'], ['#15a4a4', 'HY']
+    ]);
+    const dnastar = mk([
+      ['#d9b3ff', 'FWY'], ['#ffb3b3', 'DE'], ['#b3c6ff', 'RHK'], ['#d8e4bc', 'AGILMPV'], ['#ffe9a8', 'CNQST']
+    ]);
+    // most hydrophilic first, as the guide lists them
+    const order = 'KDERQNPHSTC' + 'G' + 'AYMVWLIF';
+    const tm = {};
+    for (let i = 0; i < order.length; i++) {
+      const t = i / (order.length - 1);           // 0 hydrophilic .. 1 hydrophobic
+      const r = Math.round(90 + 165 * t), g = Math.round(150 - 40 * Math.abs(t - 0.5) * 2), b2 = Math.round(230 - 180 * t);
+      tm[order[i]] = `rgb(${r},${g},${b2})`;
+    }
+    return { zappo, clustal, dnastar, tm };
+  })();
+  function paintProtein(str, scheme) {
+    const map = PROT_COL[scheme];
+    if (!map) return esc(str);
+    let out = '', run = '', cur = null;
+    const flush = () => { if (run) out += cur ? `<span style="background:${cur}">${esc(run)}</span>` : esc(run); run = ''; };
+    for (const ch of str) {
+      const c = map[ch] || null;
+      if (c === cur) { run += ch; continue; }
+      flush(); cur = c; run = ch;
+    }
+    flush();
+    return out;
+  }
+  function dlgProtColorKey(scheme) {
+    const map = PROT_COL[scheme];
+    const name = (PROT_SCHEMES.find(x => x[0] === scheme) || [, scheme])[1];
+    if (!map) { toast('No colour scheme is in use.'); return; }
+    const byCol = {};
+    for (const [res, col] of Object.entries(map)) (byCol[col] = byCol[col] || []).push(res);
+    dialog({
+      title: 'Colour Key — ' + name,
+      body: `<table class="grid"><thead><tr><th>Colour</th><th>Residues</th></tr></thead><tbody>
+        ${Object.entries(byCol).map(([col, res]) => `<tr><td><span class="sw" style="background:${col};width:30px"></span></td><td class="mono">${res.sort().join(' ')}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="hint">${scheme === 'dnastar' ? 'The categories are the ones the the reference tool guide lists for the DNASTAR scheme; the colours are GeneCanvas’s own.' : (scheme === 'tm' ? 'Shaded from most hydrophilic to least, in the order given by Zhao and London (2006).' : 'Palette as published for this scheme.')}</div>`,
+      buttons: [{ label: 'Close', primary: true }]
+    });
+  }
+
   function renderProtSeq() {
     const d = D(), v = $('#view'), p = d.prot;
     const per = 60;
@@ -4294,7 +4463,7 @@ svg .prim { cursor: pointer; }
       }).join('');
       rows.push(`<div class="srow" style="height:${bars ? 76 : 58}px">
         <div class="num" style="top:5px">${fmt(i + 1)}</div>
-        <div class="nt" style="left:78px;top:4px">${esc(chunk)}</div>
+        <div class="nt" style="left:78px;top:4px">${paintProtein(chunk, d.opts.protScheme)}</div>
         <div class="tick" style="left:78px;top:21px">${marks}</div>
         <div class="selov" hidden style="top:3px;height:18px"></div>
         ${bars ? `<div style="position:absolute;left:0;top:40px;right:0;height:14px">${bars}</div>` : ''}
@@ -4302,6 +4471,8 @@ svg .prim { cursor: pointer; }
     }
     v.innerHTML = `<div class="panel"><div class="ptools">
         <span class="note">${fmt(p.length)} amino acids</span>
+        <label class="inl">Colours <select id="pScheme">${PROT_SCHEMES.map(([k, t]) => `<option value="${k}" ${d.opts.protScheme === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        <button class="btn" id="pKey" ${d.opts.protScheme === 'none' ? 'disabled' : ''}>Colour Key…</button>
         <button class="btn" id="pSelAll">Select all</button>
         <button class="btn" id="pCopy">Copy</button>
         <button class="btn" id="pProps">Properties…</button>
@@ -4338,6 +4509,8 @@ svg .prim { cursor: pointer; }
       d.sel = { start: Math.min(d.anchor, q), end: Math.max(d.anchor, q) }; paint(); renderStatus();
     });
     window.addEventListener('mouseup', () => { drag = false; });
+    $('#pScheme').onchange = e => { d.opts.protScheme = e.target.value; renderAll(true); };
+    $('#pKey').onclick = () => dlgProtColorKey(d.opts.protScheme);
     $('#pSelAll').onclick = () => { d.sel = { start: 0, end: p.length }; d.anchor = 0; paint(); renderStatus(); };
     $('#pCopy').onclick = () => { const { a, b } = protSel(d); copyText(b > a ? p.slice(a, b) : p, 'Copied protein sequence'); };
     $('#pProps').onclick = () => { S.view = 'prop'; renderAll(); };
@@ -5704,6 +5877,11 @@ svg .prim { cursor: pointer; }
     if (t.dataset.o) setOpt(t.dataset.o, t.checked);
     else if (t.id === 'side-enz') { if (t.value === 'chosen') { setOpt('enzMode', 'chosen'); dlgEnzymeChooser(); } else setOpt('enzMode', t.value); }
     else if (t.id === 'side-orfmin') { const v = Math.max(20, Math.min(2000, parseInt(t.value, 10) || 100)); setOpt('orfMin', v); }
+    else if (t.id === 'side-colors') {
+      const d2 = D(); d2.opts.colorScheme = t.value;
+      if (t.value === 'nt') d2.opts.baseColors.enabled = true;
+      renderAll(true);
+    }
     else if (t.id === 'side-trans') {
       const d2 = D(); d2.opts.transMode = t.value;
       if (t.value === 'orfs') d2.opts.showORFs = true;
@@ -5712,6 +5890,9 @@ svg .prim { cursor: pointer; }
   });
   $('#side').addEventListener('click', e => {
     if (e.target.id === 'side-transopt') { dlgTranslationOptions(); return; }
+    if (e.target.id === 'side-setcol') { dlgSetDnaColor(); return; }
+    if (e.target.id === 'side-basecol') { dlgBaseColors(); return; }
+    if (e.target.id === 'side-clearcol') { const d2 = D(); d2.colors = []; commit(d2, 'Cleared custom colours'); renderAll(true); return; }
     const b = e.target.closest('[data-mm]'); if (b) { setOpt('mapMode', b.dataset.mm); return; }
     if (e.target.id === 'side-pick') dlgEnzymeChooser();
   });
