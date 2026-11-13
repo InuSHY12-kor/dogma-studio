@@ -370,6 +370,85 @@ ZraI GACGTC 3 3`;
     return frags.sort((a, b) => b.size - a.size);
   }
 
+  /* ---------- Genetic codes ----------
+   * NCBI translation tables, written as their differences from the standard code so the
+   * table numbers stay recognisable. Only the codes in real use are listed. */
+  const CODE_DIFFS = {
+    1: { name: 'Standard', diff: {} },
+    2: { name: 'Vertebrate Mitochondrial', diff: { AGA: '*', AGG: '*', ATA: 'M', TGA: 'W' } },
+    3: { name: 'Yeast Mitochondrial', diff: { ATA: 'M', CTT: 'T', CTC: 'T', CTA: 'T', CTG: 'T', TGA: 'W' } },
+    4: { name: 'Mold, Protozoan & Coelenterate Mitochondrial; Mycoplasma', diff: { TGA: 'W' } },
+    5: { name: 'Invertebrate Mitochondrial', diff: { AGA: 'S', AGG: 'S', ATA: 'M', TGA: 'W' } },
+    6: { name: 'Ciliate, Dasycladacean & Hexamita Nuclear', diff: { TAA: 'Q', TAG: 'Q' } },
+    9: { name: 'Echinoderm & Flatworm Mitochondrial', diff: { AAA: 'N', AGA: 'S', AGG: 'S', TGA: 'W' } },
+    10: { name: 'Euplotid Nuclear', diff: { TGA: 'C' } },
+    11: { name: 'Bacterial, Archaeal & Plant Plastid', diff: {} },
+    12: { name: 'Alternative Yeast Nuclear', diff: { CTG: 'S' } },
+    13: { name: 'Ascidian Mitochondrial', diff: { AGA: 'G', AGG: 'G', ATA: 'M', TGA: 'W' } },
+    14: { name: 'Alternative Flatworm Mitochondrial', diff: { AAA: 'N', AGA: 'S', AGG: 'S', TAA: 'Y', TGA: 'W' } },
+    16: { name: 'Chlorophycean Mitochondrial', diff: { TAG: 'L' } },
+    21: { name: 'Trematode Mitochondrial', diff: { AAA: 'N', AGA: 'S', AGG: 'S', ATA: 'M', TGA: 'W' } }
+  };
+  const GENETIC_CODES = {};
+  const CODE_LIST = [];
+  for (const [num, spec] of Object.entries(CODE_DIFFS)) {
+    const t = Object.assign({}, CODON, spec.diff);
+    GENETIC_CODES[num] = t;
+    GENETIC_CODES[spec.name] = t;
+    CODE_LIST.push({ id: num, name: spec.name, changed: Object.keys(spec.diff) });
+  }
+
+  // ---------- Feature segments ----------
+  // A feature is one span unless it carries `segs`, in which case those are its exons
+  // and the gaps between them are introns.
+  function featSegs(f, n) {
+    if (f.segs && f.segs.length) return f.segs.slice().sort((a, b) => a.start - b.start);
+    return [{ start: f.start, end: f.end }];
+  }
+  function featLen(f, n) {
+    return featSegs(f, n).reduce((t, g) => t + rlen(g, n), 0);
+  }
+  // The spliced coding sequence, plus the molecule position of every base in it, so a
+  // translation can be drawn over exons and numbered like a protein.
+  function featCoding(seq, f, n) {
+    const segList = featSegs(f, n);
+    const order = f.strand === -1 ? segList.slice().reverse() : segList;
+    let cds = '', pos = [];
+    for (const g of order) {
+      const piece = sub(seq, g.start, g.end);
+      if (f.strand === -1) {
+        cds += rc(piece);
+        for (let i = rlen(g, n) - 1; i >= 0; i--) pos.push((g.start + i) % n);
+      } else {
+        cds += piece;
+        for (let i = 0; i < rlen(g, n); i++) pos.push((g.start + i) % n);
+      }
+    }
+    return { cds, pos };
+  }
+  /* Translate a feature across its exons.
+   *   opts.code      a genetic code name from GENETIC_CODES
+   *   opts.startMet  translate the first codon as methionine
+   *   opts.frame     0, 1 or 2
+   *   opts.startAt   the residue number of the first amino acid (default 1)
+   * Returns one entry per codon: its letter, residue number and the position of its
+   * middle base in the molecule, which is where the letter is drawn. */
+  function featTranslate(seq, f, n, opts = {}) {
+    const { cds, pos } = featCoding(seq, f, n);
+    const fr = opts.frame || 0;
+    const table = GENETIC_CODES[opts.code] || null;
+    const out = [];
+    let res = opts.startAt || 1;
+    for (let i = fr; i + 3 <= cds.length; i += 3) {
+      const codon = cds.substr(i, 3);
+      let aa = (table ? table[codon] : CODON[codon]) || 'X';
+      const forced = opts.startMet && i === fr && aa !== 'M';
+      if (forced) aa = 'M';
+      out.push({ aa, res: res++, mid: pos[i + 1], a: pos[i], c: pos[i + 2], forced, codon });
+    }
+    return out;
+  }
+
   // ---------- Common feature library (for "Detect Common Features") ----------
   // Common features. `kind` says how a match is found: "dna" compares the sequence
   // directly on both strands, "protein" translates all six frames first, which finds a
@@ -482,6 +561,8 @@ ZraI GACGTC 3 3`;
 
   function parseLocation(loc, n, circular) {
     const strand = /complement/.test(loc) ? -1 : 1;
+    const parts = [];
+    { const re2 = /<?(\d+)\.\.>?(\d+)/g; let mm; while ((mm = re2.exec(loc))) parts.push([+mm[1] - 1, +mm[2]]); }
     const ranges = [];
     const re = /<?(\d+)(?:\.\.>?(\d+)|\^(\d+))?/g; let m;
     while ((m = re.exec(loc))) { const a = +m[1], b = m[2] ? +m[2] : (m[3] ? +m[3] : +m[1]); ranges.push([a, b]); }
@@ -495,13 +576,13 @@ ZraI GACGTC 3 3`;
       if (wraps) {
         const ordered = strand === -1 && /join\(complement/.test(loc) ? ranges.slice().reverse() : ranges;
         start = ordered[0][0] - 1; end = ordered[ordered.length - 1][1];
-        return { start, end: end % n === 0 ? n : end % n, strand };
+        return { start, end: end % n === 0 ? n : end % n, strand, parts };
       }
     }
     start = Math.min(...ranges.map(r => r[0])) - 1;
     end = Math.max(...ranges.map(r => r[1]));
     if (start > end - 1 && circular) { start = first[0] - 1; end = last[1]; }
-    return { start, end, strand };
+    return { start, end, strand, parts };
   }
 
   function parseGenBank(txt) {
@@ -543,7 +624,11 @@ ZraI GACGTC 3 3`;
       let color = f.q.ApEinfo_fwdcolor || null;
       const cm = (f.q.note || '').match(/color:\s*(#[0-9a-fA-F]{6})/); if (cm) color = cm[1];
       if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) color = null;
-      features.push({ name: fname.slice(0, 80), type: f.type, start: loc.start, end: loc.end, strand: loc.strand, color, notes: f.q.note || '' });
+      const nf = { name: fname.slice(0, 80), type: f.type, start: loc.start, end: loc.end, strand: loc.strand, color, notes: f.q.note || '' };
+      // A join() over several ranges is a segmented feature: exons with introns between them.
+      if (loc.parts && loc.parts.length > 1 && !(loc.parts.length === 2 && loc.parts[0][1] === n && loc.parts[1][0] === 0))
+        nf.segs = loc.parts.map(([a, b]) => ({ start: a, end: b }));
+      features.push(nf);
     }
     let provenance = null;
     if (histLines && histLines.length) {
@@ -622,7 +707,13 @@ ZraI GACGTC 3 3`;
 
   function gbLoc(f, n) {
     let s;
-    if (f.end > f.start) s = (f.end - f.start === 1) ? `${f.start + 1}` : `${f.start + 1}..${f.end}`;
+    if (f.segs && f.segs.length > 1) {
+      // exons in ascending order, which is how GenBank writes a join
+      const parts = f.segs.slice().sort((a, b) => a.start - b.start)
+        .map(g => g.end > g.start ? `${g.start + 1}..${g.end}` : `${g.start + 1}..${n},1..${g.end}`);
+      s = `join(${parts.join(',')})`;
+    }
+    else if (f.end > f.start) s = (f.end - f.start === 1) ? `${f.start + 1}` : `${f.start + 1}..${f.end}`;
     else s = `join(${f.start + 1}..${n},1..${f.end})`;
     return f.strand === -1 ? `complement(${s})` : s;
   }
@@ -740,6 +831,7 @@ ZraI GACGTC 3 3`;
 
   root.DNA = {
     COMP, clean, rc, comp, CODON, translate, AA3, proteinMW, gcPct, dsDnaMW, tm,
+    GENETIC_CODES, CODE_LIST, featSegs, featLen, featCoding, featTranslate,
     ENZYMES, ENZ_BY_NAME, findSites, rlen, segs, sub, overlaps, findORFs, searchDNA, searchProtein,
     digest, detectCommon, COMMON, parseGenBank, parseFASTA, parseAny, parseDnaBinary, toGenBank, toFASTA, buildDemo
   };

@@ -26,6 +26,8 @@ svg .ftxt { fill: #111; font: 600 11px var(--f-ui); pointer-events: none; }
 svg .lbl { font: 11px var(--f-ui); fill: var(--ink); cursor: pointer; }
 svg .lbl.e { fill: #3a3f4b; }
 svg .lbl.e.u { font-weight: 600; }
+svg .intron { fill: none; stroke: #8d95a3; stroke-width: 1.4px; stroke-dasharray: 5 4; }
+svg .cleave { stroke: #11306e; stroke-width: 1.6px; }
 svg .lbl.e.hl { fill: #6b4b00; font-weight: 700; paint-order: stroke; stroke: #ffd24d; stroke-width: 7px; stroke-linejoin: round; }
 svg .lbl.f { font-weight: 600; }
 svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
@@ -39,6 +41,7 @@ svg .orf { stroke: none; cursor: pointer; }
 svg .prim { cursor: pointer; }
 `;
   const FEATURE_TYPES = Object.keys(TYPE_COL).filter(t => t !== 'ORF');
+  let featPicked = new Set();   // features ticked in the Features table
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
 
   // ---------------------------------------------------------------- state
@@ -74,7 +77,11 @@ svg .prim { cursor: pointer; }
           translated: f.translated !== undefined ? !!f.translated : (f.type === 'CDS'),
           frame: f.frame || 0,
           matchProtein: !!f.matchProtein,
-          quals: f.quals || {}
+          quals: f.quals || {},
+          priority: !!f.priority, code: f.code || '1', startMet: !!f.startMet, startAt: f.startAt || 1,
+          point: f.end === f.start, hidden: !!f.hidden,
+          ...(f.segs && f.segs.length > 1 ? { segs: f.segs.map(g => ({ start: g.start, end: g.end, name: g.name || '', color: g.color || '', skip: !!g.skip, startAt: g.startAt })) } : {}),
+          ...(f.cleave && f.cleave.length ? { cleave: f.cleave.slice() } : {})
         };
       }),
       primers: (src.primers || []).map(p => ({ id: uid(), name: p.name, seq: DNA.clean(p.seq), notes: p.notes || '' })),
@@ -173,14 +180,28 @@ svg .prim { cursor: pointer; }
   }
   function collectItems(d, A) {
     const items = [], o = d.opts;
-    if (o.showFeat) for (const f of d.features) items.push({ kind: 'f', key: 'f:' + f.id, ref: f, start: f.start, end: f.end, strand: f.strand, name: f.name, color: f.color, type: f.type });
+    if (o.showFeat) for (const f of d.features) {
+      if (f.hidden) continue;
+      items.push({ kind: 'f', key: 'f:' + f.id, ref: f, start: f.start, end: f.end, strand: f.strand, name: f.name, color: f.color, type: f.type, segs: f.segs, priority: !!f.priority, cleave: f.cleave });
+    }
     if (o.showPrimers) for (const p of d.primers) (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: b.full ? '#2f6fd0' : '#7d9fd6', type: 'primer' }));
     if (o.showORFs) A.orfs.forEach((r, i) => items.push({ kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand, name: 'ORF: ' + r.aa + ' aa', color: '#9aa2ae', type: 'ORF' }));
     return items;
   }
+  // Exons of an item, ascending, with the introns between them. A feature without
+  // segments is one exon and no introns.
+  function exonsOf(it, n) {
+    if (!it.segs || it.segs.length < 2) return { exons: [{ start: it.start, end: it.end }], introns: [] };
+    const ex = it.segs.slice().sort((a, b) => a.start - b.start);
+    const introns = [];
+    for (let i = 1; i < ex.length; i++) if (ex[i].start > ex[i - 1].end) introns.push({ start: ex[i - 1].end, end: ex[i].start });
+    return { exons: ex, introns };
+  }
   function assignLanes(list, n) {
     const lanes = [];
-    const sorted = list.slice().sort((a, b) => DNA.rlen(b, n) - DNA.rlen(a, n));
+    // longest first, except that a feature marked "prioritise display" is placed first
+    // so it ends up above the larger features it overlaps.
+    const sorted = list.slice().sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0) || DNA.rlen(b, n) - DNA.rlen(a, n));
     for (const it of sorted) {
       let k = 0;
       while (lanes[k] && lanes[k].some(o => DNA.overlaps(o, it, n))) k++;
@@ -404,12 +425,37 @@ svg .prim { cursor: pointer; }
       ] },
       { label: 'Features', items: [
         { label: 'Add Feature…', key: 'Ctrl+K', dis: !has, act: () => dlgFeature(null) },
+        { label: 'Edit Feature…', dis: !has || !targetFeature(d), act: () => dlgFeature(targetFeature(d)) },
+        { label: 'Edit Features…', dis: !has, act: dlgEditFeatures },
+        { label: 'Remove Feature', dis: !has || !targetFeature(d), act: () => removeFeature(targetFeature(d).id) },
+        '-',
+        { label: 'Create Feature Segment…', dis: !has || !sl, act: dlgMakeSegment },
+        { label: 'Delete Feature Segment…', dis: !has || !sl, act: dlgDeleteSegment },
+        { label: 'Introns', items: [
+          { label: 'Convert Introns to Lowercase…', dis: !has, act: intronsToLower },
+          { label: 'Annotate Lowercase Regions as Introns…', dis: !has, act: lowerToIntrons },
+          { label: 'Splice to Remove Introns…', dis: !has, act: dlgSplice }
+        ] },
+        { label: 'Add Cleavage Site…', dis: !has, act: addCleavage },
+        { label: 'Remove Cleavage Site…', dis: !has, act: removeCleavage },
+        '-',
+        { label: 'Show or Hide Features', items: [
+          { label: 'Show All Features', dis: !has, act: () => { for (const f of d.features) f.hidden = false; renderAll(true); } },
+          { label: 'Hide All Features', dis: !has, act: () => { for (const f of d.features) f.hidden = true; renderAll(true); } },
+          '-',
+          { label: 'Show Selected Features', dis: !has, act: () => setFeatVisible(featPicked.size ? d.features.filter(f => featPicked.has(f.id)) : (targetFeature(d) ? [targetFeature(d)] : []), true) },
+          { label: 'Hide Selected Features', dis: !has, act: () => setFeatVisible(featPicked.size ? d.features.filter(f => featPicked.has(f.id)) : (targetFeature(d) ? [targetFeature(d)] : []), false) }
+        ] },
+        '-',
+        { label: 'Detect Common Features…', dis: !has, act: detectCommon },
+        { label: 'Add to Common Features…', dis: !has || !targetFeature(d), act: addToCommon },
+        { label: 'Browse Common Features…', act: dlgFeatureDB },
+        '-',
         { label: 'Import Features from Another File…', dis: !has, act: () => dlgImport('features') },
+        { label: 'Export Feature Data…', dis: !has || !d.features.length, act: dlgExportFeatures },
         '-',
-        { label: 'Detect Common Features', dis: !has, act: detectCommon },
-        { label: 'Show Features Table', dis: !has, act: () => setView('feat') },
-        '-',
-        { label: 'Add ORF as Feature', dis: !sl, act: selToCDS }
+        { label: 'Add ORF as Feature', dis: !sl, act: selToCDS },
+        { label: 'Show Features Table', dis: !has, act: () => setView('feat') }
       ] },
       { label: 'Primers', items: [
         { label: 'Add Primer…', dis: !has, act: () => dlgPrimer(null) },
@@ -977,7 +1023,22 @@ svg .prim { cursor: pointer; }
     for (const it of feats) {
       const r = fR(it.lane);
       const ar = arrow(it, r, laneW, 11);
+      const { exons, introns } = exonsOf(it, n);
+      if (exons.length > 1) {
+        // an exon each, with the arrow head only on the last one, and a dashed arc per intron
+        for (const iv of introns) g.push(`<path class="intron" d="${arcPath(cx, cy, r, ang(iv.start), ang(iv.end), 1)}"/>`);
+        exons.forEach((ex, i) => {
+          const term = it.strand === 1 ? i === exons.length - 1 : (it.strand === -1 ? i === 0 : false);
+          const sub = arrow({ start: ex.start, end: ex.end, strand: term ? it.strand : 0 }, r, laneW, 11);
+          g.push(`<path class="feat" d="${sub.path}" fill="${(it.segs[i] && it.segs[i].color) || it.color}" data-k="${it.key}"><title>${esc(it.name)} (${esc(it.type)}) segment ${i + 1} of ${exons.length}: ${fmt(ex.start + 1)}..${fmt(ex.end)}</title></path>`);
+        });
+      } else
       g.push(`<path class="feat" d="${ar.path}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} (${esc(it.type)}) ${fmt(it.start + 1)}..${fmt(it.end)} · ${fmt(DNA.rlen(it, n))} bp</title></path>`);
+      // cleavage arrows, drawn pointing into the feature band
+      for (const cp of (it.cleave || [])) {
+        const a = ang(cp), p1 = P(r - laneW / 2 - 7, a), p2 = P(r + laneW / 2, a);
+        g.push(`<line class="cleave" x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}"/>`);
+      }
       const textW = it.name.length * 6.4 + 10;
       const avail = (ar.span - ar.h) * r;
       const fits = avail > textW;
@@ -1057,7 +1118,7 @@ svg .prim { cursor: pointer; }
         return [lo, hi];
       };
       const lanes = [];
-      for (const it of list.slice().sort((p, q) => p.start - q.start)) {
+      for (const it of list.slice().sort((p, q) => (q.priority ? 1 : 0) - (p.priority ? 1 : 0) || p.start - q.start)) {
         const [lo, hi] = ext(it);
         let k = 0; while (lanes[k] !== undefined && lanes[k] > lo - 4) k++;
         lanes[k] = hi; it.lane = k;
@@ -1097,9 +1158,16 @@ svg .prim { cursor: pointer; }
     let y = baseY + 32;
     const laneH = 30;
     const bar = (it, yy, h, labelBelow) => {
-      for (const [a, b] of DNA.segs(it, n)) {
+      const ex = exonsOf(it, n);
+      // the dashed line that marks each intron, drawn before the exon blocks
+      for (const iv of ex.introns) g.push(`<line class="intron" x1="${X(iv.start).toFixed(1)}" y1="${(yy + h / 2).toFixed(1)}" x2="${X(iv.end).toFixed(1)}" y2="${(yy + h / 2).toFixed(1)}"/>`);
+      for (const cp of (it.cleave || [])) g.push(`<line class="cleave" x1="${X(cp).toFixed(1)}" y1="${(yy + h + 7).toFixed(1)}" x2="${X(cp).toFixed(1)}" y2="${(yy - 2).toFixed(1)}"/>`);
+      const pieces = [];
+      for (const exr of ex.exons) for (const [a, b] of DNA.segs(exr, n)) pieces.push([a, b, exr]);
+      for (const [a, b, exr] of pieces) {
         const x1 = X(a), x2 = X(b), hd = it.strand ? Math.min(9, (x2 - x1) * 0.5) : 0;
-        const tipR = it.strand === 1 && b === it.end, tipL = it.strand === -1 && a === it.start;
+        const tipR = it.strand === 1 && b === exr.end && exr.end === ex.exons[ex.exons.length - 1].end;
+        const tipL = it.strand === -1 && a === exr.start && exr.start === ex.exons[0].start;
         const y1 = yy, y2 = yy + h, ym = yy + h / 2;
         let pts;
         if (tipR) pts = `${x1},${y1} ${x2 - hd},${y1} ${x2},${ym} ${x2 - hd},${y2} ${x1},${y2}`;
@@ -1107,7 +1175,8 @@ svg .prim { cursor: pointer; }
         else pts = `${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}`;
         const cls = it.kind === 'f' ? 'feat' : (it.kind === 'p' ? 'prim' : 'orf');
         g.push(`<polygon class="${cls}" points="${pts}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)}</title></polygon>`);
-        if (labelBelow !== false) {
+        const widest = pieces.reduce((best, pc) => (X(pc[1]) - X(pc[0])) > (X(best[1]) - X(best[0])) ? pc : best, pieces[0]);
+        if (labelBelow !== false && (pieces.length === 1 || (a === widest[0] && b === widest[1]))) {
           const tw = it.name.length * 6.3 + 8;
           const fits = x2 - x1 - hd > tw;
           const inside = o.labelMode === 'inside' ? (x2 - x1 > it.name.length * 4) : (o.labelMode === 'outside' ? false : fits);
@@ -1226,6 +1295,7 @@ svg .prim { cursor: pointer; }
       return;
     }
     const it = findItem(d, k); if (!it) return;
+    if (it.kind === 'f') S.featSel = it.ref.id;
     selectRange(it);
   }
 
@@ -1267,19 +1337,26 @@ svg .prim { cursor: pointer; }
     cuts.sort((a, b) => a.pos - b.pos);
     // feature segments
     const items = collectItems(d, A);
-    const segsAll = [];
-    for (const it of items) for (const [a, b] of DNA.segs(it, n)) segsAll.push({ a, b, it, tipR: it.strand === 1 && b === it.end, tipL: it.strand === -1 && a === it.start });
+    const segsAll = [], intronsAll = [];
+    for (const it of items) {
+      const ex = exonsOf(it, n);
+      const last = ex.exons[ex.exons.length - 1], first = ex.exons[0];
+      for (const exr of ex.exons) for (const [a, b] of DNA.segs(exr, n))
+        segsAll.push({ a, b, it, tipR: it.strand === 1 && b === exr.end && exr.end === last.end, tipL: it.strand === -1 && a === exr.start && exr.start === first.start });
+      for (const iv of ex.introns) for (const [a, b] of DNA.segs(iv, n)) intronsAll.push({ a, b, it });
+    }
     // translations, carrying the residue number so each one can be numbered like a protein
     const aaRows = {};
     if (o.showTrans) for (const it of items) {
       if (!((it.kind === 'f' && it.ref && it.ref.translated) || it.kind === 'o')) continue;
-      const L = DNA.rlen(it, n); const fs = DNA.sub(d.seq, it.start, it.end);
-      const s = it.strand === -1 ? DNA.rc(fs) : fs;
-      for (let j = 0; j + 3 <= L; j += 3) {
-        const aa = DNA.CODON[s.substr(j, 3)] || 'X';
-        const mid = it.strand === -1 ? ((it.end - j - 2) % n + n) % n : (it.start + j + 1) % n;
+      const ref = it.ref || {};
+      const codons = DNA.featTranslate(d.seq, {
+        start: it.start, end: it.end, strand: it.strand, segs: it.kind === 'f' ? ref.segs : null
+      }, n, { code: ref.code, startMet: ref.startMet, frame: ref.frame || 0, startAt: ref.startAt });
+      for (const c of codons) {
+        const aa = c.aa, mid = c.mid;
         const r = Math.floor(mid / bpr);
-        (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key, res: j / 3 + 1 });
+        (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key, res: c.res, forced: c.forced });
       }
     }
     const rows = [], html = [];
@@ -1327,6 +1404,8 @@ svg .prim { cursor: pointer; }
         else { laneBar[l] = y; y += 17; }
       }
       const keyLane = {};
+      // dashed intron lines, drawn in the lane the feature occupies
+      const rIntrons = intronsAll.filter(x => x.a < re && x.b > rs).map(x => ({ x1: Math.max(x.a, rs), x2: Math.min(x.b, re), it: x.it }));
       for (const s of rsegs) {
         const x = G + (s.x1 - rs) * CW, w = (s.x2 - s.x1) * CW;
         let clip = '';
@@ -1337,10 +1416,22 @@ svg .prim { cursor: pointer; }
         parts.push(`<div class="fbar${s.it.kind === 'o' ? ' orf' : ''}" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneBar[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:10px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
         keyLane[s.it.key] = s.lane;
       }
+      for (const iv of rIntrons) {
+        const l = keyLane[iv.it.key]; if (l === undefined || laneBar[l] === undefined) continue;
+        const x = G + (iv.x1 - rs) * CW, w = (iv.x2 - iv.x1) * CW;
+        parts.push(`<div class="fintron" style="left:${x}px;top:${laneBar[l] + 6}px;width:${w}px"></div>`);
+      }
+      for (const it of items) {
+        for (const cp of (it.cleave || [])) {
+          if (cp < rs || cp >= re) continue;
+          const l = keyLane[it.key]; if (l === undefined || laneBar[l] === undefined) continue;
+          parts.push(`<div class="fcleave" style="left:${G + (cp - rs) * CW - 3}px;top:${laneBar[l] - 9}px" title="cleavage site after ${fmt(cp)}">↑</div>`);
+        }
+      }
       for (const a of (aaRows[ri] || [])) {
         const l = keyLane[a.key]; if (l === undefined || laneAA[l] === undefined) continue;
         const x = G + (a.mid - rs) * CW - CW;
-        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px">${a.aa}</div>`);
+        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}${a.forced ? ' forced' : ''}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px"${a.forced ? ' title="non-ATG start translated as methionine"' : ''}>${a.aa}</div>`);
         if (a.res % 5 === 0) parts.push(`<div class="aanum" style="left:${x - CW * 1.5}px;top:${laneNum[l]}px;width:${CW * 6}px">${a.res}</div>`);
       }
       const hgt = y + 5;
@@ -1643,27 +1734,435 @@ svg .prim { cursor: pointer; }
     };
   }
 
+  /* Feature translation options, shown inline inside the feature dialog rather than as a
+   * second dialog, so nothing is lost while they are being changed: reading frame,
+   * genetic code, product numbering, a forced methionine start, and per-segment
+   * numbering for a segmented feature. */
+  function transOptionsHTML(cur, tOpts, n) {
+    const segList = cur.segs && cur.segs.length > 1 ? cur.segs.slice().sort((a, b) => a.start - b.start) : null;
+    return `<div class="form" style="margin:0">
+      <label for="toFr">Reading frame</label><select id="toFr">${[0, 1, 2].map(k => `<option value="${k}" ${k === tOpts.frame ? 'selected' : ''}>+${k + 1}</option>`).join('')}</select>
+      <label for="toCode">Genetic code</label><select id="toCode">${DNA.CODE_LIST.map(c => `<option value="${c.id}" ${String(c.id) === String(tOpts.code) ? 'selected' : ''}>${c.id}. ${esc(c.name)}${c.changed.length ? ` (${c.changed.join(', ')})` : ''}</option>`).join('')}</select>
+      <label for="toAt">Numbering starts at</label><input type="number" id="toAt" value="${tOpts.startAt || 1}" style="width:110px">
+      <label></label><label><input type="checkbox" id="toMet" ${tOpts.startMet ? 'checked' : ''}> Translate the first codon as methionine</label>
+      ${segList ? `<label>Segments</label><div class="tscroll" style="max-height:140px"><table class="grid"><thead><tr><th>#</th><th>Range</th><th>Skip numbering</th><th>Start at</th></tr></thead><tbody>
+        ${segList.map((g, i) => `<tr><td>${i + 1}</td><td>${fmt(g.start + 1)}..${fmt(g.end)}</td>
+          <td><input type="checkbox" data-tsk="${i}" ${g.skip ? 'checked' : ''}></td>
+          <td><input type="number" data-tsa="${i}" value="${g.startAt || ''}" placeholder="\u2014" style="width:80px"></td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+      <div class="full" id="toPrev"></div>
+      <div class="full hint">The genetic codes are the NCBI translation tables; the codons each one changes are listed beside its name.</div></div>`;
+  }
+  function readTransOptions(cur, tOpts) {
+    if (!$('#toFr')) return;
+    tOpts.frame = +val('toFr'); tOpts.code = val('toCode');
+    tOpts.startAt = parseInt(val('toAt'), 10) || 1; tOpts.startMet = $('#toMet').checked;
+    const segList = cur.segs && cur.segs.length > 1 ? cur.segs.slice().sort((a, b) => a.start - b.start) : null;
+    if (segList) segList.forEach((g, i) => {
+      const sk = document.querySelector(`#dlg [data-tsk="${i}"]`), sa = document.querySelector(`#dlg [data-tsa="${i}"]`);
+      if (sk) g.skip = sk.checked;
+      if (sa) g.startAt = sa.value ? +sa.value : undefined;
+    });
+  }
+
+  // ================================================================ FEATURE SEGMENTS & INTRONS
+  // The feature a command should act on: the selected one, else the largest that
+  // overlaps the selection, which is the rule the reference tool uses for segment commands.
+  function targetFeature(d, needOverlap) {
+    const n = d.seq.length;
+    if (S.featSel) { const f = d.features.find(x => x.id === S.featSel); if (f) return f; }
+    if (!selLen(d)) return null;
+    const over = d.features.filter(f => DNA.overlaps(f, d.sel, n));
+    if (!over.length) return null;
+    return over.sort((a, b) => DNA.featLen(b, n) - DNA.featLen(a, n))[0];
+  }
+  const segsOf = (f, n) => DNA.featSegs(f, n).map(g => ({ start: g.start, end: g.end, name: g.name || '', color: g.color || '', skip: !!g.skip, startAt: g.startAt }));
+
+  // Split a feature at the selection, so the selected part becomes its own segment.
+  function dlgMakeSegment() {
+    const d = D(), n = d.seq.length;
+    if (!selLen(d)) { toast('Select the region that should become a segment.'); return; }
+    const f = targetFeature(d);
+    if (!f) { toast('The selection does not lie inside a feature.'); return; }
+    const a = d.sel.start, b = d.sel.end;
+    const cur = segsOf(f, n);
+    const out = [];
+    for (const g of cur) {
+      if (a >= g.end || b <= g.start) { out.push(g); continue; }
+      if (a > g.start) out.push({ start: g.start, end: a, name: g.name, color: g.color });
+      out.push({ start: Math.max(a, g.start), end: Math.min(b, g.end), name: '', color: '' });
+      if (b < g.end) out.push({ start: b, end: g.end, name: g.name, color: g.color });
+    }
+    if (out.length === cur.length) { toast('That selection does not divide the feature.'); return; }
+    editSegments(f, out, `Divided ${f.name} into ${out.length} segments`);
+  }
+  // Turn the selection into an intron: the segment is removed from the feature while the
+  // DNA stays, and the flanking segments become exons.
+  function dlgDeleteSegment() {
+    const d = D(), n = d.seq.length;
+    if (!selLen(d)) { toast('Select the region to mark as an intron.'); return; }
+    const f = targetFeature(d);
+    if (!f) { toast('The selection does not lie inside a feature.'); return; }
+    const a = d.sel.start, b = d.sel.end;
+    const out = [];
+    for (const g of segsOf(f, n)) {
+      if (a >= g.end || b <= g.start) { out.push(g); continue; }
+      if (a > g.start) out.push({ start: g.start, end: a, name: g.name, color: g.color });
+      if (b < g.end) out.push({ start: b, end: g.end, name: g.name, color: g.color });
+    }
+    if (!out.length) { toast('That would remove the whole feature. Delete the feature instead.'); return; }
+    editSegments(f, out, `Marked ${fmt(b - a)} bp of ${f.name} as an intron`);
+  }
+  // A small editor shared by both commands, so segments can be named and coloured
+  // before the change is committed, as the reference tool's Edit Feature dialog does.
+  function editSegments(f, segs, label) {
+    const d = D(), n = d.seq.length;
+    const list = segs.slice();
+    const render = () => {
+      $('#fsegT').innerHTML = `<table class="grid"><thead><tr><th>#</th><th>From</th><th>To</th><th>Length</th><th>Name</th><th>Colour</th>${f.translated ? '<th>Numbering</th>' : ''}</tr></thead><tbody>
+        ${list.map((g, i) => `<tr><td>${i + 1}</td><td>${fmt(g.start + 1)}</td><td>${fmt(g.end)}</td><td>${fmt(DNA.rlen(g, n))} bp</td>
+          <td><input type="text" data-sn="${i}" value="${esc(g.name || '')}" placeholder="segment ${i + 1}" style="width:120px"></td>
+          <td><input type="color" data-sc="${i}" value="${g.color || f.color || '#c9ced6'}"></td>
+          ${f.translated ? `<td><label class="inl"><input type="checkbox" data-sk="${i}" ${g.skip ? 'checked' : ''}> skip this segment</label>
+            <input type="number" data-sa="${i}" value="${g.startAt || ''}" placeholder="start at" style="width:78px"></td>` : ''}</tr>`).join('')}
+      </tbody></table>
+      <div class="hint">The gaps between segments are drawn as a dashed line and are left out of the translation. Clear a colour to use the feature's own colour.</div>`;
+    };
+    dialog({
+      title: `Edit Segments of “${f.name}”`, wide: true,
+      body: `<div class="form"><div class="full" id="fsegT"></div><div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        const box = $('#dlg');
+        list.forEach((g, i) => {
+          const nm = box.querySelector(`[data-sn="${i}"]`), col = box.querySelector(`[data-sc="${i}"]`);
+          const sk = box.querySelector(`[data-sk="${i}"]`), sa = box.querySelector(`[data-sa="${i}"]`);
+          g.name = nm ? nm.value.trim() : '';
+          g.color = col && col.value !== (f.color || '#c9ced6') ? col.value : '';
+          if (sk) g.skip = sk.checked;
+          if (sa) g.startAt = sa.value ? +sa.value : undefined;
+        });
+        f.segs = list.length > 1 ? list : null;
+        if (!f.segs) delete f.segs;
+        f.start = list[0].start; f.end = list[list.length - 1].end;
+        commit(d, label); renderAll(true); toast(label);
+      } }],
+      onOpen: render
+    });
+  }
+  // Introns, written in lowercase and read back from it — the pair of commands the
+  // guide describes for sequences that mark introns that way.
+  function intronsToLower() {
+    const d = D(), n = d.seq.length;
+    const f = targetFeature(d);
+    if (!f || !f.segs || f.segs.length < 2) { toast('Select a segmented feature first.'); return; }
+    const { introns } = exonsOf({ start: f.start, end: f.end, segs: f.segs }, n);
+    if (!introns.length) { toast('That feature has no introns.'); return; }
+    let seq = d.seq;
+    for (const iv of introns) for (const [a, b] of DNA.segs(iv, n)) seq = seq.slice(0, a) + seq.slice(a, b).toLowerCase() + seq.slice(b);
+    d.seq = seq;
+    commit(d, `Wrote ${introns.length} intron${introns.length === 1 ? '' : 's'} of ${f.name} in lowercase`);
+    renderAll(true); toast(`${introns.length} intron${introns.length === 1 ? '' : 's'} written in lowercase`);
+  }
+  function lowerToIntrons() {
+    const d = D(), n = d.seq.length;
+    const f = targetFeature(d);
+    if (!f) { toast('Select the feature whose lowercase regions are introns.'); return; }
+    // walk the feature's span and cut it at every run of lowercase bases
+    const span = DNA.featSegs(f, n);
+    const out = [];
+    for (const g of span) {
+      let runStart = null;
+      let cur = null;
+      for (let i = 0; i < DNA.rlen(g, n); i++) {
+        const p = (g.start + i) % n, isLower = d.seq[p] >= 'a' && d.seq[p] <= 'z';
+        if (!isLower) { if (cur === null) cur = p; }
+        else { if (cur !== null) { out.push({ start: cur, end: p }); cur = null; } }
+      }
+      if (cur !== null) out.push({ start: cur, end: g.end });
+    }
+    if (out.length < 2) { toast('No lowercase region inside that feature divides it.'); return; }
+    f.segs = out; f.start = out[0].start; f.end = out[out.length - 1].end;
+    commit(d, `Annotated ${out.length - 1} lowercase region${out.length === 2 ? '' : 's'} of ${f.name} as introns`);
+    renderAll(true); toast(`${f.name} now has ${out.length} exons`);
+  }
+  // Splice: a new file holding the feature with its introns taken out.
+  function dlgSplice() {
+    const d = D(), n = d.seq.length;
+    const f = targetFeature(d);
+    if (!f || !f.segs || f.segs.length < 2) { toast('Select a segmented CDS or mRNA feature first.'); return; }
+    const { cds } = DNA.featCoding(d.seq, f, n);
+    dialog({
+      title: 'Splice to Remove Introns',
+      body: `<div class="form">
+        <label for="spn">File name</label><input type="text" id="spn" value="${esc(d.name + ' ' + f.name + ' spliced')}">
+        <label></label><label><input type="checkbox" id="spm" checked> Merge segments into a single feature</label>
+        <div class="full note">${esc(f.name)} has ${f.segs.length} exons spanning ${fmt(DNA.featLen(f, n))} bp. The spliced sequence is ${fmt(cds.length)} bp${f.translated ? `, ${fmt(Math.floor(cds.length / 3))} codons` : ''}.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Splice', primary: true, act: () => {
+        const merge = $('#spm').checked;
+        const segList = DNA.featSegs(f, n);
+        const order = f.strand === -1 ? segList.slice().reverse() : segList;
+        let at = 0; const newSegs = [];
+        for (const g of order) { const L = DNA.rlen(g, n); newSegs.push({ start: at, end: at + L }); at += L; }
+        addDoc({
+          name: val('spn') || 'Spliced', seq: cds, circular: false,
+          features: [Object.assign({}, f, {
+            id: undefined, start: 0, end: cds.length, strand: 1,
+            segs: merge ? null : newSegs
+          })],
+          primers: [], histLabel: `Spliced ${f.segs.length} exons of ${f.name} from ${d.name}`
+        });
+        toast(`${fmt(cds.length)} bp spliced sequence created`);
+      } }]
+    });
+  }
+  // Cleavage arrows: a position inside a feature where the product is cut.
+  function addCleavage() {
+    const d = D(), n = d.seq.length;
+    const f = targetFeature(d);
+    if (!f) { toast('Click inside a feature, then place the cursor where the product is cleaved.'); return; }
+    const at = d.sel.start;
+    if (!DNA.overlaps({ start: at, end: (at + 1) % n || n }, f, n)) { toast('Put the cursor inside the feature first.'); return; }
+    f.cleave = [...new Set([...(f.cleave || []), at])].sort((a, b) => a - b);
+    commit(d, `Added a cleavage site to ${f.name} at ${fmt(at)}`);
+    renderAll(true); toast(`Cleavage site added after ${fmt(at)}`);
+  }
+  function removeCleavage() {
+    const d = D();
+    const f = targetFeature(d);
+    if (!f || !(f.cleave || []).length) { toast('That feature has no cleavage site.'); return; }
+    dialog({
+      title: `Remove Cleavage Sites from “${f.name}”`,
+      body: `<div class="form"><label>Sites</label><div>${f.cleave.map((c, i) => `<label class="inl"><input type="checkbox" data-cv="${i}" checked> after ${fmt(c)}</label>`).join(' ')}</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        const drop = [...document.querySelectorAll('#dlg [data-cv]:checked')].map(i => +i.dataset.cv);
+        f.cleave = f.cleave.filter((_, i) => !drop.includes(i));
+        if (!f.cleave.length) delete f.cleave;
+        commit(d, `Removed ${drop.length} cleavage site${drop.length === 1 ? '' : 's'} from ${f.name}`);
+        renderAll(true);
+      } }]
+    });
+  }
+  // ---------------------------------------------------------------- several features at once
+  function dlgEditFeatures() {
+    const d = D();
+    const picked = d.features.filter(f => featPicked.has(f.id));
+    const list = picked.length ? picked : (targetFeature(d) ? [targetFeature(d)] : []);
+    if (!list.length) { toast('Check the features to change in the Features table first.'); return; }
+    dialog({
+      title: `Edit ${list.length} Feature${list.length === 1 ? '' : 's'}`, wide: true,
+      body: `<div class="form">
+        <div class="full note">${esc(list.map(f => f.name).slice(0, 8).join(', '))}${list.length > 8 ? ` and ${list.length - 8} more` : ''}</div>
+        <label></label><label><input type="checkbox" id="efCT"> Set the type to <select id="efT">${FEATURE_TYPES.map(t => `<option>${t}</option>`).join('')}</select></label>
+        <label></label><label><input type="checkbox" id="efCC"> Set the colour to <input type="color" id="efC" value="#c9ced6"></label>
+        <label></label><label><input type="checkbox" id="efCD"> Set the direction to <select id="efD"><option value="1">→ forward</option><option value="-1">← reverse</option><option value="0">— nondirectional</option><option value="2">↔ bidirectional</option></select></label>
+        <label></label><label><input type="checkbox" id="efCR"> <select id="efR"><option value="1">Translate</option><option value="0">Do not translate</option></select> these features in Sequence view</label>
+        <label></label><label><input type="checkbox" id="efCP"> <select id="efP"><option value="1">Prioritise</option><option value="0">Do not prioritise</option></select> display of these features in maps</label>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        let touched = 0;
+        for (const f of list) {
+          if ($('#efCT').checked) { f.type = val('efT'); touched++; }
+          if ($('#efCC').checked) { f.color = val('efC'); touched++; }
+          if ($('#efCD').checked) { f.strand = +val('efD'); touched++; }
+          if ($('#efCR').checked) { f.translated = val('efR') === '1'; touched++; }
+          if ($('#efCP').checked) { f.priority = val('efP') === '1'; touched++; }
+        }
+        if (!touched) return showErr('Check at least one property to change.');
+        commit(d, `Edited ${list.length} feature${list.length === 1 ? '' : 's'}`);
+        renderAll(true); toast(`${list.length} feature${list.length === 1 ? '' : 's'} updated`);
+      } }]
+    });
+  }
+  // ---------------------------------------------------------------- export feature data
+  function dlgExportFeatures() {
+    const d = D(), n = d.seq.length;
+    const COLS = [
+      ['name', 'Name', f => f.name],
+      ['type', 'Type', f => f.type],
+      ['start', 'Start', f => f.start + 1],
+      ['end', 'End', f => f.end],
+      ['length', 'Length', f => DNA.featLen(f, n)],
+      ['strand', 'Direction', f => f.strand === 1 ? 'forward' : (f.strand === -1 ? 'reverse' : (f.strand === 2 ? 'bidirectional' : 'none'))],
+      ['segments', 'Segments', f => DNA.featSegs(f, n).map(g => `${g.start + 1}..${g.end}`).join(' ')],
+      ['translated', 'Translated', f => f.translated ? 'yes' : 'no'],
+      ['product', 'Product size', f => f.translated ? Math.floor(DNA.featLen(f, n) / 3) + ' aa' : ''],
+      ['color', 'Colour', f => f.color || ''],
+      ['notes', 'Note', f => (f.notes || '').replace(/[\r\n]+/g, ' ')],
+      ['quals', 'Qualifiers', f => Object.entries(f.quals || {}).map(([k, v]) => `/${k}=${v}`).join(' ')],
+      ['seq', 'Sequence', f => DNA.featCoding(d.seq, f, n).cds]
+    ];
+    const on = new Set(['name', 'type', 'start', 'end', 'length', 'strand', 'notes']);
+    dialog({
+      title: 'Export Feature Data', wide: true,
+      body: `<div class="form">
+        <label>Columns</label><div class="enz-pick" style="columns:3 150px;max-height:200px">${COLS.map(([k, t]) => `<label><input type="checkbox" data-xc="${k}" ${on.has(k) ? 'checked' : ''}> ${t}</label>`).join('')}</div>
+        <label>Format</label><select id="xfFmt"><option value="tsv">Tab-separated (.tsv)</option><option value="csv">Comma-separated (.csv)</option></select>
+        <div class="full hint">This file is meant for other programs. To copy features into another GeneCanvas file use Features › Import Features from Another File.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Export', primary: true, act: () => {
+        const keys = [...document.querySelectorAll('#dlg [data-xc]:checked')].map(i => i.dataset.xc);
+        if (!keys.length) return showErr('Choose at least one column.');
+        const cols = COLS.filter(c => keys.includes(c[0]));
+        const fmtTsv = val('xfFmt') === 'tsv';
+        const sep = fmtTsv ? '\t' : ',';
+        const q = v => { const t = String(v); return fmtTsv ? t.replace(/\t/g, ' ') : (/[",]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t); };
+        const rows = [cols.map(c => c[1]).join(sep)];
+        for (const f of d.features.slice().sort((a, b) => a.start - b.start)) rows.push(cols.map(c => q(c[2](f))).join(sep));
+        const text = rows.join('\n') + '\n';
+        const name = d.name.replace(/[^\w.-]+/g, '_') + '-features.' + (fmtTsv ? 'tsv' : 'csv');
+        if (host && host.saveFile) host.saveFile({ path: null, defaultName: name, content: text, filters: [{ name: fmtTsv ? 'Tab-separated' : 'CSV', extensions: [fmtTsv ? 'tsv' : 'csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+        else downloadText(name, text);
+      } }]
+    });
+  }
+  // ---------------------------------------------------------------- visibility
+  function setFeatVisible(list, show) {
+    const d = D();
+    for (const f of list) f.hidden = !show;
+    renderAll(true);
+    toast(`${list.length} feature${list.length === 1 ? '' : 's'} ${show ? 'shown' : 'hidden'}`);
+  }
+  // Add the selected feature to the user's own common-feature list, so Detect finds it.
+  function addToCommon() {
+    const d = D(), n = d.seq.length;
+    const f = targetFeature(d);
+    if (!f) { toast('Select a feature first.'); return; }
+    const { cds } = DNA.featCoding(d.seq, f, n);
+    const asProtein = !!f.matchProtein && f.translated;
+    const entry = {
+      name: f.name, type: f.type, kind: asProtein ? 'protein' : 'dna',
+      seq: asProtein ? DNA.translate(cds).replace(/\*$/, '') : cds,
+      molecule: f.molecule || 'DNA', color: f.color || '', translated: !!f.translated, matchProtein: !!f.matchProtein
+    };
+    if (!entry.seq) { toast('That feature has no sequence.'); return; }
+    SET.myFeatures = SET.myFeatures || [];
+    if (SET.myFeatures.some(x => x.name === entry.name && x.seq === entry.seq)) { toast(`“${entry.name}” is already in your features.`); return; }
+    SET.myFeatures.push(entry);
+    saveSettings().then(() => toast(`“${entry.name}” added to your common features (${entry.kind === 'protein' ? 'protein' : 'DNA'} match)`));
+  }
+
   // ================================================================ FEATURES TABLE
+  let featSort = 'start', featDesc = false, featOpen = new Set(), featFull = true;
   function renderFeatures() {
     const d = D(), n = isProt(d) ? d.prot.length : d.seq.length, v = $('#view');
-    const fs = d.features.slice().sort((a, b) => a.start - b.start);
-    v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="fadd">Add Feature…</button><button class="btn" id="fdet">Detect Common Features</button><span class="note">${fs.length} features · double-click a row to edit</span></div>
-      <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th></th><th>Name</th><th>Type</th><th>Location</th><th>Length</th><th>Direction</th><th>Molecule</th><th>Notes</th><th></th></tr></thead><tbody>
-      ${fs.map(f => `<tr data-f="${f.id}"><td><span class="sw" style="background:${f.color}"></span></td><td><b>${esc(f.name)}</b></td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)} .. ${fmt(f.end)}${f.end <= f.start ? ' (spans origin)' : ''}</td><td>${fmt(DNA.rlen(f, n))} ${isProt(d) ? 'aa' : 'bp'}${f.type === 'CDS' ? ` · ${Math.floor(DNA.rlen(f, n) / 3) - 1} aa` : ''}</td><td>${f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : '— none'}</td><td>${esc(f.molecule || 'DNA')}${f.translated ? ' · translated' : ''}${f.matchProtein ? ' · protein match' : ''}</td><td class="wrap">${esc(f.notes || '')}</td><td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let GeneCanvas detect common features such as promoters, tags and recombination sites.</p></div>`}</div></div>`;
+    const len = f => isProt(d) ? DNA.rlen(f, n) : DNA.featLen(f, n);
+    const cmp = {
+      start: (a, b) => a.start - b.start,
+      name: (a, b) => a.name.localeCompare(b.name),
+      type: (a, b) => a.type.localeCompare(b.type) || a.start - b.start,
+      len: (a, b) => len(a) - len(b),
+      dir: (a, b) => (a.strand || 0) - (b.strand || 0) || a.start - b.start,
+      vis: (a, b) => (a.hidden ? 1 : 0) - (b.hidden ? 1 : 0) || a.start - b.start
+    }[featSort] || ((a, b) => a.start - b.start);
+    const fs = d.features.slice().sort(featDesc ? (a, b) => -cmp(a, b) : cmp);
+    const arrow = k => featSort === k ? (featDesc ? ' ▾' : ' ▴') : '';
+    const dirTxt = f => f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : (f.strand === 2 ? '↔ bidirectional' : '— none');
+    // the expanded detail block, which is what the reference tool's disclosure button shows
+    const detail = f => {
+      const segList = DNA.featSegs(f, n);
+      const t = (!isProt(d) && f.translated) ? DNA.featTranslate(d.seq, f, n, { code: f.code, startMet: f.startMet, frame: f.frame, startAt: f.startAt }) : null;
+      const prot = t ? t.map(x => x.aa).join('').replace(/\*$/, '') : '';
+      const quals = Object.entries(f.quals || {});
+      return `<tr class="sub"><td></td><td colspan="9"><div class="fdet">
+        ${segList.length > 1 ? `<div><b>Segments</b> ${segList.map((g, i) => `${i + 1}: ${fmt(g.start + 1)}..${fmt(g.end)} (${fmt(DNA.rlen(g, n))} bp)${g.name ? ` “${esc(g.name)}”` : ''}`).join(' · ')}</div>
+          <div><b>Introns</b> ${exonsOf({ start: f.start, end: f.end, segs: f.segs }, n).introns.map(iv => `${fmt(iv.start + 1)}..${fmt(iv.end)}`).join(', ') || 'none'}</div>` : ''}
+        ${(f.cleave || []).length ? `<div><b>Cleavage sites</b> after ${f.cleave.map(c => fmt(c)).join(', ')}</div>` : ''}
+        ${t ? `<div><b>Product</b> ${fmt(prot.length)} aa, ${(DNA.proteinMW(prot) / 1000).toFixed(1)} kDa${f.code && f.code !== '1' ? ` · genetic code ${esc(f.code)}` : ''}${f.startMet ? ' · first codon read as Met' : ''}${f.startAt && f.startAt !== 1 ? ` · numbered from ${f.startAt}` : ''}</div>
+          <div class="mono wrap" style="font-size:12px">${esc(prot.slice(0, 300))}${prot.length > 300 ? '…' : ''}</div>` : ''}
+        ${f.notes ? `<div><b>/note</b> ${esc(f.notes)}</div>` : ''}
+        ${quals.map(([k, val2]) => `<div><b>/${esc(k)}</b> ${esc(val2)}</div>`).join('')}
+        ${f.priority ? '<div class="note">Prioritised in maps</div>' : ''}
+        ${f.matchProtein ? '<div class="note">Detected by an exact protein match as well as an approximate DNA match</div>' : ''}
+      </div></td></tr>`;
+    };
+    v.innerHTML = `<div class="panel"><div class="ptools">
+      <button class="btn pri" id="fadd">Add Feature…</button>
+      <button class="btn" id="fdet">Detect Common Features</button>
+      <button class="btn" id="fact">Actions ▾</button>
+      <button class="btn" id="fexp" ${fs.length ? '' : 'disabled'}>Export Data…</button>
+      <select id="fsort2"><option value="">Sort by…</option><option value="start" ${featSort === 'start' ? 'selected' : ''}>Position</option><option value="name" ${featSort === 'name' ? 'selected' : ''}>Name</option><option value="type" ${featSort === 'type' ? 'selected' : ''}>Type</option><option value="len" ${featSort === 'len' ? 'selected' : ''}>Length</option><option value="dir" ${featSort === 'dir' ? 'selected' : ''}>Direction</option><option value="vis" ${featSort === 'vis' ? 'selected' : ''}>Visibility</option></select>
+      <label class="inl"><input type="checkbox" id="ffull" ${featFull ? 'checked' : ''}> Full descriptions</label>
+      <button class="ib" id="fexpall" title="Expand or collapse every row">⇅</button>
+      <span class="note">${fs.length} features${featPicked.size ? ` · ${featPicked.size} checked` : ''} · double-click a row to edit</span></div>
+      <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th style="width:26px"></th><th style="width:26px">✓</th><th style="width:22px"></th><th class="sort" data-s="name">Name${arrow('name')}</th><th class="sort" data-s="type">Type${arrow('type')}</th><th class="sort" data-s="start">Location${arrow('start')}</th><th class="sort" data-s="len">Length${arrow('len')}</th><th class="sort" data-s="dir">Direction${arrow('dir')}</th><th>Molecule</th><th>Notes</th><th></th></tr></thead><tbody>
+      ${fs.map(f => {
+      const segList = DNA.featSegs(f, n);
+      const zero = f.end === f.start;
+      return `<tr data-f="${f.id}"${f.hidden ? ' class="dimmed"' : ''}>
+          <td><button class="ib eye" data-fvis="${f.id}" title="${f.hidden ? 'Hidden — click to show' : 'Visible — click to hide'}">${f.hidden ? '○' : '◉'}</button></td>
+          <td><input type="checkbox" data-fc="${f.id}" ${featPicked.has(f.id) ? 'checked' : ''}></td>
+          <td><span class="disc" data-fex="${f.id}">${featOpen.has(f.id) ? '▾' : '▸'}</span></td>
+          <td><span class="sw" style="background:${f.color}"></span> <b>${esc(f.name)}</b></td>
+          <td>${esc(f.type)}</td>
+          <td>${zero ? `${fmt(f.start)}^${fmt(f.start + 1)}` : `${fmt(f.start + 1)} .. ${fmt(f.end)}`}${f.end < f.start ? ' (spans origin)' : ''}${segList.length > 1 ? ` <span class="note">${segList.length} segments</span>` : ''}</td>
+          <td>${zero ? '0 (point)' : `${fmt(len(f))} ${isProt(d) ? 'aa' : 'bp'}`}${f.translated && !zero ? ` · ${Math.floor(DNA.featLen(f, n) / 3)} aa` : ''}</td>
+          <td>${dirTxt(f)}</td>
+          <td>${esc(f.molecule || 'DNA')}${f.translated ? ' · translated' : ''}${f.matchProtein ? ' · protein match' : ''}</td>
+          <td class="wrap">${featFull ? esc(f.notes || '') : esc((f.notes || '').slice(0, 40)) + ((f.notes || '').length > 40 ? '…' : '')}</td>
+          <td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`
+        + (featOpen.has(f.id) ? detail(f) : '');
+    }).join('')}
+      </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let GeneCanvas detect common features such as promoters, tags and recombination sites. With no selection, Add Feature makes a zero-length point feature at the cursor.</p></div>`}</div></div>`;
     $('#fadd').onclick = () => (isProt(d) ? dlgProtFeature(null) : dlgFeature(null));
     $('#fdet').onclick = detectCommon;
+    $('#fexp').onclick = dlgExportFeatures;
+    $('#fsort2').onchange = e => { if (e.target.value) { featSort = e.target.value; featDesc = false; renderFeatures(); } };
+    $('#ffull').onchange = e => { featFull = e.target.checked; renderFeatures(); };
+    $('#fexpall').onclick = () => { if (featOpen.size) featOpen.clear(); else for (const f of fs) featOpen.add(f.id); renderFeatures(); };
+    $('#fact').onclick = e => {
+      const r = e.target.getBoundingClientRect();
+      const picked = d.features.filter(f => featPicked.has(f.id));
+      showCtx(r.left, r.bottom, [
+        { label: `Edit Selected Features… (${picked.length})`, dis: !picked.length, act: dlgEditFeatures },
+        { label: `Show Selected Features (${picked.length})`, dis: !picked.length, act: () => setFeatVisible(picked, true) },
+        { label: `Hide Selected Features (${picked.length})`, dis: !picked.length, act: () => setFeatVisible(picked, false) },
+        '-',
+        { label: `Delete Selected Features (${picked.length})`, dis: !picked.length, act: () => { const ids = picked.map(f => f.id); d.features = d.features.filter(f => !ids.includes(f.id)); featPicked.clear(); commit(d, `Removed ${ids.length} features`); renderAll(true); } },
+        '-',
+        { label: 'Check All', act: () => { for (const f of fs) featPicked.add(f.id); renderFeatures(); } },
+        { label: 'Clear Check Boxes', dis: !picked.length, act: () => { featPicked.clear(); renderFeatures(); } }
+      ]);
+    };
+    v.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (featSort === th.dataset.s) featDesc = !featDesc; else { featSort = th.dataset.s; featDesc = false; } renderFeatures(); });
     const tb = v.querySelector('tbody'); if (!tb) return;
     tb.onclick = e => {
+      const vis = e.target.closest('[data-fvis]');
+      if (vis) { const f = d.features.find(x => x.id === +vis.dataset.fvis); f.hidden = !f.hidden; renderAll(true); return; }
+      const ck = e.target.closest('[data-fc]');
+      if (ck) { const id = +ck.dataset.fc; if (ck.checked) featPicked.add(id); else featPicked.delete(id); return; }
+      const ex = e.target.closest('[data-fex]');
+      if (ex) {
+        const id = +ex.dataset.fex;
+        if (e.altKey) { if (featOpen.size) featOpen.clear(); else for (const f of fs) featOpen.add(f.id); }
+        else if (featOpen.has(id)) featOpen.delete(id); else featOpen.add(id);
+        renderFeatures(); return;
+      }
       const ed = e.target.closest('[data-ed]'); if (ed) { const ff = d.features.find(f => f.id === +ed.dataset.ed); isProt(d) ? dlgProtFeature(ff) : dlgFeature(ff); return; }
       const del = e.target.closest('[data-del]'); if (del) { removeFeature(+del.dataset.del); return; }
       const tr = e.target.closest('tr[data-f]'); if (!tr) return;
       const f = d.features.find(x => x.id === +tr.dataset.f);
+      S.featSel = f.id;
       if (isProt(d)) { d.sel = { start: f.start, end: f.end }; d.anchor = f.start; renderStatus(); }
-      else selectRange(f);
+      else if (f.end !== f.start) selectRange(f);
+      else setSel(f.start, f.start, { anchor: f.start, scroll: true });
       tb.querySelectorAll('tr.on').forEach(r => r.classList.remove('on')); tr.classList.add('on');
     };
     tb.ondblclick = e => { const tr = e.target.closest('tr[data-f]'); if (!tr) return; const ff = d.features.find(x => x.id === +tr.dataset.f); isProt(d) ? dlgProtFeature(ff) : dlgFeature(ff); };
+    tb.oncontextmenu = e => {
+      const tr = e.target.closest('tr[data-f]'); if (!tr) return;
+      e.preventDefault();
+      const f = d.features.find(x => x.id === +tr.dataset.f);
+      S.featSel = f.id;
+      showCtx(e.clientX, e.clientY, [
+        { label: `Edit Feature “${f.name}”…`, act: () => dlgFeature(f) },
+        { label: f.hidden ? 'Show Feature' : 'Hide Feature', act: () => { f.hidden = !f.hidden; renderAll(true); } },
+        { label: 'Add to Common Features…', act: addToCommon },
+        '-',
+        { label: 'Delete Feature', act: () => removeFeature(f.id) }
+      ]);
+    };
   }
 
   // ================================================================ PRIMERS TABLE
@@ -1783,8 +2282,12 @@ svg .prim { cursor: pointer; }
       color: f.color || (f.type === 'CDS' ? CDS_PALETTE[d.features.filter(x => x.type === 'CDS').length % CDS_PALETTE.length] : (TYPE_COL[f.type] || '#c9ced6')),
       notes: f.notes || '', molecule: f.molecule || 'DNA',
       translated: f.translated !== undefined ? !!f.translated : (f.type === 'CDS'),
-      frame: f.frame || 0, matchProtein: !!f.matchProtein, quals: f.quals || {}
+      frame: f.frame || 0, matchProtein: !!f.matchProtein, quals: f.quals || {},
+      priority: !!f.priority, code: f.code || '1', startMet: !!f.startMet, startAt: f.startAt || 1,
+      point: !!f.point, hidden: !!f.hidden
     };
+    if (f.segs && f.segs.length > 1) nf.segs = f.segs.map(g => ({ start: g.start, end: g.end, name: g.name || '', color: g.color || '', skip: !!g.skip, startAt: g.startAt }));
+    if (f.cleave && f.cleave.length) nf.cleave = f.cleave.slice();
     d.features.push(nf); commit(d, `Added feature ${nf.name}`); renderAll(true);
     return nf;
   }
@@ -1943,13 +2446,16 @@ svg .prim { cursor: pointer; }
   const MOLECULES = ['DNA', 'RNA', 'protein'];
   function dlgFeature(f, preset = {}) {
     const d = D(), n = d.seq.length, isNew = !f;
-    if (isNew && !selLen(d)) { toast('Select a region first, then add a feature.'); return; }
+    // A cursor with no selection makes a zero-length point feature, which is how
+    // the reference tool marks a splice junction or any other boundary between two bases.
+    const point = isNew && !selLen(d);
     const cur = f || {
       name: preset.name || 'New feature', type: preset.type || 'misc_feature',
-      start: d.sel.start, end: d.sel.end, strand: preset.strand !== undefined ? preset.strand : 1,
+      start: d.sel.start, end: point ? d.sel.start : d.sel.end, strand: preset.strand !== undefined ? preset.strand : (point ? 0 : 1),
       color: '', notes: '', molecule: 'DNA', translated: (preset.type || '') === 'CDS', frame: 0, matchProtein: false, quals: {}
     };
     const color = cur.color || TYPE_COL[cur.type] || '#c9ced6';
+    const tOpts = { frame: cur.frame || 0, code: cur.code || '1', startMet: !!cur.startMet, startAt: cur.startAt || 1 };
     const qualText = Object.entries(cur.quals || {}).map(([k, v]) => `${k}=${v}`).join('\n');
     dialog({
       title: isNew ? 'Add Feature' : `Edit Feature “${cur.name}”`, wide: true,
@@ -1958,12 +2464,17 @@ svg .prim { cursor: pointer; }
         <label for="ft">Type</label><select id="ft">${FEATURE_TYPES.map(t => `<option ${t === cur.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <label for="fmol">Molecule</label><select id="fmol">${MOLECULES.map(m => `<option ${m === (cur.molecule || 'DNA') ? 'selected' : ''}>${m}</option>`).join('')}</select>
         <label for="fs">Start</label><input type="number" id="fs" min="1" max="${n}" value="${cur.start + 1}">
-        <label for="fe">End</label><input type="number" id="fe" min="1" max="${n}" value="${cur.end === 0 ? n : cur.end}">
-        <label for="fd">Direction</label><select id="fd"><option value="1" ${cur.strand === 1 ? 'selected' : ''}>→ Forward</option><option value="-1" ${cur.strand === -1 ? 'selected' : ''}>← Reverse</option><option value="0" ${!cur.strand ? 'selected' : ''}>— None (bidirectional)</option></select>
+        <label for="fe">End</label>${point
+          ? `<div><input type="number" id="fe" value="${cur.start}" hidden><span class="note">point feature between ${fmt(cur.start)} and ${fmt(cur.start + 1)} — no bases are covered</span></div>`
+          : `<input type="number" id="fe" min="1" max="${n}" value="${cur.end === 0 ? n : cur.end}">`}
+        <label for="fd">Direction</label><select id="fd"><option value="1" ${cur.strand === 1 ? 'selected' : ''}>→ Forward</option><option value="-1" ${cur.strand === -1 ? 'selected' : ''}>← Reverse</option><option value="0" ${!cur.strand ? 'selected' : ''}>— Nondirectional</option><option value="2" ${cur.strand === 2 ? 'selected' : ''}>↔ Bidirectional</option></select>
         <label for="fc">Colour</label><input type="color" id="fc" value="${color}">
         <label>Translation</label><div class="row2">
-          <label><input type="checkbox" id="ftr" ${cur.translated ? 'checked' : ''}> Show the protein</label>
-          <label>reading frame <select id="ffr">${[0, 1, 2].map(k => `<option value="${k}" ${k === (cur.frame || 0) ? 'selected' : ''}>+${k + 1}</option>`).join('')}</select></label></div>
+          <label><input type="checkbox" id="ftr" ${cur.translated ? 'checked' : ''}> Translate this feature in Sequence view</label>
+          <button class="btn" id="ftopt" type="button">Feature Translation Options ▾</button></div>
+        <div class="full" id="ftopts" hidden style="border:1px solid var(--border-soft);border-radius:3px;padding:8px 10px;background:var(--panel,#fafbfc)"></div>
+        <label>Display</label><label><input type="checkbox" id="fpr" ${cur.priority ? 'checked' : ''}> Prioritise display of this feature in maps</label>
+        ${cur.segs && cur.segs.length > 1 ? `<label>Segments</label><div class="row2"><span class="note">${cur.segs.length} segments, ${exonsOf({ start: cur.start, end: cur.end, segs: cur.segs }, n).introns.length} intron(s)</span><button class="btn" id="fseg" type="button">Edit Segments…</button></div>` : ''}
         <label>Matching</label><label><input type="checkbox" id="fmp" ${cur.matchProtein ? 'checked' : ''}> Recognise this feature wherever the <b>protein</b> matches, even if the DNA differs</label>
         <label for="fno">Note</label><input type="text" id="fno" value="${esc(cur.notes || '')}">
         <label for="fq">Qualifiers</label><textarea id="fq" rows="3" placeholder="one per line, like  gene=bla">${esc(qualText)}</textarea>
@@ -1984,16 +2495,34 @@ svg .prim { cursor: pointer; }
         const upd = () => {
           const a = parseInt(val('fs'), 10), b = parseInt(val('fe'), 10);
           if (!(a >= 1 && b >= 1)) return;
-          const r = { start: a - 1, end: b }, L = DNA.rlen(r, n);
-          let s = `${fmt(L)} bp`;
-          if ($('#ftr').checked && L >= 3) {
-            const seq = DNA.sub(d.seq, r.start, r.end);
-            const fr = +val('ffr');
-            const p = DNA.translate((+val('fd') === -1 ? DNA.rc(seq) : seq).slice(fr));
-            s += ` · ${p.length} codons · ${p.startsWith('M') ? 'starts with Met' : 'no ATG start'} · ${p.indexOf('*') === p.length - 1 ? 'ends with a stop codon' : (p.includes('*') ? 'internal stop codon' : 'no stop codon')}`;
+          const r = { start: a - 1, end: point ? a - 1 : b, segs: cur.segs }, L = point ? 0 : DNA.featLen(r, n);
+          let s = point ? 'zero-length point feature between two bases' : `${fmt(L)} bp`;
+          if (cur.segs && cur.segs.length > 1) s += ` in ${cur.segs.length} segments`;
+          if (!point && $('#ftr').checked && L >= 3) {
+            const t = DNA.featTranslate(d.seq, { start: r.start, end: r.end, strand: +val('fd') === -1 ? -1 : 1, segs: cur.segs }, n, tOpts);
+            const p = t.map(x => x.aa).join('');
+            s += ` · ${t.length} codons · ${p.startsWith('M') ? 'starts with Met' : 'no ATG start'} · ${p.indexOf('*') === p.length - 1 ? 'ends with a stop codon' : (p.includes('*') ? 'internal stop codon' : 'no stop codon')}`;
+            if (tOpts.code && tOpts.code !== '1') s += ` · ${esc((DNA.CODE_LIST.find(c => c.id === String(tOpts.code)) || {}).name || '')}`;
           }
           $('#finfo').textContent = s;
+          const pv = $('#toPrev');
+          if (pv) {
+            const t = DNA.featTranslate(d.seq, { start: r.start, end: r.end, strand: +val('fd') === -1 ? -1 : 1, segs: cur.segs }, n, tOpts);
+            pv.innerHTML = `<div class="mono" style="font-size:13px;letter-spacing:1px">${t.slice(0, 48).map(x => x.forced ? `<b style="color:#c0392b">${esc(x.aa)}</b>` : esc(x.aa)).join('')}${t.length > 48 ? '\u2026' : ''}</div>
+              <div class="note">${t.length} codons, numbered ${t.length ? t[0].res + '\u2013' + t[t.length - 1].res : '\u2014'}</div>`;
+          }
         };
+        const optBox = box.querySelector('#ftopts');
+        box.querySelector('#ftopt').onclick = () => {
+          if (optBox.hidden) {
+            optBox.innerHTML = transOptionsHTML(cur, tOpts, n);
+            optBox.hidden = false;
+            optBox.addEventListener('change', () => { readTransOptions(cur, tOpts); upd(); });
+          } else { readTransOptions(cur, tOpts); optBox.hidden = true; }
+          upd();
+        };
+        const segBtn = box.querySelector('#fseg');
+        if (segBtn) segBtn.onclick = () => { closeDialog(); editSegments(f, segsOf(f, n), `Edited segments of ${f.name}`); };
         box.querySelectorAll('input,select').forEach(el => el.addEventListener('input', upd));
         $('#ft').addEventListener('change', () => {
           if (isNew) { $('#fc').value = TYPE_COL[val('ft')] || '#c9ced6'; $('#ftr').checked = val('ft') === 'CDS'; }
@@ -2007,7 +2536,7 @@ svg .prim { cursor: pointer; }
       const name = val('fn').trim(), a = parseInt(val('fs'), 10), b = parseInt(val('fe'), 10);
       if (!name) return showErr('Enter a feature name.') || null;
       if (!(a >= 1 && a <= n && b >= 1 && b <= n)) return showErr(`Start and end must be between 1 and ${fmt(n)}.`) || null;
-      if (b < a && !d.circular) return showErr('End must not be before start on a linear sequence.') || null;
+      if (!point && b < a && !d.circular) return showErr('End must not be before start on a linear sequence.') || null;
       const quals = {};
       for (const line of val('fq').split('\n')) {
         const t = line.trim(); if (!t) continue;
@@ -2015,9 +2544,11 @@ svg .prim { cursor: pointer; }
         if (i > 0) quals[t.slice(0, i).trim()] = t.slice(i + 1).trim();
       }
       return {
-        name, type: val('ft'), start: a - 1, end: b, strand: +val('fd'), color: val('fc'),
+        name, type: val('ft'), start: a - 1, end: point ? a - 1 : b, strand: +val('fd'), color: val('fc'),
         notes: val('fno').trim(), molecule: val('fmol'), translated: $('#ftr').checked,
-        frame: +val('ffr'), matchProtein: $('#fmp').checked, quals
+        frame: tOpts.frame, matchProtein: $('#fmp').checked, quals,
+        priority: $('#fpr').checked, code: tOpts.code, startMet: tOpts.startMet, startAt: tOpts.startAt,
+        segs: cur.segs, cleave: cur.cleave, point: point || cur.point
       };
     }
     function saveMyFeature() {

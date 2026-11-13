@@ -401,3 +401,13 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .segbtn .btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .grid tr.sel > td { background: #e8effb; }
 .grid tr.sub > td { background: #fafbfc; }
+
+/* Segmented features: the intron line, cleavage arrows, a forced start codon */
+.srow .fintron { position: absolute; height: 0; border-top: 1.5px dashed #8d95a3; }
+.srow .fcleave { position: absolute; font: 12px/12px var(--f-ui); color: #11306e; font-weight: 700; }
+.srow .aa.forced { color: #c0392b; font-weight: 700; }
+
+.grid tr.dimmed > td { color: var(--faint); }
+.grid tr.dimmed b { color: var(--faint); font-weight: 500; }
+.fdet { padding: 4px 2px 6px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.fdet b { font-weight: 600; }
