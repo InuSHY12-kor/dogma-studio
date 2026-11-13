@@ -433,3 +433,12 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .srow .findhl.mm { background: none; border: 1.5px solid var(--danger); border-radius: 2px; }
 .findbar .cnt { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .grid tr.fhit > td { background: #fff6d8; }
+
+/* Focus on Region controls */
+.focusbar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-top: 1px solid var(--border-soft); background: var(--chrome); flex: none; }
+.focusbar input[type=number] { width: 78px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; }
+.focusbar .btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.focusbar .fcmini { flex: 1; min-width: 120px; cursor: ew-resize; }
+.focusbar .fcmini svg { display: block; }
+.focusbar .fcbox { fill: rgba(37, 99, 201, .22); stroke: var(--accent); stroke-width: 1.5; }
+.focusbar.mini .fcmini { display: none; }

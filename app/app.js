@@ -438,6 +438,9 @@ svg .prim { cursor: pointer; }
         { label: 'Show Translations', chk: has && d.opts.showTrans, dis: !has, act: () => setOpt('showTrans', !d.opts.showTrans) },
         { label: 'Show Complementary Strand', chk: has && d.opts.showComp, dis: !has, act: () => setOpt('showComp', !d.opts.showComp) },
         '-',
+        { label: 'Focus on Region', key: 'Ctrl+Alt+Z', chk: has && !!focusOf(d), dis: !has, act: focusOnSelection },
+        { label: 'Zoom Controls', key: 'Ctrl+Alt++', chk: !!S.zoomCtl, dis: !has, act: () => { S.zoomCtl = !S.zoomCtl; renderView(true); } },
+        '-',
         { label: 'Show Side Panel', chk: !S.sideHidden, act: () => { S.sideHidden = !S.sideHidden; renderAll(); } },
         { label: 'Zoom In', key: 'Ctrl++', dis: !has, act: () => zoom(1.25) },
         { label: 'Zoom Out', key: 'Ctrl+-', dis: !has, act: () => zoom(0.8) },
@@ -890,6 +893,124 @@ svg .prim { cursor: pointer; }
     else if (S.view === 'hist') renderHistory();
   }
 
+  // ---------------------------------------------------------------- focus on region
+  // A focus window narrows every view to one stretch of the sequence. It is kept on the
+  // document so each open file remembers its own.
+  const focusOf = d => (d && d.focus && DNA.rlen(d.focus, d.seq.length) > 0) ? d.focus : null;
+  function inFocus(d, r) {
+    const fo = focusOf(d);
+    return !fo || DNA.overlaps(r, fo, d.seq.length);
+  }
+  function setFocus(d, start, end, msg) {
+    const n = d.seq.length;
+    let a = ((start % n) + n) % n, b = ((end % n) + n) % n;
+    if (DNA.rlen({ start: a, end: b }, n) < 12) b = (a + 12) % n;
+    d.focus = { start: a, end: b || n };
+    S.zoomCtl = true;
+    renderAll(true);
+    if (msg !== false) toast(`Focused on ${fmt(a + 1)}–${fmt(d.focus.end)} (${fmt(DNA.rlen(d.focus, n))} bp)`);
+  }
+  function clearFocus(d) {
+    d.focus = null; renderAll(true); toast('Focus cleared');
+  }
+  function focusOnSelection() {
+    const d = D(); if (!d || isProt(d) || isGel(d)) return;
+    if (focusOf(d) && !selLen(d)) { clearFocus(d); return; }
+    const n = d.seq.length;
+    if (selLen(d)) {
+      const pad = Math.max(10, Math.round(selLen(d) * 0.1));
+      setFocus(d, d.sel.start - pad, d.sel.end + pad);
+    } else {
+      // no selection: a window around the cursor
+      const w = Math.max(120, Math.round(n / 20));
+      setFocus(d, d.sel.start - w / 2, d.sel.start + w / 2);
+    }
+  }
+  // The strip under the map and sequence views: coordinates, a minimap and a draggable
+  // blue focus box.
+  function focusBarHTML(d) {
+    const n = d.seq.length, fo = focusOf(d);
+    const a = fo ? fo.start : 0, b = fo ? fo.end : n, L = fo ? DNA.rlen(fo, n) : n;
+    return `<div class="focusbar${S.focusMin ? ' mini' : ''}">
+      <button class="ib" id="fcChev" title="${S.focusMin ? 'Expand' : 'Minimise'}">${S.focusMin ? '▸' : '▾'}</button>
+      <button class="btn${fo ? ' on' : ''}" id="fcToggle">${fo ? 'Focused' : 'Focus on Region'}</button>
+      ${S.focusMin ? '' : `<label class="inl">From <input type="number" id="fcA" value="${a + 1}" min="1" max="${n}"></label>
+      <label class="inl">to <input type="number" id="fcB" value="${b}" min="1" max="${n}"></label>
+      <label class="inl">length <input type="number" id="fcL" value="${L}" min="12" max="${n}"></label>
+      <div class="fcmini" id="fcMini"></div>`}
+      <button class="ib" id="fcClose" title="Turn focus off">✕</button></div>`;
+  }
+  function focusMiniHTML(d) {
+    const n = d.seq.length, fo = focusOf(d), W = 1000, H = 22;
+    const a = fo ? fo.start : 0, L = fo ? DNA.rlen(fo, n) : n;
+    const segs = DNA.segs({ start: a, end: (a + L) % n || n }, n);
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+      <rect x="0" y="8" width="${W}" height="6" fill="#dfe4ea"/>
+      ${d.features.filter(f => !f.hidden).map(f => DNA.segs(f, n).map(([x1, x2]) =>
+      `<rect x="${(x1 / n * W).toFixed(1)}" y="6" width="${Math.max(1, (x2 - x1) / n * W).toFixed(1)}" height="10" fill="${f.color}" opacity=".75"/>`).join('')).join('')}
+      ${segs.map(([x1, x2]) => `<rect class="fcbox" x="${(x1 / n * W).toFixed(1)}" y="1" width="${Math.max(3, (x2 - x1) / n * W).toFixed(1)}" height="${H - 2}"/>`).join('')}
+    </svg>`;
+  }
+  let focusDrag = null;
+  function bindFocusBar(d) {
+    const bar = $('.focusbar'); if (!bar) return;
+    const n = d.seq.length;
+    bar.querySelector('#fcChev').onclick = () => { S.focusMin = !S.focusMin; renderView(true); };
+    bar.querySelector('#fcToggle').onclick = () => { if (focusOf(d)) clearFocus(d); else focusOnSelection(); };
+    bar.querySelector('#fcClose').onclick = () => { if (focusOf(d)) clearFocus(d); else { S.zoomCtl = false; renderView(true); } };
+    const A = bar.querySelector('#fcA'), B = bar.querySelector('#fcB'), L = bar.querySelector('#fcL');
+    if (A) {
+      // Editing From keeps the length; editing To or the length moves the other end.
+      const apply = who => {
+        const fo = focusOf(d);
+        const curLen = fo ? DNA.rlen(fo, n) : n;
+        let a = Math.max(1, Math.min(n, parseInt(A.value, 10) || 1));
+        let b = Math.max(1, Math.min(n, parseInt(B.value, 10) || n));
+        let len = Math.max(12, Math.min(n, parseInt(L.value, 10) || curLen));
+        if (who === 'a') { b = Math.min(n, a - 1 + curLen); if (b <= a) b = Math.min(n, a + 11); }
+        else if (who === 'len') b = Math.min(n, a - 1 + len);
+        else if (b <= a) b = Math.min(n, a + 11);
+        setFocus(d, a - 1, b, false);
+      };
+      A.onchange = () => apply('a'); B.onchange = () => apply('b'); L.onchange = () => apply('len');
+    }
+    const mini = bar.querySelector('#fcMini');
+    if (!mini) return;
+    mini.innerHTML = focusMiniHTML(d);
+    const svg = mini.querySelector('svg');
+    svg.addEventListener('mousedown', e => {
+      e.preventDefault();
+      // The rect is captured once: the bar is redrawn while dragging, so measuring
+      // the live node again would read a replaced element.
+      const rect = svg.getBoundingClientRect();
+      const bpAt = ev => Math.max(0, Math.min(n, Math.round((ev.clientX - rect.left) / rect.width * n)));
+      const bp = bpAt(e);
+      const fo = focusOf(d);
+      if (!fo) { const w = Math.max(120, Math.round(n / 20)); setFocus(d, Math.max(0, bp - Math.round(w / 2)), Math.min(n, bp + Math.round(w / 2)), false); return; }
+      const edge = Math.max(6, n / 120);
+      const len = DNA.rlen(fo, n);
+      if (Math.abs(bp - fo.start) < edge) focusDrag = { kind: 'a', bpAt, doc: d };
+      else if (Math.abs(bp - fo.end) < edge) focusDrag = { kind: 'b', bpAt, doc: d };
+      else focusDrag = { kind: 'move', bpAt, doc: d, grab: bp, a: fo.start, len };
+    });
+  }
+  // One pair of handlers for every focus drag, so redrawing the bar cannot leave
+  // stale listeners behind.
+  window.addEventListener('mousemove', e => {
+    const g = focusDrag; if (!g) return;
+    const d = g.doc, n = d.seq.length, fo = d.focus;
+    if (!fo) return;
+    const bp = g.bpAt(e);
+    if (g.kind === 'a') d.focus = { start: Math.max(0, Math.min(bp, fo.end - 12)), end: fo.end };
+    else if (g.kind === 'b') d.focus = { start: fo.start, end: Math.min(n, Math.max(bp, fo.start + 12)) };
+    else {
+      const a = Math.max(0, Math.min(n - g.len, g.a + (bp - g.grab)));
+      d.focus = { start: a, end: a + g.len };
+    }
+    renderView(true);
+  });
+  window.addEventListener('mouseup', () => { if (focusDrag) { focusDrag = null; renderAll(true); } });
+
   // ================================================================ MAP VIEW
   // Where the middle of the window sits, as a fraction of the whole drawing, so the same
   // place stays in view when the drawing is redrawn at another size.
@@ -906,11 +1027,14 @@ svg .prim { cursor: pointer; }
     const v = $('#view');
     let wrap = $('#mapwrap');
     const prev = wrap ? scrollCentre(wrap) : null;
-    v.innerHTML = `<div class="mapwrap" id="mapwrap"></div>${mapSideHTML()}<div class="map-zoom"><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Fit">⤢</button><button data-z="in" title="Zoom in">+</button></div>`;
+    const dd = D();
+    const showFocus = !!(S.zoomCtl || focusOf(dd));
+    v.innerHTML = `<div class="mapwrap" id="mapwrap"></div>${mapSideHTML()}<div class="map-zoom"><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Fit">⤢</button><button data-z="in" title="Zoom in">+</button></div>${showFocus ? focusBarHTML(dd) : ''}`;
     wrap = $('#mapwrap');
     const d = D(), A = analyze(d);
     const W = Math.max(420, wrap.clientWidth), H = Math.max(380, wrap.clientHeight);
-    const svg = d.opts.mapMode === 'circular' ? drawCircular(d, A, W * S.zoom, H * S.zoom) : drawLinear(d, A, W * S.zoom);
+    // A focused view is always linear: it shows one stretch of the sequence.
+    const svg = (d.opts.mapMode === 'circular' && !focusOf(d)) ? drawCircular(d, A, W * S.zoom, H * S.zoom) : drawLinear(d, A, W * S.zoom);
     wrap.innerHTML = svg;
     // The drawing is normally wider or taller than the window, so centre it rather than
     // leaving it pinned to the top left corner.
@@ -919,6 +1043,7 @@ svg .prim { cursor: pointer; }
     bindMap(wrap.querySelector('svg'));
     v.querySelector('.map-zoom').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.z === 'in') zoom(1.25); else if (b.dataset.z === 'out') zoom(0.8); else { S.zoom = 1; renderView(true); } };
     bindMapSide();
+    if (showFocus) bindFocusBar(d);
   }
 
   // ---------------------------------------------------------------- map view panel
@@ -1134,10 +1259,17 @@ svg .prim { cursor: pointer; }
 
   function drawLinear(d, A, W) {
     const n = d.seq.length;
-    const items = collectItems(d, A);
+    const fo = focusOf(d);
+    const v0 = fo ? fo.start : 0, vLen = fo ? DNA.rlen(fo, n) : n;
+    const items = collectItems(d, A).filter(i => !fo || DNA.overlaps(i, fo, n));
     const feats = items.filter(i => i.kind === 'f'), prims = items.filter(i => i.kind === 'p'), orfs = items.filter(i => i.kind === 'o');
     const m = 46, w = W - 2 * m;
-    const X = bp => m + bp / n * w;
+    // bp -> x, measured from the left edge of the window the view is focused on
+    const X = bp => {
+      let rel = bp - v0;
+      if (fo) { rel = ((rel % n) + n) % n; if (rel > vLen && rel > n - vLen / 2) rel -= n; }
+      return m + rel / vLen * w;
+    };
     // lanes by pixel extent, so labels drawn under short bars never collide
     const pxLanes = (list, withLabel) => {
       const ext = it => {
@@ -1164,7 +1296,11 @@ svg .prim { cursor: pointer; }
     const enz = shownEnz(d, A);
     // enzyme label rows
     const elabels = [];
-    for (const e of enz) e.sites.forEach((s, i) => { if (s.cut != null) elabels.push({ x: X(s.cut), text: `${e.name} (${fmt(s.cut)})`, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) }); });
+    for (const e of enz) e.sites.forEach((s, i) => {
+      if (s.cut == null) return;
+      if (fo && !DNA.overlaps({ start: s.pos, end: (s.pos + s.len) % n || n }, fo, n)) return;
+      elabels.push({ x: X(s.cut), text: `${e.name} (${fmt(s.cut)})`, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) });
+    });
     elabels.sort((a, b) => a.x - b.x);
     const rowEnd = [];
     for (const l of elabels) {
@@ -1183,9 +1319,10 @@ svg .prim { cursor: pointer; }
       g.push(`<line class="ecut" x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
     }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
-    const step = niceStep(n / Math.max(4, Math.floor(w / 90)));
-    for (let t = 0; o.showRuler && t <= n; t += step) {
-      const x = X(t);
+    const step = niceStep(vLen / Math.max(4, Math.floor(w / 90)));
+    for (let k = 0; o.showRuler && k <= vLen; k += step) {
+      const t = fo ? ((v0 + k) % n) + 1 : k;
+      const x = X(fo ? v0 + k : k);
       g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${fmt(t || 1)}</text>`);
     }
     let y = baseY + 32;
@@ -1225,8 +1362,8 @@ svg .prim { cursor: pointer; }
     for (const it of orfs) bar(it, y + it.lane * 10, 5, false);
     y += nO * 10;
     const H = Math.max(y + 20, 200);
-    g.push(`<text class="ctr1" x="${m}" y="16" style="font-size:14px">${esc(d.name)}</text><text class="ctr2" x="${m + d.name.length * 8.6 + 10}" y="16" style="font-size:12px">${fmt(n)} bp · ${d.circular ? 'circular (shown linear)' : 'linear'}</text>`);
-    S.mapGeom = { type: 'l', m, w, n, X, y1: baseY - 12, y2: H - 6 };
+    g.push(`<text class="ctr1" x="${m}" y="16" style="font-size:14px">${esc(d.name)}</text><text class="ctr2" x="${m + d.name.length * 8.6 + 10}" y="16" style="font-size:12px">${fo ? `${fmt(v0 + 1)}–${fmt(fo.end)} of ${fmt(n)} bp · focused` : `${fmt(n)} bp · ${d.circular ? 'circular (shown linear)' : 'linear'}`}</text>`);
+    S.mapGeom = { type: 'l', m, w, n, X, y1: baseY - 12, y2: H - 6, v0, vLen };
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><rect width="${W}" height="${H}" style="fill:var(--canvas)" data-bg="1"/><g id="sellayer"></g>${g.join('')}</svg>`;
   }
 
@@ -1273,7 +1410,9 @@ svg .prim { cursor: pointer; }
         let a = Math.atan2(p.y - G.cy, p.x - G.cx) + Math.PI / 2; if (a < 0) a += TAU;
         return Math.round(a / TAU * n) % n;
       }
-      return Math.max(0, Math.min(n, Math.round((p.x - G.m) / G.w * n)));
+      const span = G.vLen || n, base = G.v0 || 0;
+      const rel = Math.round((p.x - G.m) / G.w * span);
+      return ((base + Math.max(0, Math.min(span, rel))) % n + n) % n;
     };
     let drag = null;
     svg.addEventListener('mousedown', e => {
@@ -1347,13 +1486,15 @@ svg .prim { cursor: pointer; }
     const old = $('#seqscroll'); const prevTop = old ? old.scrollTop : 0;
     const hadFocus = !!old && document.activeElement === old;
     const f = S.find;
-    v.innerHTML = findBarHTML(f) + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>`;
+    const dz = D(), showFocus = !!(S.zoomCtl || focusOf(dz));
+    v.innerHTML = findBarHTML(f) + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>` + (showFocus ? focusBarHTML(dz) : '');
     buildSeqRows();
     const sc = $('#seqscroll');
     if (keepScroll) sc.scrollTop = prevTop;
     if (hadFocus) sc.focus({ preventScroll: true });
     bindSeq(sc);
     bindFind();
+    if (showFocus) bindFocusBar(dz);
     runFind(false);
   }
 
@@ -1418,7 +1559,10 @@ svg .prim { cursor: pointer; }
     const rows = [], html = [];
     const comp = o.showComp;
     const NT_H = 17, RULER_H = 15, NUM_H = 13, AA_H = 15;
-    for (let rs = 0, ri = 0; rs < n; rs += bpr, ri++) {
+    const fo = focusOf(d);
+    const rowFrom = fo ? Math.floor(fo.start / bpr) * bpr : 0;
+    const rowTo = fo ? Math.min(n, Math.ceil((fo.start + DNA.rlen(fo, n)) / bpr) * bpr) : n;
+    for (let rs = rowFrom, ri = Math.floor(rowFrom / bpr); rs < rowTo; rs += bpr, ri++) {
       const re = Math.min(n, rs + bpr), len = re - rs;
       const parts = [];
       // --- enzyme labels stacked above the strands
@@ -1509,7 +1653,9 @@ svg .prim { cursor: pointer; }
       html.push(`<div class="srow" data-i="${ri}" style="height:${hgt}px">${parts.join('')}<div class="selov" hidden style="top:${y0 - 1}px;height:${strandBottom - y0 + 2}px"></div><div class="caret-el" hidden style="top:${y0 - 1}px;height:${strandBottom - y0 + 2}px"></div></div>`);
     }
     host.innerHTML = html.join('');
-    S.seq = { rows, G, bpr, els: [...host.querySelectorAll('.srow')] };
+    // row0 is the first row actually drawn, which is not row zero while a focus
+    // window is on, so every lookup by absolute row index goes through it.
+    S.seq = { rows, G, bpr, row0: Math.floor(rowFrom / bpr), els: [...host.querySelectorAll('.srow')] };
     updateSeqSel();
   }
 
@@ -1612,7 +1758,7 @@ svg .prim { cursor: pointer; }
   }
   function scrollSeqTo(pos) {
     const V = S.seq, sc = $('#seqscroll'); if (!V || !sc) return;
-    const i = Math.min(V.rows.length - 1, Math.floor(pos / V.bpr)); const el = V.els[i]; if (!el) return;
+    const i = Math.max(0, Math.min(V.rows.length - 1, Math.floor(pos / V.bpr) - (V.row0 || 0))); const el = V.els[i]; if (!el) return;
     const top = el.offsetTop, h = el.offsetHeight;
     if (top < sc.scrollTop || top + h > sc.scrollTop + sc.clientHeight) sc.scrollTop = Math.max(0, top - sc.clientHeight / 3);
   }
@@ -1620,7 +1766,7 @@ svg .prim { cursor: pointer; }
   function bindSeq(sc) {
     const d = D();
     const posFrom = (e, rowEl) => {
-      const r = S.seq.rows[+rowEl.dataset.i], rect = rowEl.getBoundingClientRect();
+      const r = S.seq.rows[+rowEl.dataset.i - (S.seq.row0 || 0)], rect = rowEl.getBoundingClientRect();
       const col = Math.round((e.clientX - rect.left - S.seq.G) / CW);
       return r.rs + Math.max(0, Math.min(r.re - r.rs, col));
     };
@@ -1845,10 +1991,10 @@ svg .prim { cursor: pointer; }
       for (const [a, b] of DNA.segs({ start: h.start, end: h.end }, n)) {
         const r0 = Math.floor(a / V.bpr), r1 = Math.floor((b - 1) / V.bpr);
         for (let ri = r0; ri <= r1; ri++) {
-          const el = V.els[ri]; if (!el) continue;
+          const el = V.els[ri - (V.row0 || 0)]; if (!el) continue;
           const rs = ri * V.bpr;
           const x1 = Math.max(a, rs), x2 = Math.min(b, rs + V.bpr);
-          const row = V.rows[ri]; if (!row) continue;
+          const row = V.rows[ri - (V.row0 || 0)]; if (!row) continue;
           const div = document.createElement('div');
           div.className = 'findhl' + (idx === f.i ? ' cur' : '');
           div.style.left = (V.G + (x1 - rs) * CW) + 'px';
@@ -1892,6 +2038,9 @@ svg .prim { cursor: pointer; }
     else if (enzSet === 'unique') list = list.filter(x => x.s.length === 1);
     else if (enzSet === 'noncutters') list = list.filter(x => !x.s.length);
     if (enzFilter) { const q = enzFilter.toUpperCase(); list = list.filter(x => x.e.name.toUpperCase().includes(q) || x.e.site.includes(q)); }
+    // While a focus window is on, only the sites inside it are listed.
+    const fo = focusOf(d);
+    if (fo) list = list.map(x => ({ e: x.e, s: x.s.filter(t => DNA.overlaps({ start: t.pos, end: (t.pos + t.len) % n || n }, fo, n)) })).filter(x => x.s.length);
     // sorting, including the two the reference tool offers beyond the column headers
     const selPos = selLen(d) ? d.sel.start : null;
     const distOf = x => {
@@ -1941,7 +2090,7 @@ svg .prim { cursor: pointer; }
       <button class="btn" id="enzact">Actions ▾</button>
       <button class="btn" id="enznc">View Noncutters</button>
       <button class="btn pri" id="enzdig" ${d.chosen.length ? '' : 'disabled'}>Digest chosen (${d.chosen.length})…</button>
-      <span class="note">${list.length} enzymes${hid.length ? ` · ${hid.length} hidden` : ''}</span></div>
+      <span class="note">${list.length} enzymes${hid.length ? ` · ${hid.length} hidden` : ''}${fo ? ` · within ${fmt(fo.start + 1)}–${fmt(fo.end)}` : ''}</span></div>
       ${enzStyle === 'lines' ? lineBar() : `<div class="tscroll"><table class="grid"><thead><tr><th style="width:26px"></th><th style="width:26px">✓</th><th class="sort" data-s="name">Enzyme${arrow('name')}</th><th>Recognition site</th><th class="sort" data-s="count"># Sites${arrow('count')}</th><th class="sort" data-s="pos">Cut positions${arrow('pos')}</th><th>Ends</th></tr></thead><tbody>
       ${list.map(x => {
         const nm = x.e.name, isHid = hid.includes(nm);
@@ -2463,7 +2612,8 @@ svg .prim { cursor: pointer; }
       dir: (a, b) => (a.strand || 0) - (b.strand || 0) || a.start - b.start,
       vis: (a, b) => (a.hidden ? 1 : 0) - (b.hidden ? 1 : 0) || a.start - b.start
     }[featSort] || ((a, b) => a.start - b.start);
-    const fs = d.features.slice().sort(featDesc ? (a, b) => -cmp(a, b) : cmp);
+    const fo = !isProt(d) ? focusOf(d) : null;
+    const fs = d.features.filter(f => !fo || DNA.overlaps(f, fo, n)).sort(featDesc ? (a, b) => -cmp(a, b) : cmp);
     const arrow = k => featSort === k ? (featDesc ? ' ▾' : ' ▴') : '';
     const dirTxt = f => f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : (f.strand === 2 ? '↔ bidirectional' : '— none');
     // the expanded detail block, which is what the reference tool's disclosure button shows
@@ -2494,7 +2644,7 @@ svg .prim { cursor: pointer; }
       <button class="ib" id="fexpall" title="Expand or collapse every row">⇅</button>
       <input type="text" id="ffind" placeholder="Find features — name, type or qualifier" value="${esc(featFind)}" style="width:230px">
       <span class="note" id="ffindn"></span>
-      <span class="note">${fs.length} features${featPicked.size ? ` · ${featPicked.size} checked` : ''}</span></div>
+      <span class="note">${fs.length} features${featPicked.size ? ` · ${featPicked.size} checked` : ''}${fo ? ` · within ${fmt(fo.start + 1)}–${fmt(fo.end)}` : ''}</span></div>
       <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th style="width:26px"></th><th style="width:26px">✓</th><th style="width:22px"></th><th class="sort" data-s="name">Name${arrow('name')}</th><th class="sort" data-s="type">Type${arrow('type')}</th><th class="sort" data-s="start">Location${arrow('start')}</th><th class="sort" data-s="len">Length${arrow('len')}</th><th class="sort" data-s="dir">Direction${arrow('dir')}</th><th>Molecule</th><th>Notes</th><th></th></tr></thead><tbody>
       ${fs.map(f => {
       const segList = DNA.featSegs(f, n);
@@ -2597,11 +2747,17 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ PRIMERS TABLE
+  // The primers a focused view lists: only those binding inside the focus window.
+  function primerRows(d) {
+    const fo = focusOf(d); if (!fo) return d.primers;
+    const A = analyze(d), n = d.seq.length;
+    return d.primers.filter(p => (A.psites[p.id] || []).some(b => DNA.overlaps(b, fo, n)));
+  }
   function renderPrimers() {
     const d = D(), A = analyze(d), v = $('#view');
-    v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="padd">Add Primer…</button><button class="btn" id="ptop" ${selLen(d) ? '' : 'disabled'}>From Selection (Top)</button><button class="btn" id="pbot" ${selLen(d) ? '' : 'disabled'}>From Selection (Bottom)</button><button class="btn" id="pstruct" ${d.primers.length ? '' : 'disabled'}>Structures…</button><span class="note">Tm: nearest-neighbour, 50 mM Na⁺, 250 nM primer</span></div>
-      <div class="tscroll">${d.primers.length ? `<table class="grid"><thead><tr><th>Name</th><th>Sequence (5′→3′)</th><th>Length</th><th>Tm</th><th>GC</th><th>Binding sites</th><th></th></tr></thead><tbody>
-      ${d.primers.map(p => { const b = A.psites[p.id] || []; return `<tr data-p="${p.id}"><td><b>${esc(p.name)}</b></td><td class="mono wrap">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${DNA.gcPct(p.seq).toFixed(0)}%</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}${x.full ? '' : ' (3′ 15 nt)'}`).join('<br>') : '<span style="color:var(--danger)">does not bind</span>'}</td><td><button class="ib" data-struct="${p.id}">Structure</button><button class="ib" data-ed="${p.id}">Edit</button><button class="ib dng" data-del="${p.id}">Delete</button></td></tr>`; }).join('')}
+    v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="padd">Add Primer…</button><button class="btn" id="ptop" ${selLen(d) ? '' : 'disabled'}>From Selection (Top)</button><button class="btn" id="pbot" ${selLen(d) ? '' : 'disabled'}>From Selection (Bottom)</button><button class="btn" id="pstruct" ${d.primers.length ? '' : 'disabled'}>Structures…</button><span class="note">Tm: nearest-neighbour, 50 mM Na⁺, 250 nM primer${focusOf(d) ? ` · within ${fmt(focusOf(d).start + 1)}–${fmt(focusOf(d).end)}` : ''}</span></div>
+      <div class="tscroll">${primerRows(d).length ? `<table class="grid"><thead><tr><th>Name</th><th>Sequence (5′→3′)</th><th>Length</th><th>Tm</th><th>GC</th><th>Binding sites</th><th></th></tr></thead><tbody>
+      ${primerRows(d).map(p => { const b = A.psites[p.id] || []; return `<tr data-p="${p.id}"><td><b>${esc(p.name)}</b></td><td class="mono wrap">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${DNA.gcPct(p.seq).toFixed(0)}%</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}${x.full ? '' : ' (3′ 15 nt)'}`).join('<br>') : '<span style="color:var(--danger)">does not bind</span>'}</td><td><button class="ib" data-struct="${p.id}">Structure</button><button class="ib" data-ed="${p.id}">Edit</button><button class="ib dng" data-del="${p.id}">Delete</button></td></tr>`; }).join('')}
       </tbody></table>` : `<div class="empty"><h2>No primers yet</h2><p>Select bases and choose Primer from Selection, or add a primer by sequence. Primers with 5′ tails are matched by their 3′ end.</p></div>`}</div></div>`;
     $('#padd').onclick = () => dlgPrimer(null);
     $('#ptop').onclick = () => primerFromSel(1);
@@ -6073,6 +6229,11 @@ svg .prim { cursor: pointer; }
     const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
     if (!mod) { if (!inField && (e.key === 'Delete' || e.key === 'Backspace') && D() && S.view === 'map' && selLen(D())) { e.preventDefault(); deleteSel(); } return; }
     const k = e.key.toLowerCase();
+    // Ctrl+Alt+Z / Ctrl+Alt+= focus on the selection; Ctrl+Alt++ shows the controls.
+    if (e.altKey && D() && isNuc(D())) {
+      if (k === 'z' || k === '=') { e.preventDefault(); focusOnSelection(); return; }
+      if (k === '+') { e.preventDefault(); S.zoomCtl = !S.zoomCtl; renderView(true); return; }
+    }
     const map = {
       n: dlgNew, o: openFiles, s: () => saveDoc(e.shiftKey), w: () => D() && closeDoc(S.active), f: openFind, g: () => D() && dlgGoto(), k: () => D() && dlgFeature(null),
       d: dlgNCBI, p: () => D() && dlgPrint(),
