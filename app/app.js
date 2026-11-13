@@ -1,7 +1,7 @@
 /* GeneCanvas — application UI */
 (function () {
   'use strict';
-  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON, STRUCT = window.STRUCT, GEL = window.GEL;
+  const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON, STRUCT = window.STRUCT, GEL = window.GEL, ASSEMBLY = window.ASSEMBLY;
   const host = window.gcHost || null; // provided by the Electron preload; null in a plain browser
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -286,6 +286,7 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- render orchestration
   function renderAll(keepScroll) {
     renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderStatus();
+    if (host && host.assemblySync) { try { host.assemblySync(asmDocSnapshot()); } catch (e) { } }
     document.title = D() ? `${D().name}${D().dirty ? ' •' : ''} — GeneCanvas` : 'GeneCanvas';
   }
   function refreshSel(scroll) {
@@ -412,9 +413,12 @@ svg .prim { cursor: pointer; }
         { label: 'Show Primers Table', dis: !has, act: () => setView('primer') }
       ] },
       { label: 'Cloning', items: [
-        { label: 'Restriction Cloning…', dis: S.docs.length < 1, act: dlgRestrictionClone },
+        { label: 'Restriction Cloning…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('restriction') },
+        { label: 'Restriction Cloning (simple)…', dis: S.docs.length < 1, act: dlgRestrictionClone },
         { label: 'Golden Gate Assembly…', dis: S.docs.length < 1, act: dlgGoldenGate },
-        { label: 'Gibson / Overlap Assembly…', dis: S.docs.length < 1, act: dlgGibson },
+        { label: 'Gibson Assembly…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('gibson') },
+        { label: 'In-Fusion Cloning…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('infusion') },
+        { label: 'Gibson / Overlap Assembly (simple)…', dis: S.docs.length < 1, act: dlgGibson },
         { label: 'Gateway BP / LR…', dis: S.docs.length < 2, act: dlgGateway },
         '-',
         { label: 'Insert Fragment from Clipboard…', dis: !has, act: dlgInsert },
@@ -2485,6 +2489,31 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // ================================================================ cloning window
+  // The Vector / Fragment / Product window lives in app/asmui.js so it can run either
+  // inside this window or, on the desktop, in a window of its own that stays open while
+  // the main window carries on being used.
+  function asmDocSnapshot() {
+    return S.docs.filter(isNuc).map(d => ({
+      id: d.id, name: d.name, seq: d.seq, circular: d.circular, kind: kindOf(d),
+      features: d.features.map(f => ({ name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand, color: f.color })),
+      chosen: d.chosen.slice()
+    }));
+  }
+  function dlgAssembly(method) {
+    if (!S.docs.some(isNuc)) { toast('Open a sequence first.'); return; }
+    if (host && host.openAssembly) {
+      host.openAssembly({ method, docs: asmDocSnapshot(), current: D() ? D().id : null });
+      return;
+    }
+    ASMUI.open(method, {
+      docs: () => S.docs.filter(isNuc),
+      current: D() ? D().id : null,
+      addDoc: src => addDoc(src),
+      toast, dialog, standalone: false
+    });
+  }
+
   // ================================================================ compare sequences
   function dlgCompare() {
     let picked = S.docs.map((_, i) => i === S.active);
@@ -4407,6 +4436,10 @@ svg .prim { cursor: pointer; }
   // host integration (Electron)
   if (host) {
     if (host.onOpenFile) host.onOpenFile(f => { const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); loadContent(f.name, /\.(dna|ab1)$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin), f.path); });
+    if (host.onAssemblyProduct) host.onAssemblyProduct(src => {
+      addDoc(src);
+      toast(`${esc(src.name)} — ${fmt(src.seq.length)} bp from the cloning window`);
+    });
     if (host.onCloseRequest) host.onCloseRequest(() => {
       const dirty = S.docs.filter(d => d.dirty);
       if (!dirty.length) { host.confirmClose(); return; }

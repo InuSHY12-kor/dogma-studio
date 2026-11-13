@@ -14,6 +14,14 @@ contextBridge.exposeInMainWorld('gcHost', {
   ncbiFetch: opts => ipcRenderer.invoke('ncbi-fetch', opts),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: data => ipcRenderer.invoke('save-settings', data),
+  openAssembly: payload => ipcRenderer.invoke('assembly-open', payload),
+  assemblyInit: () => ipcRenderer.invoke('assembly-init'),
+  assemblySync: docs => ipcRenderer.send('assembly-sync', docs),
+  assemblyCreate: src => ipcRenderer.send('assembly-create', src),
+  onAssemblyDocs: cb => ipcRenderer.on('assembly-docs', (_e, d) => cb(d)),
+  onAssemblyReload: cb => ipcRenderer.on('assembly-reload', (_e, p) => cb(p)),
+  onAssemblyProduct: cb => ipcRenderer.on('assembly-product', (_e, s) => cb(s)),
+  closeSelf: () => ipcRenderer.send('assembly-close'),
   printHtml: html => ipcRenderer.invoke('print-html', { html }),
   pdfHtml: opts => ipcRenderer.invoke('pdf-html', opts)
 });

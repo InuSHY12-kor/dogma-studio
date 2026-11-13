@@ -109,6 +109,49 @@ ipcMain.on('confirm-close', () => { allowClose = true; if (win) win.close(); });
 ipcMain.on('quit', () => { if (win) win.close(); });
 ipcMain.on('version', e => { e.returnValue = app.getVersion(); });
 
+// ---------------------------------------------------------------- cloning window
+// A window of its own for the Vector / Fragment / Product simulation, so the main
+// window stays usable while it is open. Only one is kept at a time.
+let asmWin = null;
+let asmPayload = null;
+
+function openAssemblyWindow(payload) {
+  asmPayload = payload;
+  if (asmWin && !asmWin.isDestroyed()) {
+    asmWin.webContents.send('assembly-reload', payload);
+    asmWin.show();
+    asmWin.focus();
+    return;
+  }
+  asmWin = new BrowserWindow({
+    width: 1060, height: 800, minWidth: 820, minHeight: 620,
+    title: 'Cloning', backgroundColor: '#ffffff',
+    parent: win || undefined, modal: false, show: false,
+    icon: path.join(__dirname, 'build', 'icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true, nodeIntegration: false, spellcheck: false
+    }
+  });
+  asmWin.setMenu(null);
+  asmWin.loadFile(path.join(__dirname, 'app', 'assembly-window.html'));
+  asmWin.once('ready-to-show', () => asmWin.show());
+  asmWin.webContents.on('will-navigate', e => e.preventDefault());
+  asmWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  asmWin.on('closed', () => { asmWin = null; });
+}
+
+ipcMain.handle('assembly-open', (_e, payload) => { openAssemblyWindow(payload); return { ok: true }; });
+ipcMain.handle('assembly-init', () => asmPayload || { method: 'gibson', docs: [] });
+// The main window pushes a fresh snapshot whenever its documents change.
+ipcMain.on('assembly-sync', (_e, docs) => {
+  if (asmPayload) asmPayload.docs = docs;
+  if (asmWin && !asmWin.isDestroyed()) asmWin.webContents.send('assembly-docs', docs);
+});
+// The cloning window hands a finished construct back to the main window.
+ipcMain.on('assembly-create', (_e, src) => { if (win && !win.isDestroyed()) win.webContents.send('assembly-product', src); });
+ipcMain.on('assembly-close', e => { const w = BrowserWindow.fromWebContents(e.sender); if (w && w !== win) w.close(); });
+
 // ---------------------------------------------------------------- stored settings
 // Preferences that apply to every file, such as saved enzyme sets. Kept beside the
 // app's own data so they survive reinstalling and are shared by all documents.
