@@ -673,6 +673,9 @@ svg .prim { cursor: pointer; }
         { label: 'Export Primer Data…', dis: !has || !d.primers.length, act: dlgExportPrimers },
         { label: 'Primer Sets…', dis: !has, act: dlgPrimerSets },
         '-',
+        { label: 'Primer Database…', act: dlgPrimerDB },
+        { label: 'Annotate From Primer Database…', dis: !has, act: dlgAnnotateFromDb },
+        '-',
         { label: 'Primer Structures…', dis: !has || !d.primers.length, act: () => dlgPrimerStruct(null, null) },
         { label: 'Analyze Selected Primers at IDT…', dis: !has || !d.primers.length, act: analyzeAtIDT },
         '-',
@@ -1076,6 +1079,463 @@ svg .prim { cursor: pointer; }
     html += `<optgroup label="All feature types">${all.map(t => `<option value="${esc(t)}" ${t === selected && !recent.includes(t) ? 'selected' : ''}>${mark(t)}</option>`).join('')}</optgroup>`;
     if (selected && !all.includes(selected)) html = `<option selected>${esc(selected)}</option>` + html;
     return html;
+  }
+
+  // ================================================================ PRIMER DATABASE
+  /* Primers kept with the program rather than with one file, so they can be reused
+   * across projects, grouped by coloured labels, and annotated onto any sequence. */
+  const pdb = () => (SET.primerDb = SET.primerDb || { primers: [], labels: [] });
+  const pdbNext = () => Math.max(0, ...pdb().primers.map(x => x.id || 0)) + 1;
+
+  function dlgPrimerDB() {
+    const db = pdb();
+    let label = '', pick = new Set(), sortBy = 'name', desc = false, q = '';
+    const rows = () => {
+      let list = db.primers.filter(x => !x.trashed);
+      if (label === '__trash') list = db.primers.filter(x => x.trashed);
+      else if (label) list = list.filter(x => (x.labels || []).includes(label));
+      if (q) { const u = q.toLowerCase(); list = list.filter(x => x.name.toLowerCase().includes(u) || x.seq.includes(q.toUpperCase()) || (x.notes || '').toLowerCase().includes(u)); }
+      const cmp = {
+        name: (a, b) => a.name.localeCompare(b.name),
+        len: (a, b) => a.seq.length - b.seq.length,
+        tm: (a, b) => DNA.tm(a.seq) - DNA.tm(b.seq),
+        added: (a, b) => (a.added || 0) - (b.added || 0)
+      }[sortBy] || ((a, b) => a.name.localeCompare(b.name));
+      return list.sort(desc ? (a, b) => -cmp(a, b) : cmp);
+    };
+    const labelChip = n => {
+      const L = db.labels.find(x => x.name === n);
+      return `<span class="plabel" style="background:${L ? L.color : '#c9ced6'}">${esc(n)}</span>`;
+    };
+    const render = () => {
+      if (!$('#pdbT')) return;
+      const list = rows();
+      const arrow = k => sortBy === k ? (desc ? ' ▾' : ' ▴') : '';
+      $('#pdbSide').innerHTML = `
+        <div class="pdbitem${label === '' ? ' on' : ''}" data-lab="">All Primers <span class="note">${db.primers.filter(x => !x.trashed).length}</span></div>
+        ${db.labels.map(L => `<div class="pdbitem${label === L.name ? ' on' : ''}" data-lab="${esc(L.name)}"><span class="sw" style="background:${L.color}"></span> ${esc(L.name)} <span class="note">${db.primers.filter(x => !x.trashed && (x.labels || []).includes(L.name)).length}</span></div>`).join('')}
+        <div class="pdbitem${label === '__trash' ? ' on' : ''}" data-lab="__trash">Trash <span class="note">${db.primers.filter(x => x.trashed).length}</span></div>
+        <div style="margin-top:6px"><button class="btn" id="pdbNewLab" type="button">Create New Label…</button></div>
+        ${db.labels.length ? `<div><button class="ib" id="pdbEditLab" type="button">Edit labels…</button></div>` : ''}`;
+      $('#pdbT').innerHTML = list.length ? `<table class="grid"><thead><tr>
+          <th style="width:26px"><input type="checkbox" id="pdbAll"></th>
+          <th class="sort" data-s="name">Name${arrow('name')}</th><th>Sequence (5′→3′)</th>
+          <th class="sort" data-s="len">Length${arrow('len')}</th><th class="sort" data-s="tm">Tm${arrow('tm')}</th>
+          <th>Labels</th><th>Description</th><th class="sort" data-s="added">Added${arrow('added')}</th><th></th></tr></thead><tbody>
+        ${list.map(x => `<tr data-id="${x.id}">
+          <td><input type="checkbox" data-pdbc="${x.id}" ${pick.has(x.id) ? 'checked' : ''}></td>
+          <td><span class="sw" style="background:${x.color || '#2f6fd0'}"></span> <b>${esc(x.name)}</b>${x.phos ? ' <span class="note">5′P</span>' : ''}</td>
+          <td class="mono wrap">${esc(x.seq)}</td><td>${x.seq.length}</td><td>${DNA.tm(x.seq).toFixed(1)} °C</td>
+          <td>${(x.labels || []).map(labelChip).join(' ')}</td>
+          <td class="wrap">${esc(x.notes || '')}</td>
+          <td class="note">${x.added ? new Date(x.added).toLocaleDateString() : ''}</td>
+          <td><button class="ib" data-pdbmenu="${x.id}" title="More">⋮</button></td></tr>`).join('')}
+      </tbody></table>` : `<div class="hint">${label === '__trash' ? 'The trash is empty.' : (q ? 'Nothing matches that search.' : 'No primers here yet. Use Add Primers to bring some in from a CSV, a TSV or an open file.')}</div>`;
+      $('#pdbN').textContent = `${list.length} primer${list.length === 1 ? '' : 's'}${pick.size ? ` · ${pick.size} selected` : ''}`;
+      for (const id of ['pdbLabelBtn', 'pdbTrash']) { const b = $('#' + id); if (b) b.disabled = !pick.size; }
+    };
+    dialog({
+      title: 'Primer Database', wide: true,
+      body: `<div class="ecbar">
+          <button class="btn pri" id="pdbAdd">Add Primers…</button>
+          <button class="btn" id="pdbLabelBtn">Apply Label ▾</button>
+          <button class="btn dng" id="pdbTrash">Move to Trash</button>
+          <button class="btn" id="pdbIO">Database ▾</button>
+          <input type="text" id="pdbQ" placeholder="Search name, sequence or description" style="width:220px">
+          <span class="sp" style="flex:1"></span><span class="note" id="pdbN"></span>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          <div class="pdbside" id="pdbSide"></div>
+          <div class="tscroll" style="flex:1;min-width:0;max-height:50vh" id="pdbT"></div>
+        </div>
+        <div class="hint">The database is kept with the program, not with one file. Primers → Annotate From Primer Database puts matching primers onto the sequence you have open.</div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        const reopen = () => dlgPrimerDB();
+        box.querySelector('#pdbQ').oninput = e => { q = e.target.value; render(); };
+        box.querySelector('#pdbSide').addEventListener('click', e => {
+          const it = e.target.closest('[data-lab]');
+          if (it) { label = it.dataset.lab; pick.clear(); render(); return; }
+          if (e.target.id === 'pdbNewLab') { dlgPdbLabel(null, reopen); return; }
+          if (e.target.id === 'pdbEditLab') { dlgPdbLabels(reopen); return; }
+        });
+        box.querySelector('#pdbT').addEventListener('click', e => {
+          if (e.target.id === 'pdbAll') {
+            const on = e.target.checked;
+            for (const x of rows()) { if (on) pick.add(x.id); else pick.delete(x.id); }
+            render(); return;
+          }
+          const ck = e.target.closest('[data-pdbc]');
+          if (ck) { const id = +ck.dataset.pdbc; if (ck.checked) pick.add(id); else pick.delete(id); render(); return; }
+          const mn = e.target.closest('[data-pdbmenu]');
+          if (mn) {
+            const x = db.primers.find(y => y.id === +mn.dataset.pdbmenu);
+            const r = mn.getBoundingClientRect();
+            showCtx(r.left - 150, r.bottom, [
+              { label: 'Edit primer…', act: () => dlgPdbPrimer(x, reopen) },
+              { label: 'Labels…', act: () => dlgPdbAssign([x], reopen) },
+              '-',
+              ...(x.trashed
+                ? [{ label: 'Restore', act: async () => { delete x.trashed; await saveSettings(); render(); } },
+                { label: 'Delete for good', act: async () => { db.primers = db.primers.filter(y => y.id !== x.id); await saveSettings(); render(); } }]
+                : [{ label: 'Move to Trash', act: async () => { x.trashed = true; await saveSettings(); render(); } }])
+            ]);
+            return;
+          }
+          const th = e.target.closest('th.sort');
+          if (th) { if (sortBy === th.dataset.s) desc = !desc; else { sortBy = th.dataset.s; desc = false; } render(); }
+        });
+        box.querySelector('#pdbT').addEventListener('dblclick', e => {
+          const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+          dlgPdbPrimer(db.primers.find(y => y.id === +tr.dataset.id), reopen);
+        });
+        box.querySelector('#pdbAdd').onclick = () => dlgPdbImport(reopen);
+        box.querySelector('#pdbLabelBtn').onclick = () => dlgPdbAssign(db.primers.filter(x => pick.has(x.id)), reopen);
+        box.querySelector('#pdbTrash').onclick = async () => {
+          const list = db.primers.filter(x => pick.has(x.id));
+          for (const x of list) x.trashed = true;
+          pick.clear();
+          await saveSettings(); render();
+          toast(`${list.length} primer${list.length === 1 ? '' : 's'} moved to the trash`);
+        };
+        box.querySelector('#pdbIO').onclick = e => {
+          const r = e.target.getBoundingClientRect();
+          showCtx(r.left, r.bottom, [
+            { label: 'Export Database…', act: exportPrimerDb },
+            { label: 'Import Database…', act: () => importPrimerDb(reopen) },
+            '-',
+            { label: 'Empty the Trash', dis: !db.primers.some(x => x.trashed), act: async () => { db.primers = db.primers.filter(x => !x.trashed); await saveSettings(); render(); toast('Trash emptied'); } }
+          ]);
+        };
+      }
+    });
+  }
+  function dlgPdbLabel(existing, done) {
+    const db = pdb(), isNew = !existing;
+    dialog({
+      title: isNew ? 'Create Label' : `Edit Label “${existing.name}”`,
+      body: `<div class="form">
+        <label for="plN">Name</label><input type="text" id="plN" value="${esc(existing ? existing.name : '')}">
+        <label for="plC">Colour</label><input type="color" id="plC" value="${existing ? existing.color : '#7cc37a'}">
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel', act: () => { closeDialog(); if (done) done(); return false; } },
+      { label: isNew ? 'Create' : 'Save', primary: true, act: async () => {
+        const name = val('plN').trim();
+        if (!name) return showErr('Give the label a name.');
+        if (isNew && db.labels.some(x => x.name === name)) return showErr('That label already exists.');
+        if (isNew) db.labels.push({ name, color: val('plC') });
+        else {
+          const old = existing.name;
+          existing.name = name; existing.color = val('plC');
+          for (const p2 of db.primers) p2.labels = (p2.labels || []).map(l => l === old ? name : l);
+        }
+        await saveSettings();
+        closeDialog();
+        if (done) done();
+        return false;
+      } }]
+    });
+  }
+  function dlgPdbLabels(done) {
+    const db = pdb();
+    const render = () => {
+      if (!$('#plList')) return;
+      $('#plList').innerHTML = db.labels.length
+        ? db.labels.map((L, i) => `<div class="iitem"><span class="sw" style="background:${L.color}"></span> <b>${esc(L.name)}</b>
+            <span class="note">${db.primers.filter(x => (x.labels || []).includes(L.name)).length} primers</span>
+            <span style="flex:1"></span><button class="ib" data-ple="${i}">Edit</button><button class="ib dng" data-pld="${i}">Delete</button></div>`).join('')
+        : '<div class="hint">No labels yet.</div>';
+    };
+    dialog({
+      title: 'Labels', wide: true,
+      body: `<div class="ilist" id="plList" style="max-width:520px"></div>`,
+      buttons: [{ label: 'New Label…', act: () => { closeDialog(); dlgPdbLabel(null, done); return false; } },
+      { label: 'Close', primary: true, act: () => { closeDialog(); if (done) done(); return false; } }],
+      onOpen: box => {
+        render();
+        box.querySelector('#plList').addEventListener('click', async e => {
+          const ed = e.target.closest('[data-ple]');
+          if (ed) { closeDialog(); dlgPdbLabel(db.labels[+ed.dataset.ple], done); return; }
+          const del = e.target.closest('[data-pld]');
+          if (del) {
+            const L = db.labels[+del.dataset.pld];
+            db.labels.splice(+del.dataset.pld, 1);
+            for (const p2 of db.primers) p2.labels = (p2.labels || []).filter(x => x !== L.name);
+            await saveSettings(); render();
+          }
+        });
+      }
+    });
+  }
+  function dlgPdbAssign(list, done) {
+    const db = pdb();
+    if (!list.length) { toast('Select the primers to label first.'); return; }
+    if (!db.labels.length) { dlgPdbLabel(null, done); return; }
+    const have = n => list.every(x => (x.labels || []).includes(n));
+    dialog({
+      title: `Labels for ${list.length} Primer${list.length === 1 ? '' : 's'}`,
+      body: `<div class="form">
+        <label>Labels</label><div>${db.labels.map(L => `<label class="inl"><input type="checkbox" data-pla="${esc(L.name)}" ${have(L.name) ? 'checked' : ''}> <span class="sw" style="background:${L.color}"></span> ${esc(L.name)}</label>`).join('<br>')}</div>
+        <div class="full hint">A primer may carry several labels; a label is how a set is made.</div></div>`,
+      buttons: [{ label: 'Cancel', act: () => { closeDialog(); if (done) done(); return false; } },
+      { label: 'OK', primary: true, act: async () => {
+        const on = [...document.querySelectorAll('#dlg [data-pla]')].filter(i => i.checked).map(i => i.dataset.pla);
+        const off = [...document.querySelectorAll('#dlg [data-pla]')].filter(i => !i.checked).map(i => i.dataset.pla);
+        for (const x of list) {
+          const set = new Set(x.labels || []);
+          for (const n of on) set.add(n);
+          for (const n of off) set.delete(n);
+          x.labels = [...set];
+        }
+        await saveSettings();
+        closeDialog();
+        if (done) done();
+        toast(`Labels applied to ${list.length} primer${list.length === 1 ? '' : 's'}`);
+        return false;
+      } }]
+    });
+  }
+  function dlgPdbPrimer(x, done) {
+    dialog({
+      title: `Edit Primer “${x.name}”`,
+      body: `<div class="form">
+        <label for="pdN">Name</label><input type="text" id="pdN" value="${esc(x.name)}">
+        <label for="pdS">Sequence 5′→3′</label><textarea id="pdS" rows="2">${esc(x.seq)}</textarea>
+        <label for="pdD">Description</label><input type="text" id="pdD" value="${esc(x.notes || '')}">
+        <label for="pdC">Colour</label><input type="color" id="pdC" value="${x.color || '#2f6fd0'}">
+        <label></label><label><input type="checkbox" id="pdP" ${x.phos ? 'checked' : ''}> 5′ phosphorylated</label>
+        <div class="full note" id="pdInfo"></div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel', act: () => { closeDialog(); if (done) done(); return false; } },
+      { label: 'OK', primary: true, act: async () => {
+        const nm = val('pdN').trim(), sq = DNA.clean(val('pdS'));
+        if (!nm) return showErr('Enter a name.');
+        if (sq.length < 6) return showErr('A primer needs at least 6 bases.');
+        Object.assign(x, { name: nm, seq: sq, notes: val('pdD').trim(), color: val('pdC'), phos: $('#pdP').checked });
+        await saveSettings();
+        closeDialog();
+        if (done) done();
+        return false;
+      } }],
+      onOpen: box => {
+        const upd = () => {
+          const sq = DNA.clean(val('pdS'));
+          $('#pdInfo').textContent = sq.length >= 6 ? `${sq.length} nt · Tm ${DNA.tm(sq).toFixed(1)} °C · GC ${DNA.gcPct(sq).toFixed(0)} %` : '';
+        };
+        box.querySelector('#pdS').addEventListener('input', upd); upd();
+      }
+    });
+  }
+  /* Bringing primers in: a CSV or TSV with Name, Sequence and Description columns, the
+   * primers of an open file, or a pasted list. Invalid and duplicate rows are called out
+   * rather than silently dropped. */
+  function dlgPdbImport(done) {
+    const db = pdb();
+    let items = [];
+    // every non-empty line is kept, so a row that is not a usable primer can be
+    // reported rather than quietly dropped
+    const parse = text => {
+      const out = [];
+      for (const raw of String(text || '').split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || /^[#>]/.test(line)) continue;
+        if (/^name[,;\t]/i.test(line)) continue;                 // a header row
+        const parts = line.split(/\t|,|\s{2,}/).map(x => x.trim()).filter(Boolean);
+        if (!parts.length) continue;
+        let seqPart = parts.find(x => /^[ACGTUacgtu\s]+$/.test(x) && DNA.clean(x).length >= 6);
+        if (!seqPart) seqPart = parts.find(x => /^[ACGTUacgtu\s]+$/.test(x)) || '';
+        const seq = DNA.clean(seqPart);
+        const rest = parts.filter(x => x !== seqPart);
+        out.push({ name: rest[0] || `Primer ${out.length + 1}`, seq, notes: rest.slice(1).join(' '), ok: seq.length >= 6 });
+      }
+      return out;
+    };
+    const render = () => {
+      if (!$('#piList')) return;
+      // only the second and later copies of a sequence count as repeats, so the
+      // first one can still be imported
+      const seenSeq = new Set();
+      const rows = items.map((it, i) => {
+        const inDb = db.primers.some(p2 => p2.seq === it.seq && !p2.trashed);
+        const dup = it.ok && seenSeq.has(it.seq);
+        if (it.ok) seenSeq.add(it.seq);
+        const bad = !it.ok;
+        return { it, i, inDb, dup, bad, use: !inDb && !bad && !dup };
+      });
+      $('#piList').innerHTML = rows.length ? `<table class="grid"><thead><tr>
+          <th style="width:26px"><input type="checkbox" id="piAll" checked></th><th>Name</th><th>Sequence</th><th>Length</th><th>Tm</th><th>Status</th></tr></thead><tbody>
+        ${rows.map(r => `<tr${r.bad || r.inDb || r.dup ? ' style="color:var(--faint)"' : ''}>
+          <td><input type="checkbox" data-pii="${r.i}" ${r.use ? 'checked' : ''} ${r.bad ? 'disabled' : ''}></td>
+          <td>${esc(r.it.name)}</td><td class="mono">${esc(r.it.seq || '—')}</td><td>${r.it.seq.length || ''}</td>
+          <td>${r.it.ok ? DNA.tm(r.it.seq).toFixed(1) : ''}</td>
+          <td>${r.bad ? '<span style="color:var(--danger)">not a usable primer</span>' : (r.inDb ? 'already in the database' : (r.dup ? 'repeated in this list' : 'new'))}</td></tr>`).join('')}
+      </tbody></table>` : '<div class="hint">Nothing recognised yet.</div>';
+      const bad = rows.filter(r => r.bad).length, inDb = rows.filter(r => r.inDb).length, dup = rows.filter(r => r.dup).length;
+      $('#piN').innerHTML = rows.length
+        ? `${rows.length} row${rows.length === 1 ? '' : 's'}${bad ? ` · <span style="color:var(--danger)">${bad} invalid</span>` : ''}${inDb ? ` · ${inDb} already in the database` : ''}${dup ? ` · ${dup} repeated` : ''}`
+        : '';
+    };
+    dialog({
+      title: 'Add Primers to the Database', wide: true,
+      body: `<div class="form">
+        <label>From</label><div class="row2">
+          <button class="btn" id="piFile" type="button">Choose a CSV or TSV file…</button>
+          <select id="piDoc"><option value="">an open file…</option>${S.docs.filter(x => isNuc(x) && x.primers.length).map((x, i) => `<option value="${x.id}">${esc(x.name)} (${x.primers.length})</option>`).join('')}</select>
+        </div>
+        <label for="piText">or paste a list</label><textarea id="piText" rows="4" placeholder="Name,Sequence,Description&#10;M13-F (-20),GTAAAACGACGGCCAGT,Standard M13 forward sequencing primer" style="min-height:80px;font-family:var(--f-mono)"></textarea>
+        <div class="full" id="piN"></div>
+        <div class="full tscroll" style="max-height:34vh" id="piList"></div>
+        <div class="full hint">A CSV or TSV exported from a spreadsheet works: Name, Sequence and Description columns, in any order, with or without a header row.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel', act: () => { closeDialog(); if (done) done(); return false; } },
+      { label: 'Add Primers', primary: true, act: async () => {
+        const use = [...document.querySelectorAll('#dlg [data-pii]:checked')].map(i => items[+i.dataset.pii]);
+        if (!use.length) return showErr('Check at least one primer.');
+        for (const it of use) db.primers.push({ id: pdbNext(), name: it.name, seq: it.seq, notes: it.notes || '', added: Date.now(), labels: [], color: '#2f6fd0' });
+        await saveSettings();
+        closeDialog();
+        if (done) done();
+        toast(`${use.length} primer${use.length === 1 ? '' : 's'} added to the database`);
+        return false;
+      } }],
+      onOpen: box => {
+        render();
+        box.querySelector('#piText').addEventListener('input', e => { items = parse(e.target.value); render(); });
+        box.querySelector('#piDoc').onchange = e => {
+          const doc = S.docs.find(x => String(x.id) === e.target.value);
+          items = doc ? doc.primers.map(p2 => ({ name: p2.name, seq: p2.seq, notes: p2.notes || '', ok: p2.seq.length >= 6 })) : [];
+          render();
+        };
+        box.querySelector('#piFile').onclick = async () => {
+          let text = null;
+          if (host && host.openFiles) {
+            const files = await host.openFiles();
+            if (!files || !files.length) return;
+            const bin = Uint8Array.from(atob(files[0].data), c => c.charCodeAt(0));
+            text = new TextDecoder().decode(bin);
+          } else {
+            const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,.tsv,.txt';
+            text = await new Promise(res => { inp.onchange = () => { const f = inp.files[0]; if (!f) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(f); }; inp.click(); });
+          }
+          if (!text) return;
+          box.querySelector('#piText').value = text.slice(0, 20000);
+          items = parse(text);
+          render();
+        };
+        box.querySelector('#piList').addEventListener('click', e => {
+          if (e.target.id === 'piAll') {
+            const on = e.target.checked;
+            for (const cb of box.querySelectorAll('[data-pii]')) if (!cb.disabled) cb.checked = on;
+          }
+        });
+      }
+    });
+  }
+  function exportPrimerDb() {
+    const db = pdb();
+    const json = JSON.stringify({ kind: 'GeneCanvas primer database', version: 1, saved: new Date().toISOString(), labels: db.labels, primers: db.primers }, null, 1);
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'primer-database.json', content: json, filters: [{ name: 'JSON', extensions: ['json'] }] }).then(p2 => { if (p2) toast('Database exported to ' + p2.split(/[\\/]/).pop()); });
+    else downloadText('primer-database.json', json);
+  }
+  async function importPrimerDb(done) {
+    let text = null;
+    if (host && host.openFiles) {
+      const files = await host.openFiles();
+      if (!files || !files.length) return;
+      const bin = Uint8Array.from(atob(files[0].data), c => c.charCodeAt(0));
+      text = new TextDecoder().decode(bin);
+    } else {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json';
+      text = await new Promise(res => { inp.onchange = () => { const f = inp.files[0]; if (!f) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(f); }; inp.click(); });
+    }
+    if (!text) return;
+    let obj;
+    try { obj = JSON.parse(text); } catch (e) { toast('That file is not a saved primer database.'); return; }
+    if (!obj || !Array.isArray(obj.primers)) { toast('That file holds no primers.'); return; }
+    dialog({
+      title: 'Import Database',
+      body: `<div class="form">
+        <div class="full">The file holds <b>${obj.primers.length}</b> primer${obj.primers.length === 1 ? '' : 's'} and <b>${(obj.labels || []).length}</b> label${(obj.labels || []).length === 1 ? '' : 's'}${obj.saved ? `, saved ${new Date(obj.saved).toLocaleString()}` : ''}.</div>
+        <div class="full hint">Replacing discards the database you have now. Merging keeps it and adds anything whose sequence is not already there.</div></div>`,
+      buttons: [
+        { label: 'Cancel', act: () => { closeDialog(); if (done) done(); return false; } },
+        { label: 'Merge', act: async () => {
+          const db = pdb();
+          let added = 0;
+          for (const x of obj.primers) {
+            if (db.primers.some(y => y.seq === x.seq)) continue;
+            db.primers.push({ ...x, id: pdbNext() }); added++;
+          }
+          for (const L of (obj.labels || [])) if (!db.labels.some(y => y.name === L.name)) db.labels.push(L);
+          await saveSettings();
+          closeDialog();
+          if (done) done();
+          toast(`${added} primer${added === 1 ? '' : 's'} merged in`);
+          return false;
+        } },
+        { label: 'Replace', primary: true, danger: true, act: async () => {
+          SET.primerDb = { primers: obj.primers.map((x, i) => ({ ...x, id: i + 1 })), labels: obj.labels || [] };
+          await saveSettings();
+          closeDialog();
+          if (done) done();
+          toast(`Database replaced — ${obj.primers.length} primers`);
+          return false;
+        } }]
+    });
+  }
+  /* Annotate From Primer Database: finds the database primers that bind the open
+   * sequence and adds the ones you keep. */
+  function dlgAnnotateFromDb() {
+    const d = D(), db = pdb();
+    if (!db.primers.filter(x => !x.trashed).length) { toast('The primer database is empty. Open Primers › Primer Database to fill it.'); return; }
+    let source = '', mode = 'exact', found = [];
+    const run = () => {
+      const pool = db.primers.filter(x => !x.trashed && (!source || (x.labels || []).includes(source)));
+      found = [];
+      for (const x of pool) {
+        if (d.primers.some(y => y.seq === x.seq)) continue;      // already on the sequence
+        const b = mode === 'exact' ? DNA.searchDNA(d.seq, d.circular, x.seq).map(h => ({ ...h, annealed: x.seq.length, tm: DNA.tm(x.seq), full: true })) : primerBind(d, x);
+        if (b.length) found.push({ p: x, sites: b });
+      }
+      $('#afList').innerHTML = found.length ? `<table class="grid"><thead><tr>
+          <th style="width:26px"><input type="checkbox" id="afAll" checked></th><th>Name</th><th>Sequence</th><th>Binds</th><th>Labels</th></tr></thead><tbody>
+        ${found.map((f, i) => `<tr><td><input type="checkbox" data-afi="${i}" checked></td><td>${esc(f.p.name)}</td>
+          <td class="mono">${esc(f.p.seq)}</td>
+          <td>${f.sites.map(s2 => `${fmt(s2.start + 1)}..${fmt(s2.end)} ${s2.strand > 0 ? '→' : '←'}${s2.full ? '' : ` (3′ ${s2.annealed} nt)`}`).join('<br>')}</td>
+          <td>${(f.p.labels || []).join(', ')}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="hint">No primer in ${source ? `the label “${esc(source)}”` : 'the database'} binds this sequence under that rule.</div>`;
+      $('#afN').textContent = `${pool.length} primer${pool.length === 1 ? '' : 's'} searched · ${found.length} match${found.length === 1 ? '' : 'es'}`;
+    };
+    dialog({
+      title: 'Annotate From Primer Database', wide: true,
+      body: `<div class="form">
+        <label for="afSrc">Source</label><select id="afSrc"><option value="">All Primers</option>${db.labels.map(L => `<option value="${esc(L.name)}">${esc(L.name)}</option>`).join('')}</select>
+        <label for="afMode">Match</label><select id="afMode">
+          <option value="exact">the whole primer must be present</option>
+          <option value="hyb">allow a 5′ tail (use the file's hybridisation parameters)</option>
+        </select>
+        <div class="full" id="afN"></div>
+        <div class="full tscroll" style="max-height:40vh" id="afList"></div>
+        <div class="full hint">A primer already on this sequence is left out.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Add Primers', primary: true, act: () => {
+        const use = [...document.querySelectorAll('#dlg [data-afi]:checked')].map(i => found[+i.dataset.afi]);
+        if (!use.length) return showErr('Check at least one primer.');
+        for (const f of use) d.primers.push({ id: uid(), added: Date.now(), name: f.p.name, seq: f.p.seq, notes: f.p.notes || 'From the primer database', color: f.p.color, phos: !!f.p.phos });
+        commit(d, `Annotated ${use.length} primer${use.length === 1 ? '' : 's'} from the database`);
+        renderAll(true);
+        toast(`${use.length} primer${use.length === 1 ? '' : 's'} added`);
+      } }],
+      onOpen: box => {
+        run();
+        box.querySelector('#afSrc').onchange = e => { source = e.target.value; run(); };
+        box.querySelector('#afMode').onchange = e => { mode = e.target.value; run(); };
+        box.querySelector('#afList').addEventListener('click', e => {
+          if (e.target.id === 'afAll') { const on = e.target.checked; for (const cb of box.querySelectorAll('[data-afi]')) cb.checked = on; }
+        });
+      }
+    });
   }
 
   // ================================================================ FEATURE TYPES
@@ -6993,7 +7453,7 @@ svg .prim { cursor: pointer; }
   // ================================================================ stored settings
   // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
   const SETTINGS_KEY = 'genecanvas.settings';
-  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [], featureTypes: [], typeColors: {}, recentTypes: [] };
+  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [], featureTypes: [], typeColors: {}, recentTypes: [], primerDb: { primers: [], labels: [] } };
   let SET = { ...DEFAULT_SETTINGS };
 
   async function loadSettings() {

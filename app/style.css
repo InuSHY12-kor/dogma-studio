@@ -505,3 +505,10 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .palign .arow { display: flex; gap: 8px; align-items: baseline; }
 .palign .lbl { flex: 0 0 96px; color: var(--muted); text-align: right; font-size: 11px; }
 .palign .mono { white-space: pre; letter-spacing: .5px; }
+
+/* Primer database */
+.pdbside { flex: 0 0 190px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.pdbitem { padding: 4px 7px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+.pdbitem:hover { background: var(--chrome); }
+.pdbitem.on { background: #e8effb; color: #11306e; font-weight: 600; }
+.plabel { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 10.5px; color: #1c2230; }
