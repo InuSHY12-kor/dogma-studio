@@ -26,29 +26,75 @@
       if (!seq.length) throw new Error('The region to amplify is empty.');
       return { seq, from, to, doc, label: `PCR ${from + 1}..${to}`, ends: { left: { type: 'blunt', x: '' }, right: { type: 'blunt', x: '' } } };
     }
-    // cut with one or two enzymes
-    const cuts = spec.cuts || [];
+    if (spec.prep === 'typeIIs') {
+      const CLONE = root.CLONE;
+      const enzyme = spec.enzyme;
+      if (!enzyme) throw new Error('Choose a Type IIS enzyme.');
+      const all = CLONE.ggFragments(doc, enzyme);
+      if (!all.length) {
+        const k = (DNA.findSites(doc.seq, doc.circular)[enzyme] || []).length;
+        throw new Error(k < 2
+          ? `“${doc.name}” has ${k} ${enzyme} site${k === 1 ? '' : 's'}. A Golden Gate part needs two, pointing inward.`
+          : `“${doc.name}” has ${enzyme} sites, but no fragment between them is free of them.`);
+      }
+      const sorted = all.slice().sort((x, y) => y.size - x.size);
+      const f = spec.fragment != null && sorted[spec.fragment] ? sorted[spec.fragment] : sorted[0];
+      return {
+        seq: f.seq, from: f.start, to: f.end, doc,
+        label: `${enzyme} part, ${f.size} bp`,
+        choices: sorted.length,
+        ends: { left: fromCloneEnd(f.left, enzyme), right: fromCloneEnd(f.right, enzyme) }
+      };
+    }
+    if (spec.prep === 'att') {
+      const CLONE = root.CLONE;
+      const sp = CLONE.attSplit(doc);
+      if (!sp) throw new Error(`No att1 and att2 pair was found in “${doc.name}”.`);
+      const r = spec.role === 'acceptor' ? sp.outer : sp.inner;
+      const seq = DNA.sub(doc.seq, r.start, r.end) || doc.seq;
+      return {
+        seq, from: r.start, to: r.end, doc, att: sp,
+        label: spec.role === 'acceptor' ? 'backbone between the att cores' : 'cassette between the att cores',
+        ends: spec.role === 'acceptor'
+          ? { left: { type: 'blunt', x: '', att: 2 }, right: { type: 'blunt', x: '', att: 1 } }
+          : { left: { type: 'blunt', x: '', att: 1 }, right: { type: 'blunt', x: '', att: 2 } }
+      };
+    }
+    // cut with restriction enzymes: one cut in a circle, or the piece between two cuts
+    const cuts = (spec.cuts || []).slice().sort((a, b) => a.cut - b.cut);
     if (!cuts.length) throw new Error('Choose at least one enzyme.');
     if (cuts.length === 1) {
       if (!doc.circular) throw new Error(`“${doc.name}” is linear, so one cut gives two pieces. Choose which piece, or cut with two enzymes.`);
       const c = cuts[0];
       return { seq: DNA.sub(doc.seq, c.cut, c.cut) || doc.seq, from: c.cut, to: c.cut, doc, label: `${c.enzyme} (${c.cut})`, ends: { left: endOf(doc.seq, c), right: endOf(doc.seq, c) } };
     }
-    const [a, b] = cuts;
-    // Two cuts give two arcs. The backbone is the longer one unless asked otherwise, and
-    // the arc that is kept decides which cut end is at its start and which at its end.
-    const arc = (from, to) => DNA.rlen({ start: from.cut, end: to.cut }, n) || n;
-    const aFirst = arc(a, b), bFirst = arc(b, a);
-    const takeAtoB = spec.keepInner ? (aFirst <= bFirst) : (aFirst >= bFirst);
-    const startCut = takeAtoB ? a : b, endCut = takeAtoB ? b : a;
+    /* Any number of enzymes may be chosen. The cuts are taken together, as they would be
+     * in one tube, and the piece kept is the longest stretch between two neighbouring
+     * cuts — or the shortest, when the stretch between the cuts is what is wanted. */
+    const spans = [];
+    for (let i = 0; i < cuts.length; i++) {
+      const a = cuts[i], b = cuts[(i + 1) % cuts.length];
+      if (i === cuts.length - 1 && !doc.circular) break;     // a linear molecule has no wrap-around piece
+      spans.push({ a, b, len: DNA.rlen({ start: a.cut, end: b.cut }, n) || n });
+    }
+    if (!spans.length) throw new Error('These cuts leave no piece with two cut ends.');
+    spans.sort((x, y) => spec.keepInner ? x.len - y.len : y.len - x.len);
+    const pick = spans[0];
+    const startCut = pick.a, endCut = pick.b;
     const seq = DNA.sub(doc.seq, startCut.cut, endCut.cut) || doc.seq;
-    if (!seq.length) throw new Error('The two cuts leave nothing.');
+    if (!seq.length) throw new Error('These cuts leave nothing.');
     return {
       seq, from: startCut.cut, to: endCut.cut, doc,
       label: `${startCut.enzyme} (${startCut.cut}) – ${endCut.enzyme} (${endCut.cut})`,
       removed: n - seq.length,
+      pieces: spans.length,
       ends: { left: endOf(doc.seq, startCut), right: endOf(doc.seq, endCut) }
     };
+  }
+  // CLONE writes ends as 'b' / '5' / '3' / 'o'; this window writes blunt / 5 / 3.
+  function fromCloneEnd(e, enzyme) {
+    if (!e || e.type === 'o') return { type: 'open', x: '', enzyme };
+    return { type: e.type === 'b' ? 'blunt' : e.type, x: e.x || '', enzyme };
   }
   function endOf(seq, c) {
     if (c.cut === c.cut2) return { type: 'blunt', x: '', enzyme: c.enzyme };
@@ -153,7 +199,7 @@
     for (let i = 0; i < N; i++) {
       const left = pieces[i], right = pieces[(i + 1) % N];
       const a = left.ends.right, b = right.ends.left;
-      const same = a && b && a.type === b.type && (a.x || '') === (b.x || '');
+      const same = a && b && a.type === b.type && a.type !== 'open' && (a.x || '') === (b.x || '');
       junctions.push({
         from: left.name, to: right.name, carrier: null,
         len: (a && a.x ? a.x.length : 0), seq: a ? a.x : '', tm: 0, ok: !!same,
@@ -163,7 +209,25 @@
     }
     return { junctions, primers: pieces.map(() => null), opts: {} };
   }
-  const describeEnd = e => !e ? 'with an open end' : (e.type === 'blunt' ? 'blunt' : `with a ${e.type}′ overhang ${e.x}`);
+  const describeEnd = e => !e ? 'with an open end' : (e.type === 'open' ? 'with an uncut end' : (e.type === 'blunt' ? 'blunt' : `with a ${e.type}′ overhang ${e.x}`));
+
+  // ---------------------------------------------------------------- att junctions
+  /* Gateway joins at the 7 bp crossover core, so the junction is defined by which att
+   * family meets which: att1 to att1 and att2 to att2 recombine, anything else does not. */
+  function planAtt(pieces) {
+    const N = pieces.length, junctions = [];
+    for (let i = 0; i < N; i++) {
+      const left = pieces[i], right = pieces[(i + 1) % N];
+      const a = left.ends.right, b = right.ends.left;
+      const ok = !!(a && b && a.att && b.att && a.att === b.att);
+      junctions.push({
+        from: left.name, to: right.name, carrier: null, len: 0, seq: '', tm: 0, ok,
+        overhang: ok ? 'attB' + a.att : '',
+        why: ok ? '' : `${left.name} and ${right.name} do not meet at a shared att core, so they cannot recombine.`
+      });
+    }
+    return { junctions, primers: pieces.map(() => null), opts: {} };
+  }
 
   // ---------------------------------------------------------------- the product
   function build(pieces, plan, name) {
@@ -251,5 +315,5 @@
     return null;
   }
 
-  root.ASSEMBLY = { prepare, flip, planGibson, planRestriction, build, frameIssues, suggestFlips, chooseOverlap, annealPart, naturalOverlap, describeEnd, endOf };
+  root.ASSEMBLY = { prepare, flip, planGibson, planRestriction, planAtt, build, frameIssues, suggestFlips, chooseOverlap, annealPart, naturalOverlap, describeEnd, endOf };
 })(typeof window !== 'undefined' ? window : globalThis);

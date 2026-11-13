@@ -723,13 +723,12 @@ svg .prim { cursor: pointer; }
         { label: 'Show Enzymes Table', dis: !has, act: () => setView('enz') }
       ] },
       { label: 'Cloning', items: [
+        // every method opens the same window; its dropdown chooses which algorithm runs
         { label: 'Restriction Cloning…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('restriction') },
-        { label: 'Restriction Cloning (simple)…', dis: S.docs.length < 1, act: dlgRestrictionClone },
-        { label: 'Golden Gate Assembly…', dis: S.docs.length < 1, act: dlgGoldenGate },
+        { label: 'Golden Gate Assembly…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('goldengate') },
         { label: 'Gibson Assembly…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('gibson') },
         { label: 'In-Fusion Cloning…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('infusion') },
-        { label: 'Gibson / Overlap Assembly (simple)…', dis: S.docs.length < 1, act: dlgGibson },
-        { label: 'Gateway BP / LR…', dis: S.docs.length < 2, act: dlgGateway },
+        { label: 'Gateway BP / LR…', dis: S.docs.length < 2, act: () => dlgAssembly('gateway') },
         '-',
         { label: 'Insert Fragment from Clipboard…', dis: !has, act: dlgInsert },
         { label: 'Show att Sites in This Sequence', dis: !has, act: showAttSites }
@@ -973,7 +972,7 @@ svg .prim { cursor: pointer; }
     circ: () => setOpt('mapMode', 'circular', true), lin: () => setOpt('mapMode', 'linear', true),
     feat: () => dlgFeature(null), primer: () => (selLen(D()) ? primerFromSel(1) : dlgPrimer(null)), enz: () => setView('enz'), gel: () => newSimDoc(),
     tr: () => dlgTranslate(), rc: () => revCompSel(), origin: () => setOrigin(), side: () => { S.sideShown = !S.sideShown; renderAll(); },
-    ncbi: () => dlgNCBI(), print: () => dlgPrint(), clone: () => dlgRestrictionClone(), design: () => dlgDesignPCR(), align: () => openTraces()
+    ncbi: () => dlgNCBI(), print: () => dlgPrint(), clone: () => dlgAssembly('restriction'), design: () => dlgDesignPCR(), align: () => openTraces()
   };
 
   function renderDocTabs() {
@@ -6138,224 +6137,6 @@ svg .prim { cursor: pointer; }
     };
   }
 
-  // A record of one piece that went into a construct, kept with its own sequence so the
-  // history stands on its own even after the parent file is closed.
-  function pieceOfFrag(f, detail) {
-    return {
-      name: `${f.doc.name} ${f.lenz}–${f.renz} fragment`, seq: f.seq, circular: false,
-      features: f.doc.features.filter(x => {
-        const n = f.doc.seq.length, rs = ((x.start - f.start) % n + n) % n;
-        return rs + DNA.rlen(x, n) <= f.size;
-      }).map(x => { const n = f.doc.seq.length; const rs = ((x.start - f.start) % n + n) % n; return { ...x, start: rs, end: rs + DNA.rlen(x, n) }; }),
-      detail,
-      source: { method: 'Cut from ' + f.doc.name, detail: `${f.lenz} (${fmt(f.start + 1)}) – ${f.renz} (${fmt(f.end)})`, inputs: [{ name: f.doc.name, seq: f.doc.seq, circular: f.doc.circular, features: f.doc.features }] }
-    };
-  }
-
-  // ================================================================ cloning dialogs
-  function docOptions(sel) { return S.docs.map((x, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(x.name)} (${fmt(x.seq.length)} bp, ${x.circular ? 'circular' : 'linear'})</option>`).join(''); }
-  function cutters(doc) {
-    const sites = DNA.findSites(doc.seq, doc.circular);
-    return DNA.ENZYMES.filter(e => (sites[e.name] || []).some(s => s.cut != null)).map(e => ({ name: e.name, n: sites[e.name].length })).sort((a, b) => a.n - b.n || a.name.localeCompare(b.name));
-  }
-  function fragLabel(f) { return `${fmt(f.size)} bp · ${esc(f.lenz)} / ${esc(f.renz)} · ends ${esc(CLONE.endLabel(f.left))} … ${esc(CLONE.endLabel(f.right))}`; }
-
-  function dlgRestrictionClone() {
-    if (!S.docs.length) return;
-    let vi = S.active, ii = S.docs.length > 1 ? (S.active + 1) % S.docs.length : S.active;
-    let vEnz = [], iEnz = [], products = [];
-    const enzBox = (id, doc, chosen) => `<div class="enz-pick" id="${id}" style="max-height:110px">${cutters(doc).map(e => `<label><input type="checkbox" value="${e.name}" ${chosen.includes(e.name) ? 'checked' : ''}> ${e.name} <span style="color:var(--faint)">(${e.n})</span></label>`).join('') || '<span class="hint">No enzyme from the list cuts this sequence.</span>'}</div>`;
-    const guess = doc => { const c = cutters(doc).filter(e => e.n === 1 && DNA.ENZ_BY_NAME[e.name].core >= 6); return c.slice(0, 2).map(e => e.name); };
-    const fragsOf = (doc, enz) => enz.length ? CLONE.cut(doc, DNA.findSites(doc.seq, doc.circular), enz) : [];
-    // The enzyme lists are rebuilt only when the document changes, so ticking a box keeps its place.
-    const refreshEnz = () => {
-      $('#vbox').innerHTML = enzBox('venz', S.docs[vi], vEnz);
-      $('#ibox').innerHTML = enzBox('ienz', S.docs[ii], iEnz);
-    };
-    const refresh = () => {
-      const V = S.docs[vi], I = S.docs[ii];
-      const vf = fragsOf(V, vEnz), inf = fragsOf(I, iEnz);
-      const usable = f => f.left.type !== 'o' && f.right.type !== 'o';
-      // Largest first: the vector backbone is almost always the big fragment.
-      const bySize = (a, b) => b.size - a.size;
-      const vlist = vf.filter(usable).sort(bySize), ilist = inf.filter(usable).sort(bySize);
-      $('#vfr').innerHTML = vlist.length ? vlist.map((f, k) => `<label><input type="radio" name="vf" value="${k}" ${k === 0 ? 'checked' : ''}> ${fragLabel(f)}</label>`).join('') : `<span class="hint">${vEnz.length ? 'These enzymes do not produce a fragment with two cut ends.' : 'Choose the enzymes that cut the vector.'}</span>`;
-      $('#ifr').innerHTML = ilist.length ? ilist.map((f, k) => `<label><input type="radio" name="if" value="${k}" ${k === 0 ? 'checked' : ''}> ${fragLabel(f)}</label>`).join('') : `<span class="hint">${iEnz.length ? 'These enzymes do not produce a fragment with two cut ends.' : 'Choose the enzymes that cut the insert.'}</span>`;
-      $('#rcres').innerHTML = '';
-      products = [];
-      refresh.vlist = vlist; refresh.ilist = ilist;
-    };
-    const simulate = () => {
-      const vk = +(document.querySelector('input[name=vf]:checked') || {}).value;
-      const ik = +(document.querySelector('input[name=if]:checked') || {}).value;
-      const V = refresh.vlist[vk], I = refresh.ilist[ik];
-      if (!V || !I) { $('#rcres').innerHTML = '<div class="err">Choose one vector fragment and one insert fragment.</div>'; return; }
-      products = CLONE.ligate([V, I], { name: `${S.docs[vi].name}-${S.docs[ii].name}` });
-      if (!products.length) {
-        $('#rcres').innerHTML = `<div class="err">These two fragments cannot be joined. The vector ends are ${esc(CLONE.endLabel(V.left))} and ${esc(CLONE.endLabel(V.right))}; the insert ends are ${esc(CLONE.endLabel(I.left))} and ${esc(CLONE.endLabel(I.right))}. Ligation needs matching overhangs at both joins.</div>`;
-        return;
-      }
-      $('#rcres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Orientation</th><th>Junctions</th><th></th></tr></thead><tbody>${products.map((p, k) => `<tr><td>${k + 1}</td><td><b>${fmt(p.size)} bp</b></td><td>${p.chain[1].rev ? 'insert reversed' : 'insert forward'}</td><td class="wrap">${esc(p.junctions.join(' · '))}</td><td><button class="ib" data-mk="${k}">Create</button></td></tr>`).join('')}</tbody></table><div class="hint">Features on both fragments are carried into the product.</div>`;
-    };
-    vEnz = guess(S.docs[vi]); iEnz = guess(S.docs[ii]);
-    dialog({
-      title: 'Restriction Cloning', wide: true,
-      body: `<div class="form">
-        <label for="vdoc">Vector</label><select id="vdoc">${docOptions(vi)}</select>
-        <label>Cut with</label><div id="vbox"></div>
-        <label>Fragment</label><div class="fraglist" id="vfr"></div>
-        <div class="full" style="border-top:1px solid var(--border-soft);margin:4px 0"></div>
-        <label for="idoc">Insert from</label><select id="idoc">${docOptions(ii)}</select>
-        <label>Cut with</label><div id="ibox"></div>
-        <label>Fragment</label><div class="fraglist" id="ifr"></div>
-        <div class="full" id="rcres"></div></div>`,
-      buttons: [{ label: 'Close' }, { label: 'Simulate Ligation', primary: true, act: () => { simulate(); return false; } }],
-      onOpen: box => {
-        refreshEnz(); refresh();
-        box.addEventListener('change', e => {
-          if (e.target.id === 'vdoc') { vi = +e.target.value; vEnz = guess(S.docs[vi]); refreshEnz(); refresh(); }
-          else if (e.target.id === 'idoc') { ii = +e.target.value; iEnz = guess(S.docs[ii]); refreshEnz(); refresh(); }
-          else if (e.target.closest('#venz')) { vEnz = [...box.querySelectorAll('#venz input:checked')].map(i => i.value); refresh(); }
-          else if (e.target.closest('#ienz')) { iEnz = [...box.querySelectorAll('#ienz input:checked')].map(i => i.value); refresh(); }
-        });
-        box.addEventListener('click', e => {
-          const b = e.target.closest('[data-mk]'); if (!b) return;
-          const p = products[+b.dataset.mk];
-          closeDialog();
-          addDoc({
-            ...p.doc, histLabel: `Ligated ${S.docs[vi].name} with ${S.docs[ii].name}`,
-            provenance: {
-              method: 'Restriction ligation',
-              detail: p.junctions.join('  ·  '),
-              inputs: p.chain.map((f, k) => pieceOfFrag(f.rev ? { ...f, seq: f.seq } : f, k === 0 ? 'Backbone' : 'Insert' + (f.rev ? ', flipped' : '')))
-            }
-          });
-          toast(`Created ${fmt(p.size)} bp construct`);
-        });
-      }
-    });
-  }
-
-  function dlgGibson() {
-    let picked = S.docs.map((_, i) => i === S.active), results = [], idxUsed = [];
-    const pieceOf = i => {
-      const d = S.docs[i];
-      const useSel = d.circular && selLen(d) > 0 && i === S.active;
-      const seq = useSel ? selSeq(d) : (d.circular ? d.seq : d.seq);
-      return { name: d.name + (useSel ? ' (selection)' : ''), seq, doc: d, start: useSel ? d.sel.start : 0, end: useSel ? d.sel.end : d.seq.length };
-    };
-    const simulate = () => {
-      const idx = picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
-      if (idx.length < 2) { $('#gbres').innerHTML = '<div class="err">Choose at least two pieces.</div>'; return; }
-      if (idx.length > 6) { $('#gbres').innerHTML = '<div class="err">Choose at most six pieces.</div>'; return; }
-      const min = Math.max(10, Math.min(80, parseInt(val('gbov'), 10) || 20));
-      const pieces = idx.map(pieceOf);
-      idxUsed = idx;
-      results = CLONE.gibson(pieces, { minOverlap: min, name: 'Assembled construct' });
-      if (!results.length) {
-        $('#gbres').innerHTML = `<div class="err">These pieces do not share ends of at least ${min} bp, so they cannot be assembled. Gibson assembly needs each piece to end in the same sequence that the next piece begins with — usually added as primer tails.</div>`;
-        return;
-      }
-      $('#gbres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Junction overlaps</th><th></th></tr></thead><tbody>${results.map((r, k) => `<tr><td>${k + 1}</td><td><b>${fmt(r.size)} bp</b></td><td class="wrap">${r.junctions.map(j => `${esc(j.from)} → ${esc(j.to)}: ${j.len} bp`).join(' · ')}</td><td><button class="ib" data-mk="${k}">Create</button></td></tr>`).join('')}</tbody></table>`;
-    };
-    dialog({
-      title: 'Gibson / Overlap Assembly', wide: true,
-      body: `<div class="form">
-        <label>Pieces</label><div class="enz-pick" id="gbp" style="columns:1;max-height:150px">${S.docs.map((d, i) => `<label><input type="checkbox" value="${i}" ${picked[i] ? 'checked' : ''}> ${esc(d.name)} — ${fmt(d.seq.length)} bp${d.circular ? ' (circular; the current selection is used if there is one)' : ''}</label>`).join('')}</div>
-        <label for="gbov">Minimum overlap</label><div class="row2"><input type="number" id="gbov" value="20" min="10" max="80" style="width:80px"> bp</div>
-        <div class="full hint">Each piece must end in the same sequence that the next piece starts with. Pieces are tried in every order and orientation.</div>
-        <div class="full" id="gbres"></div></div>`,
-      buttons: [{ label: 'Close' }, { label: 'Simulate Assembly', primary: true, act: () => { simulate(); return false; } }],
-      onOpen: box => {
-        box.querySelector('#gbp').addEventListener('change', () => { picked = S.docs.map((_, i) => !!box.querySelector(`#gbp input[value="${i}"]`).checked); });
-        box.addEventListener('click', e => {
-          const b = e.target.closest('[data-mk]'); if (!b) return;
-          const r = results[+b.dataset.mk];
-          closeDialog();
-          addDoc({
-            ...r.doc, histLabel: 'Assembled from ' + r.junctions.length + ' pieces',
-            provenance: {
-              method: 'Gibson / overlap assembly',
-              detail: r.junctions.map(j => `${j.from} → ${j.to}: ${j.len} bp overlap`).join('  ·  '),
-              inputs: idxUsed.map(i => {
-                const pc = pieceOf(i);
-                return { name: pc.name, seq: pc.seq, circular: false, features: [], detail: 'Overlap and insert 1..' + pc.seq.length,
-                  source: { method: 'From ' + pc.doc.name, detail: `${fmt(pc.start + 1)}..${fmt(pc.end)}`, inputs: [{ name: pc.doc.name, seq: pc.doc.seq, circular: pc.doc.circular, features: pc.doc.features }] } };
-              })
-            }
-          });
-          toast(`Created ${fmt(r.size)} bp construct`);
-        });
-      }
-    });
-  }
-
-  function dlgGateway() {
-    if (S.docs.length < 2) { toast('Open both the entry clone and the destination vector first.'); return; }
-    const sizes = S.docs.map(d => d.seq.length);
-    let di = sizes.indexOf(Math.min(...sizes)), ai = S.docs.findIndex((_, i) => i !== di);
-    let res = null;
-    const describe = i => {
-      const d = S.docs[i], sites = CLONE.findAtt(d.seq, d.circular);
-      return sites.length ? sites.map(s => `${esc(s.label)} at ${fmt(s.pos + 1)}`).join(', ') : 'no att sites found';
-    };
-    const refresh = () => {
-      $('#gwd').innerHTML = describe(di);
-      $('#gwa').innerHTML = describe(ai);
-      $('#gwres').innerHTML = '';
-      res = null;
-    };
-    const simulate = () => {
-      if (di === ai) { $('#gwres').innerHTML = '<div class="err">Choose two different sequences.</div>'; return; }
-      try {
-        res = CLONE.gateway(S.docs[di], S.docs[ai], { name: `${S.docs[ai].name}-${S.docs[di].name}`, byName: 'By-product' });
-        const warn = res.junctions.filter(j => !j.startsWith('attB')).length;
-        $('#gwres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Features</th><th></th></tr></thead><tbody>
-          <tr><td><b>Recombination product</b></td><td>${fmt(res.product.seq.length)} bp</td><td>${res.product.features.length}</td><td><button class="ib" data-mk="p">Create</button></td></tr>
-          <tr><td>By-product</td><td>${fmt(res.byproduct.seq.length)} bp</td><td>${res.byproduct.features.length}</td><td><button class="ib" data-mk="b">Create</button></td></tr>
-          </tbody></table><div class="hint">Transferred segment: ${fmt(res.insertSize)} bp. Junctions read as ${esc(res.junctions.join(' and '))}.${warn ? ' A junction that is not a full attB site usually means the att sites are not the standard ones.' : ''}</div>`;
-      } catch (err) { $('#gwres').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
-    };
-    dialog({
-      title: 'Gateway Recombination', wide: true,
-      body: `<div class="form">
-        <label for="gwdon">Insert donor</label><select id="gwdon">${docOptions(di)}</select>
-        <label></label><div class="hint" id="gwd" style="margin:0"></div>
-        <label for="gwacc">Backbone</label><select id="gwacc">${docOptions(ai)}</select>
-        <label></label><div class="hint" id="gwa" style="margin:0"></div>
-        <div class="full hint">The stretch between the donor’s att1 and att2 sites replaces the stretch between the backbone’s own att sites. For an LR reaction the donor is the entry clone and the backbone is the destination vector; for BP, the donor carries the attB-flanked insert and the backbone is the donor vector.</div>
-        <div class="full" id="gwres"></div></div>`,
-      buttons: [{ label: 'Close' }, { label: 'Simulate Reaction', primary: true, act: () => { simulate(); return false; } }],
-      onOpen: box => {
-        refresh();
-        box.addEventListener('change', e => {
-          if (e.target.id === 'gwdon') di = +e.target.value;
-          else if (e.target.id === 'gwacc') ai = +e.target.value;
-          else return;
-          refresh();
-        });
-        box.addEventListener('click', e => {
-          const b = e.target.closest('[data-mk]'); if (!b || !res) return;
-          const p = b.dataset.mk === 'p' ? res.product : res.byproduct;
-          const don = S.docs[di], acc = S.docs[ai];
-          closeDialog();
-          addDoc({
-            ...p, histLabel: 'Gateway recombination',
-            provenance: {
-              method: 'Gateway recombination',
-              detail: `Junctions read as ${res.junctions.join(' and ')}; ${fmt(res.insertSize)} bp transferred`,
-              inputs: [
-                { name: don.name, seq: don.seq, circular: don.circular, features: don.features, detail: 'Insert donor' },
-                { name: acc.name, seq: acc.seq, circular: acc.circular, features: acc.features, detail: 'Backbone' }
-              ]
-            }
-          });
-          toast(`Created ${fmt(p.seq.length)} bp construct`);
-        });
-      }
-    });
-  }
-
   function showAttSites() {
     const d = D(), sites = CLONE.findAtt(d.seq, d.circular);
     if (!sites.length) { toast('No att sites found in this sequence.'); return; }
@@ -6365,73 +6146,6 @@ svg .prim { cursor: pointer; }
     }
     commit(d, `Marked ${sites.length} att site${sites.length > 1 ? 's' : ''}`); renderAll(true);
     toast(sites.map(s => s.label).join(', '));
-  }
-
-  // ================================================================ Golden Gate
-  function dlgGoldenGate() {
-    let enzyme = 'BsaI';
-    let picked = S.docs.map((_, i) => i === S.active);
-    let result = null;
-    const describe = (d, enz) => {
-      const n = (DNA.findSites(d.seq, d.circular)[enz] || []).length;
-      let frags = [];
-      try { frags = CLONE.ggFragments(d, enz); } catch (e) { frags = []; }
-      if (!n) return `<span style="color:var(--danger)">no ${enz} site</span>`;
-      if (!frags.length) return `<span style="color:var(--danger)">${n} ${enz} site${n > 1 ? 's' : ''}, but no site-free fragment</span>`;
-      const f = frags.slice().sort((a, b) => b.size - a.size)[0];
-      const inner = n > 2 ? ` <span style="color:var(--danger)">— ${n - 2} site${n - 2 > 1 ? 's' : ''} inside the part</span>` : '';
-      return `${n} ${enz} site${n > 1 ? 's' : ''} → part of ${fmt(f.size)} bp, overhangs <span class="mono">${esc(f.left.x)}</span> / <span class="mono">${esc(f.right.x)}</span>${inner}`;
-    };
-    const refreshList = () => {
-      $('#ggp').innerHTML = S.docs.map((d, i) => `<label><input type="checkbox" value="${i}" ${picked[i] ? 'checked' : ''}> <b>${esc(d.name)}</b> — ${describe(d, enzyme)}</label>`).join('');
-    };
-    const simulate = () => {
-      const idx = picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
-      if (idx.length < 2) { $('#ggres').innerHTML = '<div class="err">Choose at least two parts.</div>'; return; }
-      try {
-        result = CLONE.goldenGate(idx.map(i => ({ doc: S.docs[i] })), enzyme, { name: 'Golden Gate product' });
-      } catch (err) { $('#ggres').innerHTML = `<div class="err">${esc(err.message)}</div>`; return; }
-      const warn = [];
-      if (result.duplicateOverhangs.length) warn.push(`Two parts end in the same overhang (${esc(result.duplicateOverhangs.join(', '))}), so the order is ambiguous.`);
-      warn.push(...result.notes);
-      if (!result.products.length) {
-        $('#ggres').innerHTML = `<div class="err">The parts do not form a circle. Their overhangs are ${result.parts.map(f => esc(f.left.x + '…' + f.right.x)).join(', ')}. Each part's right overhang must match the next part's left overhang.</div>`;
-        return;
-      }
-      $('#ggres').innerHTML = `<table class="grid"><thead><tr><th>Product</th><th>Size</th><th>Junction overhangs</th><th>${esc(enzyme)} sites left</th><th></th></tr></thead><tbody>${result.products.map((p, k) => `<tr><td>${k + 1}</td><td><b>${fmt(p.size)} bp</b></td><td class="mono">${p.overhangs.map(esc).join(' · ')}</td><td>${p.leftover === 0 ? '<span style="color:#1a7f37">none</span>' : `<span style="color:var(--danger)">${p.leftover}</span>`}</td><td><button class="ib" data-mk="${k}">Create</button></td></tr>`).join('')}</tbody></table>
-        ${warn.length ? `<div class="hint" style="color:var(--danger)">${warn.map(esc).join('<br>')}</div>` : ''}
-        <div class="hint">A finished Golden Gate product keeps no ${esc(enzyme)} site, because both sites are carried away on the discarded ends.</div>`;
-    };
-    dialog({
-      title: 'Golden Gate Assembly', wide: true,
-      body: `<div class="form">
-        <label for="ggenz">Enzyme</label><select id="ggenz">${CLONE.TYPE2S.map(e => `<option ${e === enzyme ? 'selected' : ''}>${e}</option>`).join('')}</select>
-        <label>Parts</label><div class="enz-pick" id="ggp" style="columns:1;max-height:180px"></div>
-        <div class="full hint">Each part needs two inward-facing ${esc(enzyme)} sites. The piece between them carries no site of its own and is what goes into the product; the overhangs decide the order.</div>
-        <div class="full" id="ggres"></div></div>`,
-      buttons: [{ label: 'Close' }, { label: 'Simulate Assembly', primary: true, act: () => { simulate(); return false; } }],
-      onOpen: box => {
-        refreshList();
-        box.addEventListener('change', e => {
-          if (e.target.id === 'ggenz') { enzyme = e.target.value; refreshList(); $('#ggres').innerHTML = ''; }
-          else if (e.target.closest('#ggp')) picked = S.docs.map((_, i) => { const el = box.querySelector(`#ggp input[value="${i}"]`); return !!(el && el.checked); });
-        });
-        box.addEventListener('click', e => {
-          const b = e.target.closest('[data-mk]'); if (!b || !result) return;
-          const p = result.products[+b.dataset.mk];
-          closeDialog();
-          addDoc({
-            ...p.doc, histLabel: `Golden Gate with ${enzyme}`,
-            provenance: {
-              method: `Golden Gate assembly (${enzyme})`,
-              detail: 'Junction overhangs ' + p.overhangs.join(' · '),
-              inputs: p.chain.map(f => pieceOfFrag(f, `Overhangs ${f.left.x} … ${f.right.x}`))
-            }
-          });
-          toast(`Created ${fmt(p.size)} bp construct`);
-        });
-      }
-    });
   }
 
   // ================================================================ cloning window
@@ -6528,7 +6242,7 @@ svg .prim { cursor: pointer; }
       docs: () => S.docs.filter(isNuc),
       current: D() ? D().id : null,
       addDoc: src => addDoc(src),
-      toast, dialog, standalone: false
+      toast, dialog, copy: (t, m) => copyText(t, m), standalone: false
     });
   }
 

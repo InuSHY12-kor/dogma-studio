@@ -54,7 +54,7 @@
 
   function mount(payload) {
     DOCS = payload.docs || [];
-    document.title = (payload.method === 'restriction' ? 'Restriction Cloning' : (payload.method === 'infusion' ? 'In-Fusion Cloning' : 'Gibson Assembly')) + ' — GeneCanvas';
+    document.title = 'Cloning — GeneCanvas';
     window.ASMUI.open(payload.method || 'gibson', {
       standalone: true,
       docs: () => DOCS,
@@ -64,6 +64,9 @@
         toast(`Sent ${Number(src.seq.length).toLocaleString('en-US')} bp to the main window`);
       },
       toast, dialog,
+      copy: (text, msg) => {
+        navigator.clipboard.writeText(text).then(() => toast(msg || 'Copied')).catch(() => toast('Could not copy'));
+      },
       onClose: () => { if (host && host.closeSelf) host.closeSelf(); }
     });
   }
