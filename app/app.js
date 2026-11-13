@@ -31,6 +31,10 @@ svg .lbl { font: 11px var(--f-ui); fill: var(--ink); cursor: pointer; }
 svg .lbl.e { fill: #3a3f4b; }
 svg .lbl.e.u { font-weight: 600; }
 svg .intron { fill: none; stroke: #8d95a3; stroke-width: 1.4px; stroke-dasharray: 5 4; }
+svg .gcbg { fill: #f4f6f8; }
+svg .gcline { fill: none; stroke: #45506280; stroke-width: 1px; }
+svg .gcmid { stroke: #9aa2ae; stroke-width: 1px; stroke-dasharray: 4 3; }
+svg .gcax { font-size: 9px; fill: #8d95a3; }
 svg .cleave { stroke: #11306e; stroke-width: 1.6px; }
 svg .lbl.e.hl { fill: #6b4b00; font-weight: 700; paint-order: stroke; stroke: #ffd24d; stroke-width: 7px; stroke-linejoin: round; }
 svg .lbl.f { font-weight: 600; }
@@ -338,7 +342,7 @@ svg .prim { cursor: pointer; }
 
   // ---------------------------------------------------------------- render orchestration
   function renderAll(keepScroll) {
-    renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderStatus();
+    renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderCompanion(); renderStatus();
     if (host && host.assemblySync) { try { host.assemblySync(asmDocSnapshot()); } catch (e) { } }
     document.title = D() ? `${D().name}${D().dirty ? ' •' : ''} — GeneCanvas` : 'GeneCanvas';
   }
@@ -346,6 +350,7 @@ svg .prim { cursor: pointer; }
     if (S.view === 'map') drawSelLayer();
     else if (S.view === 'seq') { updateSeqSel(); if (scroll) scrollSeqTo(D().sel.start); }
     else if (S.view === 'enz' || S.view === 'feat' || S.view === 'primer') { /* tables don't show selection */ }
+    if (S.split) drawCompanionSel();
     renderSide(); renderStatus();
   }
 
@@ -458,6 +463,8 @@ svg .prim { cursor: pointer; }
           { label: 'Fixed Line Width…', chk: has && !!d.opts.lineWidth, dis: !has, act: dlgLineWidth }
         ] },
         { label: 'Show Minimap', chk: has && d.opts.showMinimap, dis: !has, act: () => setOpt('showMinimap', !d.opts.showMinimap) },
+        { label: 'Show GC Content Plot', chk: has && d.opts.showGC, dis: !has, act: () => setOpt('showGC', !d.opts.showGC) },
+        { label: 'GC Content Plot…', dis: !has, act: dlgGCRange },
         { label: 'Show Locations', chk: has && d.opts.showLocations !== false, dis: !has, act: () => setOpt('showLocations', d.opts.showLocations === false) },
         '-',
         { label: 'Set Origin…', dis: !has, act: dlgSetOrigin },
@@ -474,6 +481,25 @@ svg .prim { cursor: pointer; }
         '-',
         { label: 'Focus on Region', key: 'Ctrl+Alt+Z', chk: has && !!focusOf(d), dis: !has, act: focusOnSelection },
         { label: 'Zoom Controls', key: 'Ctrl+Alt++', chk: !!S.zoomCtl, dis: !has, act: () => { S.zoomCtl = !S.zoomCtl; renderView(true); } },
+        '-',
+        { label: 'Split Window', items: [
+          { label: 'Side by Side', chk: S.split === 'v', dis: !has, act: () => { S.split = S.split === 'v' ? null : 'v'; renderAll(true); } },
+          { label: 'Top and Bottom', chk: S.split === 'h', dis: !has, act: () => { S.split = S.split === 'h' ? null : 'h'; renderAll(true); } },
+          '-',
+          { label: 'No Split', chk: !S.split, dis: !has, act: () => { S.split = null; renderAll(true); } }
+        ] },
+        { label: 'Rotate Map…', key: 'Ctrl+Alt+R', dis: !has || !d.circular, act: dlgRotateMap },
+        '-',
+        { label: 'Toolbar', items: [
+          { label: 'Show Side Panel', chk: !S.sideHidden, act: () => { S.sideHidden = !S.sideHidden; renderAll(); } },
+          { label: 'Show Top Toolbar', chk: !S.toolbarHidden, act: () => { S.toolbarHidden = !S.toolbarHidden; applyChrome(); } },
+          '-',
+          { label: 'Icons and Text', chk: (SET.toolbarStyle || 'both') === 'both', act: () => { SET.toolbarStyle = 'both'; saveSettings(); applyChrome(); } },
+          { label: 'Icons Only', chk: SET.toolbarStyle === 'icons', act: () => { SET.toolbarStyle = 'icons'; saveSettings(); applyChrome(); } },
+          { label: 'Text Only', chk: SET.toolbarStyle === 'text', act: () => { SET.toolbarStyle = 'text'; saveSettings(); applyChrome(); } },
+          { label: 'Use Small Size', chk: !!SET.toolbarSmall, act: () => { SET.toolbarSmall = !SET.toolbarSmall; saveSettings(); applyChrome(); } }
+        ] },
+        { label: 'Font Size', items: FONT_SIZES.map(px => ({ label: px + ' px', chk: (SET.fontSize || 13) === px, act: () => setFontSize(px) })) },
         '-',
         { label: 'Show Side Panel', chk: !S.sideHidden, act: () => { S.sideHidden = !S.sideHidden; renderAll(); } },
         { label: 'Zoom In', key: 'Ctrl++', dis: !has, act: () => zoom(1.25) },
@@ -582,6 +608,8 @@ svg .prim { cursor: pointer; }
         { label: 'Design PCR Primers…', dis: !has, act: dlgDesignPCR },
         { label: 'Design Sequencing Primers…', dis: !has, act: dlgDesignWalk },
         { label: 'Design Mutagenesis Primers…', dis: !has || !sl, act: dlgDesignMut },
+        '-',
+        { label: 'Show DNA Calculations…', dis: !has, act: dlgCalculations },
         '-',
         { label: 'Letter Codes', act: dlgLetterCodes },
         { label: 'Genetic Code Tables', act: dlgGeneticCodes },
@@ -901,6 +929,116 @@ svg .prim { cursor: pointer; }
     st.innerHTML = `<span><b>${esc(d.name)}</b> &nbsp; ${fmt(n)} bp &nbsp; ${d.circular ? 'circular' : 'linear'}</span><span>${sel}</span><span class="r">${S.view === 'seq' ? 'Type A/C/G/T to edit · Shift+arrows extend' : ''}</span>`;
   }
 
+  // ---------------------------------------------------------------- split window
+  /* A second pane beside or under the main one, showing the map while the main pane
+   * shows whatever view is chosen. Both are live: the companion is redrawn on every
+   * change and clicking in either pane moves the selection in both. The companion is
+   * drawn from the same map code, with its own geometry, so the two never fight over
+   * the interactive state the main pane owns. */
+  function renderCompanion() {
+    const pane = $('#view2'), sp = $('#splitter'), main = document.querySelector('.main');
+    if (!pane) return;
+    const d = D();
+    const on = !!S.split && d && isNuc(d);
+    pane.hidden = !on; sp.hidden = !on;
+    main.classList.toggle('split-v', S.split === 'v');
+    main.classList.toggle('split-h', S.split === 'h');
+    if (!on) { pane.innerHTML = ''; S.mapGeom2 = null; return; }
+    const size = S.splitSize || 38;
+    pane.style.flexBasis = size + '%';
+    pane.style.width = ''; pane.style.height = '';
+    const mode = S.view2Mode || (d.opts.mapMode === 'circular' ? 'circular' : 'linear');
+    pane.innerHTML = `<div class="cmphead">
+        <b>Map</b>
+        <button class="ib${mode === 'circular' ? ' on' : ''}" data-c2="circular">Circular</button>
+        <button class="ib${mode === 'linear' ? ' on' : ''}" data-c2="linear">Linear</button>
+        <span style="flex:1"></span>
+        <button class="ib" data-c2="swap" title="Swap the panes">\u21c4</button>
+        <button class="ib" data-c2="close" title="Close the split">\u2715</button>
+      </div><div class="cmpbody" id="cmpbody"></div>`;
+    const body = pane.querySelector('#cmpbody');
+    const W = Math.max(320, body.clientWidth || pane.clientWidth || 420);
+    const H = Math.max(260, body.clientHeight || pane.clientHeight || 320);
+    // draw with the companion's own geometry, then take it out of the shared slot
+    const keep = S.mapGeom;
+    const A = analyze(d);
+    const svg = mode === 'circular' && !focusOf(d) ? drawCircular(d, A, W, H) : drawLinear(d, A, W);
+    S.mapGeom2 = S.mapGeom; S.mapGeom = keep;
+    body.innerHTML = svg.replace('id="sellayer"', 'id="sellayer2"');
+    drawCompanionSel();
+    const el = body.querySelector('svg');
+    if (el) {
+      const toBp = e => {
+        const pt = el.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+        const q = pt.matrixTransform(el.getScreenCTM().inverse());
+        const G = S.mapGeom2, n = d.seq.length;
+        if (!G) return 0;
+        if (G.type === 'c') {
+          let a = Math.atan2(q.y - G.cy, q.x - G.cx) + Math.PI / 2 - (G.rot || 0);
+          a = ((a % TAU) + TAU) % TAU;
+          return Math.round(a / TAU * n) % n;
+        }
+        const span = G.vLen || n, base = G.v0 || 0;
+        const rel = Math.round((q.x - G.m) / G.w * span);
+        return ((base + Math.max(0, Math.min(span, rel))) % n + n) % n;
+      };
+      let drag = null;
+      el.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const k = e.target.getAttribute && e.target.getAttribute('data-k');
+        if (k) { clickItem(k, e); return; }
+        e.preventDefault();
+        const bp = toBp(e);
+        drag = { anchor: bp };
+        setSel(bp, bp, { anchor: bp });
+      });
+      el.addEventListener('mousemove', e => { if (drag) setSel(Math.min(drag.anchor, toBp(e)), Math.max(drag.anchor, toBp(e)), { anchor: drag.anchor }); });
+      window.addEventListener('mouseup', () => { drag = null; });
+      el.addEventListener('dblclick', e => {
+        const k = e.target.getAttribute && e.target.getAttribute('data-k');
+        if (k && k.startsWith('f:')) { const it = findItem(D(), k); if (it) dlgFeature(it.ref); }
+      });
+    }
+    pane.querySelector('.cmphead').onclick = e => {
+      const b = e.target.closest('[data-c2]'); if (!b) return;
+      const a = b.dataset.c2;
+      if (a === 'close') { S.split = null; renderAll(true); return; }
+      if (a === 'swap') { S.split = S.split === 'v' ? 'h' : 'v'; renderAll(true); return; }
+      S.view2Mode = a; renderCompanion();
+    };
+    bindSplitter();
+  }
+  // The companion keeps its own selection layer, painted whenever the selection moves.
+  function drawCompanionSel() {
+    const layer = document.getElementById('sellayer2'), G = S.mapGeom2, d = D();
+    if (!layer || !G || !d) return;
+    const keep = S.mapGeom;
+    S.mapGeom = G;
+    const inner = document.getElementById('sellayer');
+    // reuse the normal painter by borrowing the id for a moment
+    layer.id = 'sellayer';
+    try { drawSelLayer(); } finally { layer.id = 'sellayer2'; if (inner) inner.id = 'sellayer'; S.mapGeom = keep; }
+  }
+  function bindSplitter() {
+    const sp = $('#splitter'); if (!sp || sp.__bound) return;
+    sp.__bound = true;
+    sp.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const main = document.querySelector('.main');
+      const move = ev => {
+        const r = main.getBoundingClientRect();
+        const pct = S.split === 'h'
+          ? (1 - (ev.clientY - r.top) / r.height) * 100
+          : (1 - (ev.clientX - r.left) / r.width) * 100;
+        S.splitSize = Math.max(15, Math.min(70, pct));
+        const pane = $('#view2'); if (pane) pane.style.flexBasis = S.splitSize + '%';
+      };
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); renderCompanion(); };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+  }
+
   // ---------------------------------------------------------------- main view dispatcher
   function renderView(keepScroll) {
     const v = $('#view'), d = D();
@@ -1089,6 +1227,160 @@ svg .prim { cursor: pointer; }
   });
   window.addEventListener('mouseup', () => { if (focusDrag) { focusDrag = null; renderAll(true); } });
 
+  // Applies the chrome settings: whether the top toolbar is shown, how its buttons are
+  // labelled, and the font size, all of which are remembered with the program.
+  function applyChrome() {
+    const tb = $('#toolbar');
+    if (tb) {
+      tb.hidden = !!S.toolbarHidden;
+      tb.classList.toggle('icons-only', SET.toolbarStyle === 'icons');
+      tb.classList.toggle('text-only', SET.toolbarStyle === 'text');
+      tb.classList.toggle('small', !!SET.toolbarSmall);
+    }
+    if (SET.fontSize) document.body.style.fontSize = SET.fontSize + 'px';
+    renderMenuState();
+  }
+
+  function dlgRotateMap() {
+    const d = D();
+    if (!d.circular) { toast('Only a circular map can be rotated.'); return; }
+    const start = d.opts.mapRotate || 0;
+    dialog({
+      title: 'Rotate Map',
+      body: `<div class="form">
+        <label for="rmA">Rotation</label><div class="row2"><input type="range" id="rmR" min="0" max="359.9" step="0.1" value="${start}" style="flex:1">
+          <input type="number" id="rmA" min="0" max="359.9" step="0.1" value="${start}" style="width:90px"> °</div>
+        <div class="full hint">Zero puts base 1 at the top. The sequence itself is not changed; use Actions › Set Origin to move base 1.</div></div>`,
+      buttons: [{ label: 'Cancel', act: () => { d.opts.mapRotate = start; renderAll(true); } },
+      { label: 'OK', primary: true, act: () => { } }],
+      onOpen: box => {
+        const r = box.querySelector('#rmR'), a = box.querySelector('#rmA');
+        const apply = v => { d.opts.mapRotate = Math.max(0, Math.min(359.9, v)) % 360; renderView(true); };
+        r.oninput = () => { a.value = r.value; apply(parseFloat(r.value)); };
+        a.oninput = () => { r.value = a.value; apply(parseFloat(a.value)); };
+      }
+    });
+  }
+  // Font size: scales every view, since feature widths follow the label size.
+  const FONT_SIZES = [11, 12, 13, 14, 16, 18];
+  function setFontSize(px) {
+    SET.fontSize = px;
+    document.documentElement.style.setProperty('--ui-size', px + 'px');
+    document.body.style.fontSize = px + 'px';
+    saveSettings();
+    measureCW();
+    renderAll(true);
+    toast('Font size ' + px + ' px');
+  }
+
+  // ================================================================ DNA / RNA CALCULATIONS
+  /* Molecular weight, mass, composition, concentration and copy number, for the whole
+   * sequence and for the selection. The weights come from the average masses of the
+   * nucleotides; an ambiguity code counts as the mean of the bases it stands for. */
+  function dlgCalculations() {
+    const d = D(), n = d.seq.length, rna = isRNA(d);
+    let ends = d.circular ? 'circular' : 'unphosphorylated';
+    let conc = 50, concUnit = 'ng';
+    const block = (seq, label, circular) => {
+      const ss = DNA.strandMW(seq, { rna, ends: circular ? 'circular' : ends });
+      const ssRC = rna ? null : DNA.strandMW(DNA.rc(seq), { rna, ends: circular ? 'circular' : ends });
+      const ds = rna ? null : ss + ssRC;
+      const comp = DNA.composition(seq);
+      const gc = DNA.gcPct(seq);
+      const mw = rna ? ss : ds;
+      // pmol per µg, and molecules per ng
+      const pmolPerUg = 1e6 / mw;
+      const moleculesPerNg = 1e-9 / mw * 6.02214076e23;
+      return `<h4>${esc(label)}</h4>
+        <table class="grid" style="width:auto"><tbody>
+          <tr><td>Length</td><td><b>${fmt(seq.length)}</b> ${rna ? 'nt' : 'bp'}${circular ? ' · circular' : ''}</td></tr>
+          <tr><td>${rna ? 'Molecular weight' : 'Molecular weight (double-stranded)'}</td><td><b>${fmt(Math.round(mw))}</b> Da = ${(mw / 1000).toFixed(2)} kDa</td></tr>
+          ${rna ? '' : `<tr><td>Single strands</td><td>top ${fmt(Math.round(ss))} Da · bottom ${fmt(Math.round(ssRC))} Da</td></tr>`}
+          <tr><td>Composition</td><td class="mono">A ${fmt(comp.A)} · C ${fmt(comp.C)} · G ${fmt(comp.G)} · ${rna ? 'U' : 'T'} ${fmt(comp.T)}${comp.other ? ` · other ${fmt(comp.other)}` : ''}</td></tr>
+          <tr><td>GC content</td><td><b>${gc.toFixed(1)} %</b></td></tr>
+          <tr><td>Amount per µg</td><td><b>${pmolPerUg.toFixed(3)}</b> pmol</td></tr>
+          <tr><td>Molecules per ng</td><td><b>${moleculesPerNg.toExponential(3)}</b></td></tr>
+          <tr><td>At ${conc} ${concUnit}/µL</td><td>${concLine(mw, conc, concUnit)}</td></tr>
+        </tbody></table>`;
+    };
+    const concLine = (mw, c, unit) => {
+      // convert the entered concentration to both mass and molar terms
+      let ngPerUl;
+      if (unit === 'ng') ngPerUl = c;
+      else if (unit === 'ug') ngPerUl = c * 1000;
+      else if (unit === 'nM') ngPerUl = c * 1e-9 * mw * 1e-6 * 1e9;   // nmol/L -> ng/µL
+      else ngPerUl = c;
+      // 1 ng/µL is 1e-3 g/L, so mol/L = ngPerUl * 1e-3 / mw and nM is that times 1e9
+      const nM = ngPerUl * 1e6 / mw;
+      const molecules = ngPerUl * 1e-9 / mw * 6.02214076e23;
+      return `<b>${ngPerUl.toFixed(2)}</b> ng/µL = <b>${nM.toFixed(2)}</b> nM = ${molecules.toExponential(2)} molecules/µL`;
+    };
+    const render = () => {
+      const sel = selLen(d) ? selSeq(d) : null;
+      $('#calcBody').innerHTML = block(d.seq, d.name + ' — whole sequence', d.circular)
+        + (sel ? block(sel, `Selection ${fmt(d.sel.start + 1)}–${fmt(d.sel.end || n)}`, false)
+          : '<div class="hint">Select a region to see the same figures for it.</div>');
+    };
+    dialog({
+      title: rna ? 'RNA Calculations' : 'DNA Calculations', wide: true,
+      body: `<div class="ecbar">
+          <label class="inl">Ends <select id="calcEnds" ${d.circular ? 'disabled' : ''}>
+            <option value="unphosphorylated">unphosphorylated</option>
+            <option value="phosphorylated">5′ phosphorylated</option>
+          </select></label>
+          <label class="inl">Concentration <input type="number" id="calcC" value="50" step="any" style="width:80px">
+            <select id="calcU"><option value="ng">ng/µL</option><option value="ug">µg/µL</option><option value="nM">nM</option></select></label>
+        </div>
+        <div class="tscroll" style="max-height:56vh;padding:4px 8px" id="calcBody"></div>
+        <div class="hint">Weights are the average masses of the nucleotides, with one water lost at each bond; a circular molecule loses one more and has no free end. A degenerate position counts as the mean of the bases it stands for. ${d.circular ? 'This molecule is circular, so the ends setting does not apply.' : ''}</div>`,
+      buttons: [{ label: 'Copy', act: () => { copyText($('#calcBody').innerText, 'Calculations copied'); return false; } }, { label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#calcEnds').onchange = e => { ends = e.target.value; render(); };
+        box.querySelector('#calcC').oninput = e => { conc = parseFloat(e.target.value) || 0; render(); };
+        box.querySelector('#calcU').onchange = e => { concUnit = e.target.value; render(); };
+      }
+    });
+  }
+
+  // ================================================================ GC CONTENT PLOT
+  // The curve is cached per document, since it only changes when the sequence does.
+  function gcData(d) {
+    if (d._gc && d._gc.ver === d.ver && d._gc.win === (d.opts.gcWindow || 25)) return d._gc;
+    const win = d.opts.gcWindow || 25;
+    const vals = DNA.gcCurve(d.seq, win, d.circular);
+    let lo = 100, hi = 0, sum = 0;
+    for (const v of vals) { if (v < lo) lo = v; if (v > hi) hi = v; sum += v; }
+    d._gc = { ver: d.ver, win, vals, lo, hi, mean: vals.length ? sum / vals.length : 0 };
+    return d._gc;
+  }
+  function dlgGCRange() {
+    const d = D(), g = gcData(d), o = d.opts;
+    dialog({
+      title: 'GC Content Plot',
+      body: `<div class="form">
+        <label for="gcW">Window</label><div class="row2"><input type="number" id="gcW" value="${o.gcWindow || 25}" min="5" max="500" step="2" style="width:80px"> bases</div>
+        <label for="gcMin">Axis minimum</label><div class="row2"><input type="number" id="gcMin" value="${o.gcMin == null ? Math.floor(g.lo) : o.gcMin}" min="0" max="100" style="width:80px"> %</div>
+        <label for="gcMax">Axis maximum</label><div class="row2"><input type="number" id="gcMax" value="${o.gcMax == null ? Math.ceil(g.hi) : o.gcMax}" min="0" max="100" style="width:80px"> %</div>
+        <label for="gcMid">Colour midpoint</label><div class="row2"><input type="number" id="gcMid" value="${o.gcMid == null ? g.mean.toFixed(1) : o.gcMid}" min="0" max="100" step="0.1" style="width:80px"> %</div>
+        <label></label><label><input type="checkbox" id="gcPlain" ${o.gcPlain ? 'checked' : ''}> Plain graph, no colours</label>
+        <div class="full note">This sequence runs from ${g.lo.toFixed(1)} % to ${g.hi.toFixed(1)} %, averaging ${g.mean.toFixed(1)} %.</div>
+        <div class="full hint">Above the midpoint is drawn red and below it blue, so GC-rich and AT-rich stretches stand apart.</div></div>`,
+      buttons: [{ label: 'Reset', act: () => { o.gcWindow = 25; o.gcMin = null; o.gcMax = null; o.gcMid = null; d._gc = null; renderAll(true); } },
+      { label: 'Cancel' },
+      { label: 'OK', primary: true, act: () => {
+        o.gcWindow = Math.max(5, Math.min(500, parseInt(val('gcW'), 10) || 25));
+        o.gcMin = Math.max(0, Math.min(100, parseFloat(val('gcMin'))));
+        o.gcMax = Math.max(0, Math.min(100, parseFloat(val('gcMax'))));
+        if (o.gcMax <= o.gcMin) { o.gcMin = null; o.gcMax = null; }
+        o.gcMid = Math.max(0, Math.min(100, parseFloat(val('gcMid'))));
+        o.gcPlain = $('#gcPlain').checked;
+        d._gc = null;
+        renderAll(true);
+      } }]
+    });
+  }
+
   // ================================================================ MAP VIEW
   // Where the middle of the window sits, as a fraction of the whole drawing, so the same
   // place stays in view when the drawing is redrawn at another size.
@@ -1208,7 +1500,8 @@ svg .prim { cursor: pointer; }
     const laneW = 14, laneGap = 5;
     const pBand = nP ? nP * 9 + 8 : 0;
     const R = Math.max(70, Math.min(W / 2 - 175, H / 2 - 60) - pBand);
-    const ang = bp => bp / n * TAU - Math.PI / 2;
+    const rot = (o.mapRotate || 0) / 360 * TAU;
+    const ang = bp => bp / n * TAU - Math.PI / 2 + rot;
     const P = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
     const fmtP = p => p[0].toFixed(1) + ',' + p[1].toFixed(1);
     const fR = k => R - k * (laneW + laneGap);
@@ -1229,10 +1522,28 @@ svg .prim { cursor: pointer; }
       g.push(`<line class="tick" x1="${fmtP(P(tr, a)).replace(',', '" y1="')}" x2="${fmtP(P(tr - 5, a)).replace(',', '" y2="')}"/>`);
       if (tr > 70) { const q = P(tr - 15, a); g.push(`<text class="tickl" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" text-anchor="middle" dy=".35em">${fmt(t)}</text>`); }
     }
+    if (o.showGC) {
+      const gd = gcData(d), band = 26;
+      const r1 = Math.max(24, innerAll - 6), r0 = Math.max(12, r1 - band);
+      const lo = o.gcMin == null ? Math.floor(gd.lo) : o.gcMin, hi = o.gcMax == null ? Math.ceil(gd.hi) : o.gcMax;
+      const mid = o.gcMid == null ? gd.mean : o.gcMid;
+      const rv = v2 => r0 + (Math.max(lo, Math.min(hi, v2)) - lo) / Math.max(1e-6, hi - lo) * band;
+      const step = Math.max(1, Math.round(n / 720));
+      let pts = '';
+      for (let i = 0; i < n; i += step) {
+        const q = P(rv(gd.vals[i] || 0), ang(i));
+        pts += (pts ? 'L' : 'M') + q[0].toFixed(1) + ',' + q[1].toFixed(1);
+      }
+      pts += 'Z';
+      g.push(`<g class="gcplot"><circle class="gcmid" cx="${cx}" cy="${cy}" r="${rv(mid).toFixed(1)}" fill="none"/>
+        <path class="gcline" d="${pts}" fill="${o.gcPlain ? 'none' : 'rgba(37,99,201,.12)'}"/>
+        <title>GC content, ${gd.win} base window · ${lo}–${hi}%, midpoint ${mid.toFixed(1)}%</title></g>`);
+    }
     // backbone
     g.push(`<circle class="bb" cx="${cx}" cy="${cy}" r="${R - 2}"/><circle class="bb" cx="${cx}" cy="${cy}" r="${R + 2}"/>`);
     // origin mark
-    g.push(`<line class="ecut" x1="${cx}" y1="${cy - R - 6}" x2="${cx}" y2="${cy - R + 6}" stroke-width="1.6"/>`);
+    { const o1 = P(R + 6, ang(0)), o2 = P(R - 6, ang(0));
+      g.push(`<line class="ecut" x1="${o1[0].toFixed(1)}" y1="${o1[1].toFixed(1)}" x2="${o2[0].toFixed(1)}" y2="${o2[1].toFixed(1)}" stroke-width="1.6"/>`); }
 
     const labels = [];
     // arrows
@@ -1331,7 +1642,7 @@ svg .prim { cursor: pointer; }
     }
     // center
     g.push(`<text class="ctr1" x="${cx}" y="${cy - 4}" text-anchor="middle">${esc(d.name)}</text><text class="ctr2" x="${cx}" y="${cy + 16}" text-anchor="middle">${fmt(n)} bp</text>`);
-    S.mapGeom = { type: 'c', cx, cy, n, r1: Math.max(8, innerAll - 24), r2: Rl - 14, R, ang };
+    S.mapGeom = { type: 'c', cx, cy, n, r1: Math.max(8, innerAll - 24), r2: Rl - 14, R, ang, rot };
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><defs>${defs}</defs><rect width="${W}" height="${H}" style="fill:var(--canvas)" data-bg="1"/><g id="sellayer"></g>${g.join('')}</svg>`;
   }
 
@@ -1395,6 +1706,32 @@ svg .prim { cursor: pointer; }
       g.push(`<line class="lead" x1="${l.x.toFixed(1)}" y1="${baseY - 7}" x2="${l.x.toFixed(1)}" y2="${y + 4}"/>`);
       g.push(`<text class="lbl e${l.u ? ' u' : ''}${l.hl ? ' hl' : ''}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}">${esc(l.text)}</text>`);
       g.push(`<line class="ecut" x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
+    }
+    if (o.showGC) {
+      const gd = gcData(d), H2 = 34;
+      const lo = o.gcMin == null ? Math.floor(gd.lo) : o.gcMin, hi = o.gcMax == null ? Math.ceil(gd.hi) : o.gcMax;
+      const mid = o.gcMid == null ? gd.mean : o.gcMid;
+      const yTop = baseY - 14 - H2;
+      const yv = v2 => yTop + H2 - (Math.max(lo, Math.min(hi, v2)) - lo) / Math.max(1e-6, hi - lo) * H2;
+      const step = Math.max(1, Math.round(vLen / Math.max(60, w)));
+      let above = '', below = '', line = '';
+      for (let k = 0; k < vLen; k += step) {
+        const pos = fo ? (v0 + k) % n : k;
+        const v2 = gd.vals[pos] || 0, x = X(fo ? v0 + k : k).toFixed(1), yy = yv(v2).toFixed(1);
+        line += (line ? 'L' : 'M') + x + ',' + yy;
+        if (!o.gcPlain) {
+          const ym = yv(mid).toFixed(1);
+          if (v2 >= mid) above += `<rect x="${x}" y="${yy}" width="${Math.max(1, w / (vLen / step))}" height="${Math.max(0.5, ym - yy)}"/>`;
+          else below += `<rect x="${x}" y="${ym}" width="${Math.max(1, w / (vLen / step))}" height="${Math.max(0.5, yy - ym)}"/>`;
+        }
+      }
+      g.push(`<g class="gcplot"><rect class="gcbg" x="${m}" y="${yTop}" width="${w}" height="${H2}"/>
+        <g class="gchi" fill="#c43c3c">${above}</g><g class="gclo" fill="#2563c9">${below}</g>
+        <path class="gcline" d="${line}"/>
+        <line class="gcmid" x1="${m}" y1="${yv(mid).toFixed(1)}" x2="${m + w}" y2="${yv(mid).toFixed(1)}"/>
+        <text class="tickl gcax" x="${m - 4}" y="${(yTop + 8).toFixed(1)}" text-anchor="end">${hi}%</text>
+        <text class="tickl gcax" x="${m - 4}" y="${(yTop + H2).toFixed(1)}" text-anchor="end">${lo}%</text>
+        <title>GC content, ${gd.win} base window · midpoint ${mid.toFixed(1)}%</title></g>`);
     }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
     const step = niceStep(vLen / Math.max(4, Math.floor(w / 90)));
@@ -1485,7 +1822,8 @@ svg .prim { cursor: pointer; }
       const p = pt.matrixTransform(svg.getScreenCTM().inverse());
       const G = S.mapGeom, n = d.seq.length;
       if (G.type === 'c') {
-        let a = Math.atan2(p.y - G.cy, p.x - G.cx) + Math.PI / 2; if (a < 0) a += TAU;
+        let a = Math.atan2(p.y - G.cy, p.x - G.cx) + Math.PI / 2 - (G.rot || 0);
+        a = ((a % TAU) + TAU) % TAU;
         return Math.round(a / TAU * n) % n;
       }
       const span = G.vLen || n, base = G.v0 || 0;
@@ -6744,6 +7082,7 @@ svg .prim { cursor: pointer; }
     if (e.altKey && D() && isNuc(D())) {
       if (k === 'z' || k === '=') { e.preventDefault(); focusOnSelection(); return; }
       if (k === '+') { e.preventDefault(); S.zoomCtl = !S.zoomCtl; renderView(true); return; }
+      if (k === 'r' && D().circular) { e.preventDefault(); dlgRotateMap(); return; }
     }
     const map = {
       n: dlgNew, o: openFiles, s: () => saveDoc(e.shiftKey), w: () => D() && closeDoc(S.active), f: openFind, g: () => D() && dlgGoto(), k: () => D() && dlgFeature(null),
@@ -6800,6 +7139,7 @@ svg .prim { cursor: pointer; }
     addDoc(DNA.buildDemo());
     S.docs[0].dirty = false;
     renderAll();
+    applyChrome();
     if (host && host.ready) host.ready();
   }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(start); else start();

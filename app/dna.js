@@ -21,6 +21,65 @@
   function gcPct(s) { if (!s.length) return 0; let g = 0; for (const c of s) if (c === 'G' || c === 'C') g++; return g / s.length * 100; }
   function dsDnaMW(n) { return n * 617.96 + 36.04; }
 
+  /* ---------- Nucleotide masses and composition ----------
+   * Average monoisotopic-free (average) masses of the monophosphate nucleotides, less
+   * the water lost at each phosphodiester bond. An ambiguity code is counted as the
+   * mean of the bases it stands for, which is what the reference tool does.
+   * A 5'-phosphate adds HPO3 (79.98); an unphosphorylated 5' end has none. */
+  const NT_MW = { A: 331.22, C: 307.20, G: 347.22, T: 322.21, U: 324.18 };
+  const H2O = 18.02, HPO3 = 79.98;
+  const IUPAC_SETS = { R: 'AG', Y: 'CT', S: 'GC', W: 'AT', K: 'GT', M: 'AC', B: 'CGT', D: 'AGT', H: 'ACT', V: 'ACG', N: 'ACGT' };
+  function ntMW(ch, rna) {
+    if (NT_MW[ch] !== undefined) return rna && ch === 'T' ? NT_MW.U : NT_MW[ch];
+    const set = IUPAC_SETS[ch];
+    if (!set) return 0;
+    let t = 0;
+    for (const c of set) t += rna && c === 'T' ? NT_MW.U : NT_MW[c];
+    return t / set.length;
+  }
+  /* Molecular weight of a strand.
+   *   ends: 'phosphorylated' | 'unphosphorylated' | 'circular'
+   * A circular molecule loses one more water than a linear one, and carries no free end. */
+  function strandMW(seq, { rna = false, ends = 'unphosphorylated' } = {}) {
+    let t = 0;
+    for (const ch of seq) t += ntMW(ch, rna);
+    // each residue above is a monophosphate; joining n of them loses (n-1) waters
+    t -= H2O * Math.max(0, seq.length - 1);
+    if (ends === 'circular') t -= H2O;
+    else if (ends === 'unphosphorylated') t -= HPO3;      // the 5' phosphate is not there
+    return t;
+  }
+  function composition(seq) {
+    const out = { A: 0, C: 0, G: 0, T: 0, other: 0 };
+    for (const ch of seq) { if (out[ch] !== undefined) out[ch]++; else out.other++; }
+    return out;
+  }
+  /* %GC over a sliding window, which is what the GC content plot draws.
+   * A degenerate position counts as the fraction of its bases that are G or C. */
+  function gcCurve(seq, win = 25, circular = false) {
+    const n = seq.length;
+    if (!n) return [];
+    const frac = ch => {
+      if (ch === 'G' || ch === 'C' || ch === 'S') return 1;
+      if (ch === 'A' || ch === 'T' || ch === 'U' || ch === 'W') return 0;
+      const set = IUPAC_SETS[ch];
+      if (!set) return 0;
+      let g = 0; for (const c of set) if (c === 'G' || c === 'C') g++;
+      return g / set.length;
+    };
+    const w = Math.max(3, Math.min(win, n));
+    const half = Math.floor(w / 2);
+    const out = new Array(n);
+    let sum = 0;
+    const at = i => frac(seq[circular ? ((i % n) + n) % n : Math.max(0, Math.min(n - 1, i))]);
+    for (let i = -half; i < w - half; i++) sum += at(i);
+    for (let i = 0; i < n; i++) {
+      out[i] = sum / w * 100;
+      sum += at(i + w - half) - at(i - half);
+    }
+    return out;
+  }
+
   // ---------- Melting temperature (SantaLucia 1998 nearest neighbour) ----------
   const NN = { AA: [-7.9, -22.2], TT: [-7.9, -22.2], AT: [-7.2, -20.4], TA: [-7.2, -21.3], CA: [-8.5, -22.7], TG: [-8.5, -22.7], GT: [-8.4, -22.4], AC: [-8.4, -22.4], CT: [-7.8, -21.0], AG: [-7.8, -21.0], GA: [-8.2, -22.2], TC: [-8.2, -22.2], CG: [-10.6, -27.2], GC: [-9.8, -24.4], GG: [-8.0, -19.9], CC: [-8.0, -19.9] };
   function tm(s, na = 0.05, ct = 250e-9) {
@@ -838,6 +897,7 @@ ZraI GACGTC 3 3`;
   root.DNA = {
     COMP, clean, rc, comp, CODON, translate, AA3, proteinMW, gcPct, dsDnaMW, tm,
     GENETIC_CODES, CODE_LIST, featSegs, featLen, featCoding, featTranslate,
+    NT_MW, ntMW, strandMW, composition, gcCurve,
     ENZYMES, ENZ_BY_NAME, findSites, rlen, segs, sub, overlaps, findORFs, searchDNA, searchProtein,
     digest, detectCommon, COMMON, parseGenBank, parseFASTA, parseAny, parseDnaBinary, toGenBank, toFASTA, buildDemo
   };
