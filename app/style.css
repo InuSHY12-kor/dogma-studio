@@ -411,3 +411,15 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .grid tr.dimmed b { color: var(--faint); font-weight: 500; }
 .fdet { padding: 4px 2px 6px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .fdet b { font-weight: 600; }
+
+/* Reading-frame translation rows: forward orange, reverse green */
+.srow .aa.fr { font-weight: 500; }
+.srow .aa.fr.fwd { background: rgba(232, 163, 61, .20); color: #7a4e07; }
+.srow .aa.fr.rev { background: rgba(79, 168, 106, .20); color: #15572c; }
+.srow .aa.fr.st { background: rgba(196, 60, 60, .22); color: #8e1f1f; font-weight: 700; }
+.srow .frlbl { position: absolute; font: 10px/15px var(--f-ui); color: var(--faint); white-space: nowrap; }
+
+/* Genetic code tables */
+.codetbl td { font-size: 11.5px; white-space: nowrap; }
+.codetbl td.chg { background: #fff3d6; }
+.codetbl td.stopc { color: var(--danger); font-weight: 600; }

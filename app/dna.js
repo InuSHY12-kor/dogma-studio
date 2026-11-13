@@ -285,18 +285,24 @@ ZraI GACGTC 3 3`;
   }
 
   // ---------- ORFs ----------
-  function findORFs(seq, circular, minAA) {
+  function findORFs(seq, circular, minAA, opts) {
+    opts = opts || {};
+    const table = GENETIC_CODES[opts.code] || CODON;
+    const starts = opts.starts && opts.starts.length ? opts.starts : ['ATG'];
+    const anyStart = !!opts.anyStart;      // start at any sense codon after a stop
+    const strands = opts.strands === 'top' ? [1] : (opts.strands === 'bottom' ? [-1] : [1, -1]);
     const n = seq.length; if (n < 6) return [];
     const s = circular ? seq + seq : seq, m = s.length;
     const seen = new Set(), out = [];
-    for (const strand of [1, -1]) {
+    for (const strand of strands) {
       const t = strand === 1 ? s : rc(s);
       for (let f = 0; f < 3; f++) {
         let st = -1;
         for (let i = f; i + 3 <= m; i += 3) {
           const c = t.substr(i, 3);
-          if (st < 0 && c === 'ATG') st = i;
-          else if (st >= 0 && (c === 'TAA' || c === 'TAG' || c === 'TGA')) {
+          const isStop = (table[c] || 'X') === '*';
+          if (st < 0 && !isStop && (anyStart || starts.includes(c))) st = i;
+          else if (st >= 0 && isStop) {
             const aa = (i - st) / 3;
             const len = i + 3 - st;
             if (aa >= minAA && len <= n) {

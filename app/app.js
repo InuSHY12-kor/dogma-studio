@@ -42,6 +42,8 @@ svg .prim { cursor: pointer; }
 `;
   const FEATURE_TYPES = Object.keys(TYPE_COL).filter(t => t !== 'ORF');
   let featPicked = new Set();   // features ticked in the Features table
+  // Forward ORFs orange, reverse ORFs green, as the reference tool draws them
+  const ORF_FWD = '#e8a33d', ORF_REV = '#4fa86a';
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
 
   // ---------------------------------------------------------------- state
@@ -53,6 +55,8 @@ svg .prim { cursor: pointer; }
     return {
       mapMode: circular ? 'circular' : 'linear', showFeat: true, showPrimers: true, showORFs: false,
       orfMin: 100, showTrans: true, enzMode: 'unique6', showComp: true,
+      transMode: 'orfs',        // orfs | top3 | bottom3 | all6 | +1 | +2 | +3 | -1 | -2 | -3
+      aa3: false, transCode: '1', orfStarts: ['ATG'], orfStrands: 'both',
       labelMode: 'auto',      // auto | inside | outside
       featOnLine: false,      // draw every feature on the backbone instead of in its own lane
       showRuler: true,
@@ -149,10 +153,13 @@ svg .prim { cursor: pointer; }
     return out;
   }
   function analyze(d) {
-    if (d.cache && d.cache.ver === d.ver && d.cache.orfMin === d.opts.orfMin) return d.cache;
-    const t = { ver: d.ver, orfMin: d.opts.orfMin };
+    const orfKey = [d.opts.orfMin, d.opts.transCode, (d.opts.orfStarts || []).join('+'), d.opts.orfStrands].join('|');
+    if (d.cache && d.cache.ver === d.ver && d.cache.orfKey === orfKey) return d.cache;
+    const t = { ver: d.ver, orfMin: d.opts.orfMin, orfKey };
     t.sites = DNA.findSites(d.seq, d.circular);
-    t.orfs = DNA.findORFs(d.seq, d.circular, d.opts.orfMin);
+    t.orfs = DNA.findORFs(d.seq, d.circular, d.opts.orfMin, {
+      code: d.opts.transCode, starts: d.opts.orfStarts, strands: d.opts.orfStrands
+    });
     t.psites = {};
     for (const p of d.primers) t.psites[p.id] = primerBind(d, p);
     d.cache = t; return t;
@@ -185,7 +192,10 @@ svg .prim { cursor: pointer; }
       items.push({ kind: 'f', key: 'f:' + f.id, ref: f, start: f.start, end: f.end, strand: f.strand, name: f.name, color: f.color, type: f.type, segs: f.segs, priority: !!f.priority, cleave: f.cleave });
     }
     if (o.showPrimers) for (const p of d.primers) (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: b.full ? '#2f6fd0' : '#7d9fd6', type: 'primer' }));
-    if (o.showORFs) A.orfs.forEach((r, i) => items.push({ kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand, name: 'ORF: ' + r.aa + ' aa', color: '#9aa2ae', type: 'ORF' }));
+    if (o.showORFs && o.transMode === 'orfs') A.orfs.forEach((r, i) => items.push({
+      kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand,
+      name: 'ORF: ' + r.aa + ' aa', color: r.strand === 1 ? ORF_FWD : ORF_REV, type: 'ORF'
+    }));
     return items;
   }
   // Exons of an item, ascending, with the introns between them. A feature without
@@ -415,6 +425,8 @@ svg .prim { cursor: pointer; }
         { label: 'Show Features', chk: has && d.opts.showFeat, dis: !has, act: () => setOpt('showFeat', !d.opts.showFeat) },
         { label: 'Show Primers', chk: has && d.opts.showPrimers, dis: !has, act: () => setOpt('showPrimers', !d.opts.showPrimers) },
         { label: 'Show ORFs', chk: has && d.opts.showORFs, dis: !has, act: () => setOpt('showORFs', !d.opts.showORFs) },
+        { label: 'Translation Options…', dis: !has, act: dlgTranslationOptions },
+        { label: 'Use 3-Letter Amino Acid Codes', chk: has && d.opts.aa3, dis: !has, act: () => setOpt('aa3', !d.opts.aa3) },
         { label: 'Show Translations', chk: has && d.opts.showTrans, dis: !has, act: () => setOpt('showTrans', !d.opts.showTrans) },
         { label: 'Show Complementary Strand', chk: has && d.opts.showComp, dis: !has, act: () => setOpt('showComp', !d.opts.showComp) },
         '-',
@@ -454,6 +466,7 @@ svg .prim { cursor: pointer; }
         { label: 'Import Features from Another File…', dis: !has, act: () => dlgImport('features') },
         { label: 'Export Feature Data…', dis: !has || !d.features.length, act: dlgExportFeatures },
         '-',
+        { label: 'Add Translated Feature…', dis: !has, act: addTranslatedFeature },
         { label: 'Add ORF as Feature', dis: !sl, act: selToCDS },
         { label: 'Show Features Table', dis: !has, act: () => setView('feat') }
       ] },
@@ -524,6 +537,9 @@ svg .prim { cursor: pointer; }
         { label: 'Design PCR Primers…', dis: !has, act: dlgDesignPCR },
         { label: 'Design Sequencing Primers…', dis: !has, act: dlgDesignWalk },
         { label: 'Design Mutagenesis Primers…', dis: !has || !sl, act: dlgDesignMut },
+        '-',
+        { label: 'Letter Codes', act: dlgLetterCodes },
+        { label: 'Genetic Code Tables', act: dlgGeneticCodes },
         '-',
         { label: 'Align Sequencing Traces…', dis: !has, act: openTraces },
         { label: 'Show Alignments', dis: !has, act: () => setView('align') },
@@ -788,7 +804,11 @@ svg .prim { cursor: pointer; }
       <button class="btn" id="side-pick" style="width:100%;margin-top:4px">Choose Enzymes…</button>`;
     h += `<h4>Show</h4>${chk('showFeat', 'Features')}${chk('showPrimers', 'Primers')}${chk('showORFs', 'ORFs')}
       <div class="row2" style="padding-left:22px">min <input type="number" id="side-orfmin" min="20" max="2000" step="10" value="${o.orfMin}"> aa</div>
-      ${chk('showTrans', 'Translations')}${chk('showComp', 'Complementary strand')}`;
+      ${chk('showTrans', 'Translations')}
+      <div class="row2" style="padding-left:22px"><select id="side-trans">${TRANS_MODES.map(([k, t]) => `<option value="${k}" ${o.transMode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="row2" style="padding-left:22px">${chk('aa3', '3-letter codes')}</div>
+      <div class="row2" style="padding-left:22px"><button class="btn" id="side-transopt" type="button">Translation Options…</button></div>
+      ${chk('showComp', 'Complementary strand')}`;
     h += `<h4>Selection</h4>`;
     if (L) {
       const s = selSeq(d), a = d.sel.start + 1, b = d.sel.end === 0 ? n : d.sel.end;
@@ -1296,6 +1316,7 @@ svg .prim { cursor: pointer; }
     }
     const it = findItem(d, k); if (!it) return;
     if (it.kind === 'f') S.featSel = it.ref.id;
+    if (it.kind === 'o') S.orfSel = +k.split(':')[1];
     selectRange(it);
   }
 
@@ -1359,6 +1380,31 @@ svg .prim { cursor: pointer; }
         (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key, res: c.res, forced: c.forced });
       }
     }
+    // Reading-frame translations: whole-sequence rows, independent of features, which is
+    // what the "Top 3 frames" and "All 6 frames" display modes show.
+    const FRAMES = { top3: [[1, 0], [1, 1], [1, 2]], bottom3: [[-1, 0], [-1, 1], [-1, 2]],
+      all6: [[1, 0], [1, 1], [1, 2], [-1, 0], [-1, 1], [-1, 2]],
+      '+1': [[1, 0]], '+2': [[1, 1]], '+3': [[1, 2]], '-1': [[-1, 0]], '-2': [[-1, 1]], '-3': [[-1, 2]] };
+    const frameList = (o.showTrans && FRAMES[o.transMode]) || [];
+    const frameRows = frameList.map(([strand, off]) => {
+      const table = DNA.GENETIC_CODES[o.transCode] || DNA.CODON, buckets = {};
+      if (strand === 1) {
+        for (let i = off; i + 3 <= n; i += 3) {
+          const mid = i + 1, aa = table[d.seq.substr(i, 3)] || 'X';
+          (buckets[Math.floor(mid / bpr)] = buckets[Math.floor(mid / bpr)] || []).push({ mid, aa, res: (i - off) / 3 + 1 });
+        }
+      } else {
+        const rcs = DNA.rc(d.seq);
+        for (let i = off; i + 3 <= n; i += 3) {
+          const mid = n - 2 - i, aa = table[rcs.substr(i, 3)] || 'X';
+          (buckets[Math.floor(mid / bpr)] = buckets[Math.floor(mid / bpr)] || []).push({ mid, aa, res: (i - off) / 3 + 1 });
+        }
+      }
+      return { strand, off, buckets, label: (strand === 1 ? '+' : '\u2212') + (off + 1) + (strand === 1 ? ' \u2192' : ' \u2190') };
+    });
+    const aaTxt = aa => o.aa3 ? (DNA.AA3[aa] || 'Xaa').slice(0, 3) : aa;
+    const aaTip = (aa, res) => `${DNA.AA3[aa] || 'Xaa'} (${aa}) \u00b7 residue ${res}`;
+
     const rows = [], html = [];
     const comp = o.showComp;
     const NT_H = 17, RULER_H = 15, NUM_H = 13, AA_H = 15;
@@ -1431,8 +1477,22 @@ svg .prim { cursor: pointer; }
       for (const a of (aaRows[ri] || [])) {
         const l = keyLane[a.key]; if (l === undefined || laneAA[l] === undefined) continue;
         const x = G + (a.mid - rs) * CW - CW;
-        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}${a.forced ? ' forced' : ''}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px"${a.forced ? ' title="non-ATG start translated as methionine"' : ''}>${a.aa}</div>`);
+        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}${a.forced ? ' forced' : ''}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px" title="${esc(a.forced ? 'non-ATG start translated as methionine \u00b7 ' : '')}${esc(aaTip(a.aa, a.res))}">${esc(aaTxt(a.aa))}</div>`);
         if (a.res % 5 === 0) parts.push(`<div class="aanum" style="left:${x - CW * 1.5}px;top:${laneNum[l]}px;width:${CW * 6}px">${a.res}</div>`);
+      }
+      // reading-frame rows, drawn below the features
+      if (frameRows.length) {
+        y += 2;
+        for (const fr of frameRows) {
+          for (const a of (fr.buckets[ri] || [])) {
+            if (a.mid < rs || a.mid >= re) continue;
+            const x = G + (a.mid - rs) * CW - CW;
+            parts.push(`<div class="aa fr ${fr.strand === 1 ? 'fwd' : 'rev'}${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}" style="left:${x}px;top:${y}px;width:${CW * 3}px" title="${esc(aaTip(a.aa, a.res))} \u00b7 frame ${esc(fr.label)}">${esc(aaTxt(a.aa))}</div>`);
+          }
+          parts.push(`<div class="frlbl" style="left:${(G + len * CW + 6).toFixed(1)}px;top:${y}px">${fr.label}</div>`);
+          y += AA_H;
+        }
+        y += 4;
       }
       const hgt = y + 5;
       rows.push({ rs, re, y0, y1: strandBottom });
@@ -1763,6 +1823,129 @@ svg .prim { cursor: pointer; }
       if (sk) g.skip = sk.checked;
       if (sa) g.startAt = sa.value ? +sa.value : undefined;
     });
+  }
+
+  // ================================================================ TRANSLATIONS
+  const TRANS_MODES = [
+    ['orfs', 'ORFs only'],
+    ['top3', 'Top 3 frames'],
+    ['bottom3', 'Bottom 3 frames'],
+    ['all6', 'All 6 frames'],
+    ['+1', 'Frame +1'], ['+2', 'Frame +2'], ['+3', 'Frame +3'],
+    ['-1', 'Frame −1'], ['-2', 'Frame −2'], ['-3', 'Frame −3']
+  ];
+  function dlgTranslationOptions() {
+    const d = D(), o = d.opts;
+    const starts = new Set(o.orfStarts || ['ATG']);
+    dialog({
+      title: 'Translation Options', wide: true,
+      body: `<div class="form">
+        <label for="toMode">Show</label><select id="toMode">${TRANS_MODES.map(([k, t]) => `<option value="${k}" ${o.transMode === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <div class="full" style="border-top:1px solid var(--border-soft);margin:4px 0"></div>
+        <label for="toMin">Minimum ORF length</label><div class="row2"><input type="number" id="toMin" min="10" max="5000" step="5" value="${o.orfMin}" style="width:90px"> amino acids</div>
+        <label>Start codons</label><div>${['ATG', 'GTG', 'TTG', 'CTG', 'ATT', 'ATA'].map(c => `<label class="inl"><input type="checkbox" data-sc="${c}" ${starts.has(c) ? 'checked' : ''}> ${c}</label>`).join(' ')}</div>
+        <label for="toStr">Strands</label><select id="toStr"><option value="both" ${o.orfStrands === 'both' ? 'selected' : ''}>Both strands</option><option value="top" ${o.orfStrands === 'top' ? 'selected' : ''}>Top strand only</option><option value="bottom" ${o.orfStrands === 'bottom' ? 'selected' : ''}>Bottom strand only</option></select>
+        <div class="full" style="border-top:1px solid var(--border-soft);margin:4px 0"></div>
+        <label for="toGC">Genetic code for ORFs and new features</label><select id="toGC">${DNA.CODE_LIST.map(c => `<option value="${c.id}" ${String(c.id) === String(o.transCode || '1') ? 'selected' : ''}>${c.id}. ${esc(c.name)}${c.changed.length ? ` (${c.changed.join(', ')})` : ''}</option>`).join('')}</select>
+        <label></label><label><input type="checkbox" id="toApply"> Apply this genetic code to the ${d.features.filter(f => f.translated).length} translated feature(s) in this file too</label>
+        <label></label><label><input type="checkbox" id="toAA3" ${o.aa3 ? 'checked' : ''}> Use 3-letter amino acid codes</label>
+        <div class="full" id="toSum"></div>
+        <div class="full hint">Forward translations are drawn on an orange background and reverse translations on a green one. GeneCanvas finds simple ORFs only: a coding sequence with introns has to be annotated as a segmented feature.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        const chosen = [...document.querySelectorAll('#dlg [data-sc]:checked')].map(i => i.dataset.sc);
+        if (!chosen.length) return showErr('Choose at least one start codon.');
+        o.transMode = val('toMode');
+        o.orfMin = Math.max(10, Math.min(5000, parseInt(val('toMin'), 10) || 100));
+        o.orfStarts = chosen;
+        o.orfStrands = val('toStr');
+        o.transCode = val('toGC');
+        o.aa3 = $('#toAA3').checked;
+        if (o.transMode !== 'orfs' || !o.showORFs) o.showTrans = true;
+        if (o.transMode === 'orfs') o.showORFs = true;
+        if ($('#toApply').checked) for (const f of d.features) if (f.translated) f.code = o.transCode;
+        d.cache = null;
+        renderAll(true);
+        toast('Translation options applied');
+      } }],
+      onOpen: box => {
+        const sum = () => {
+          const code = val('toGC'), min = parseInt(val('toMin'), 10) || 100;
+          const chosen = [...box.querySelectorAll('[data-sc]:checked')].map(i => i.dataset.sc);
+          let txt = '—';
+          if (chosen.length) {
+            const found = DNA.findORFs(d.seq, d.circular, min, { code, starts: chosen, strands: val('toStr') });
+            txt = `${found.length} ORF${found.length === 1 ? '' : 's'} of ${min} aa or more`;
+            if (found.length) txt += ` · longest ${Math.max(...found.map(x => x.aa))} aa`;
+          }
+          $('#toSum').innerHTML = `<span class="note">${txt}</span>`;
+        };
+        box.addEventListener('change', sum);
+        box.addEventListener('input', sum);
+        sum();
+      }
+    });
+  }
+  // The amino acid letter codes, as a reference window.
+  function dlgLetterCodes() {
+    const rows = Object.entries(DNA.AA3).filter(([k]) => k !== 'X');
+    const NAMES = {
+      A: 'Alanine', R: 'Arginine', N: 'Asparagine', D: 'Aspartic acid', C: 'Cysteine', Q: 'Glutamine',
+      E: 'Glutamic acid', G: 'Glycine', H: 'Histidine', I: 'Isoleucine', L: 'Leucine', K: 'Lysine',
+      M: 'Methionine', F: 'Phenylalanine', P: 'Proline', S: 'Serine', T: 'Threonine', W: 'Tryptophan',
+      Y: 'Tyrosine', V: 'Valine', '*': 'Stop codon'
+    };
+    dialog({
+      title: 'Letter Codes', wide: true,
+      body: `<div class="tscroll" style="max-height:60vh"><table class="grid"><thead><tr><th>1-letter</th><th>3-letter</th><th>Amino acid</th><th>Codons (standard code)</th></tr></thead><tbody>
+        ${rows.map(([one, three]) => {
+      const codons = Object.entries(DNA.CODON).filter(([, aa]) => aa === one).map(([c]) => c);
+      return `<tr><td><b class="mono">${esc(one)}</b></td><td class="mono">${esc(three)}</td><td>${esc(NAMES[one] || '')}</td><td class="mono wrap">${codons.join(' ')}</td></tr>`;
+    }).join('')}
+      </tbody></table></div>
+      <div class="hint">IUPAC single-letter codes. B, Z, J and X stand for ambiguous residues and are shown as Xaa.</div>`,
+      buttons: [{ label: 'Close', primary: true }]
+    });
+  }
+  // The genetic code tables, as a 4x4x4 matrix, with the non-standard codons marked.
+  function dlgGeneticCodes() {
+    const d = D();
+    let pick = (d && d.opts.transCode) || '1';
+    const B = ['T', 'C', 'A', 'G'];
+    const render = () => {
+      const table = DNA.GENETIC_CODES[pick] || DNA.CODON;
+      const spec = DNA.CODE_LIST.find(c => String(c.id) === String(pick)) || { changed: [] };
+      const changed = new Set(spec.changed);
+      let html = '<table class="grid codetbl"><thead><tr><th></th>' + B.map(b2 => `<th colspan="4">2nd: ${b2}</th>`).join('') + '</tr></thead><tbody>';
+      for (const b1 of B) {
+        for (const b3 of B) {
+          html += `<tr>${b3 === B[0] ? `<th rowspan="4">1st: ${b1}</th>` : ''}`;
+          if (b3 !== B[0]) html = html.slice(0, -4) + '<tr>';
+          html += B.map(b2 => {
+            const c = b1 + b2 + b3, aa = table[c] || 'X';
+            return `<td class="${changed.has(c) ? 'chg' : ''}${aa === '*' ? ' stopc' : ''}" title="${esc(c)} = ${esc(DNA.AA3[aa] || aa)}"><span class="mono">${esc(c)}</span> ${esc(DNA.AA3[aa] || aa)}</td>`;
+          }).join('');
+          html += '</tr>';
+        }
+      }
+      html += '</tbody></table>';
+      $('#gcT').innerHTML = html + `<div class="hint">${spec.changed.length ? `Shaded codons differ from the standard code: ${spec.changed.join(', ')}.` : 'This table is the standard genetic code.'}</div>`;
+    };
+    dialog({
+      title: 'Genetic Code Tables', wide: true,
+      body: `<div class="ecbar"><label class="inl">Code <select id="gcPick">${DNA.CODE_LIST.map(c => `<option value="${c.id}" ${String(c.id) === String(pick) ? 'selected' : ''}>${c.id}. ${esc(c.name)}</option>`).join('')}</select></label></div>
+        <div id="gcT"></div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => { render(); box.querySelector('#gcPick').onchange = e => { pick = e.target.value; render(); }; }
+    });
+  }
+  // Features -> Add Translated Feature: the selected ORF, or the selection, as a CDS.
+  function addTranslatedFeature() {
+    const d = D();
+    const orf = S.orfSel != null ? analyze(d).orfs[S.orfSel] : null;
+    if (orf) selectRange(orf);
+    if (!selLen(d)) { toast('Select an ORF or a region first.'); return; }
+    dlgFeature(null, { type: 'CDS', name: orf ? `ORF ${orf.aa} aa` : 'CDS', strand: orf ? orf.strand : 1 });
   }
 
   // ================================================================ FEATURE SEGMENTS & INTRONS
@@ -2452,7 +2635,8 @@ svg .prim { cursor: pointer; }
     const cur = f || {
       name: preset.name || 'New feature', type: preset.type || 'misc_feature',
       start: d.sel.start, end: point ? d.sel.start : d.sel.end, strand: preset.strand !== undefined ? preset.strand : (point ? 0 : 1),
-      color: '', notes: '', molecule: 'DNA', translated: (preset.type || '') === 'CDS', frame: 0, matchProtein: false, quals: {}
+      color: '', notes: '', molecule: 'DNA', translated: (preset.type || '') === 'CDS', frame: 0, matchProtein: false, quals: {},
+      code: (d.opts.transCode || '1')
     };
     const color = cur.color || TYPE_COL[cur.type] || '#c9ced6';
     const tOpts = { frame: cur.frame || 0, code: cur.code || '1', startMet: !!cur.startMet, startAt: cur.startAt || 1 };
@@ -5520,8 +5704,14 @@ svg .prim { cursor: pointer; }
     if (t.dataset.o) setOpt(t.dataset.o, t.checked);
     else if (t.id === 'side-enz') { if (t.value === 'chosen') { setOpt('enzMode', 'chosen'); dlgEnzymeChooser(); } else setOpt('enzMode', t.value); }
     else if (t.id === 'side-orfmin') { const v = Math.max(20, Math.min(2000, parseInt(t.value, 10) || 100)); setOpt('orfMin', v); }
+    else if (t.id === 'side-trans') {
+      const d2 = D(); d2.opts.transMode = t.value;
+      if (t.value === 'orfs') d2.opts.showORFs = true;
+      d2.opts.showTrans = true; d2.cache = null; renderAll(true);
+    }
   });
   $('#side').addEventListener('click', e => {
+    if (e.target.id === 'side-transopt') { dlgTranslationOptions(); return; }
     const b = e.target.closest('[data-mm]'); if (b) { setOpt('mapMode', b.dataset.mm); return; }
     if (e.target.id === 'side-pick') dlgEnzymeChooser();
   });
