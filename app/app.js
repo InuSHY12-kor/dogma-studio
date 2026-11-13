@@ -47,7 +47,7 @@ svg .prim { cursor: pointer; }
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
 
   // ---------------------------------------------------------------- state
-  const S = { docs: [], active: -1, view: 'map', zoom: 1, sideHidden: false, seq: null, mapGeom: null, find: { q: '', mode: 'dna', res: [], i: -1 } };
+  const S = { docs: [], active: -1, view: 'map', zoom: 1, sideHidden: false, seq: null, mapGeom: null, find: { q: '', mode: 'dna', res: [], i: -1, maxErr: 1, gaps: false, recent: [] } };
   let UID = 1; const uid = () => UID++;
   const D = () => S.docs[S.active] || null;
 
@@ -409,7 +409,7 @@ svg .prim { cursor: pointer; }
         { label: 'Select Range…', dis: !has, act: dlgGoto },
         { label: 'Go To Position…', key: 'Ctrl+G', dis: !has, act: dlgGoto },
         '-',
-        { label: 'Find…', key: 'Ctrl+F', dis: !has, act: openFind },
+        { label: 'Find', items: FIND_MODES.map(([k, t]) => ({ label: t + '…', key: k === 'dna' ? 'Ctrl+F' : '', chk: S.find.mode === k, dis: !has, act: () => openFind(k) })) },
         { label: 'Rename Sequence…', dis: !has, act: dlgRename }
       ] },
       { label: 'View', items: [
@@ -579,6 +579,7 @@ svg .prim { cursor: pointer; }
         { label: 'Make Linear', chk: has && !d.circular, dis: !has, act: () => setTopology(false) }
       ] },
       { label: 'Help', items: [
+        { label: 'Search Tips', act: dlgSearchTips },
         { label: 'Keyboard Shortcuts', act: dlgShortcuts },
         { label: 'About GeneCanvas', act: dlgAbout }
       ] }
@@ -1346,17 +1347,14 @@ svg .prim { cursor: pointer; }
     const old = $('#seqscroll'); const prevTop = old ? old.scrollTop : 0;
     const hadFocus = !!old && document.activeElement === old;
     const f = S.find;
-    v.innerHTML = `<div class="findbar"><span>Find</span><input type="text" id="findq" placeholder="DNA (IUPAC ok) or protein" value="${esc(f.q)}" spellcheck="false">
-      <select id="findmode"><option value="dna" ${f.mode === 'dna' ? 'selected' : ''}>DNA</option><option value="prot" ${f.mode === 'prot' ? 'selected' : ''}>Protein</option></select>
-      <button id="findprev" title="Previous (Shift+Enter)">▲</button><button id="findnext" title="Next (Enter)">▼</button><span class="cnt" id="findcnt"></span><span class="sp"></span>
-      <button id="gotobtn">Go To…</button></div><div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>`;
+    v.innerHTML = findBarHTML(f) + `<div class="seqscroll" id="seqscroll" tabindex="0"><div id="seqrows"></div></div>`;
     buildSeqRows();
     const sc = $('#seqscroll');
     if (keepScroll) sc.scrollTop = prevTop;
     if (hadFocus) sc.focus({ preventScroll: true });
     bindSeq(sc);
     bindFind();
-    updateFindCount();
+    runFind(false);
   }
 
   function buildSeqRows() {
@@ -1704,34 +1702,181 @@ svg .prim { cursor: pointer; }
     catch (err) { toast('Click in the sequence view and press Ctrl+V to paste.'); }
   }
 
+  // ---------------------------------------------------------------- find bar
+  const FIND_MODES = [
+    ['dna', 'Find DNA sequence'],
+    ['similar', 'Find similar DNA sequence'],
+    ['prot', 'Find protein sequence'],
+    ['name', 'Find enzyme, feature or primer']
+  ];
+  function findBarHTML(f) {
+    return `<div class="findbar">
+      <select id="findmode" title="What to search for">${FIND_MODES.map(([k, t]) => `<option value="${k}" ${f.mode === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <input type="text" id="findq" placeholder="${f.mode === 'name' ? 'name of an enzyme, feature or primer' : (f.mode === 'prot' ? 'amino acids \u2014 X any, !P not P, \u201cX\u201d literal' : 'bases \u2014 (AG) either, R ambiguity, !R not A/G/R, \u201cR\u201d literal')}" value="${esc(f.q)}" spellcheck="false">
+      ${f.recent.length ? `<select id="findrec" title="Recent searches"><option value="">Recent\u2026</option>${f.recent.map(q => `<option value="${esc(q)}">${esc(q)}</option>`).join('')}</select>` : ''}
+      ${f.mode === 'similar' ? `<select id="finderrk">${[0, 1, 2, 3, 4, 5].map(k => `<option value="${k}" ${f.maxErr === k ? 'selected' : ''}>${k} difference${k === 1 ? '' : 's'}</option>`).join('')}</select>
+        <select id="findgap"><option value="0" ${!f.gaps ? 'selected' : ''}>mismatch only</option><option value="1" ${f.gaps ? 'selected' : ''}>mismatch or gap/insertion</option></select>` : ''}
+      <button id="findprev" title="Previous (Shift+Enter)">\u25b2</button><button id="findnext" title="Next (Enter)">\u25bc</button>
+      <span class="cnt" id="findcnt"></span><span class="sp"></span>
+      <button id="findtips" title="Search tips">?</button>
+      <button id="gotobtn">Go To\u2026</button></div>`;
+  }
+  // Everything the name search can match, limited to what is actually on display,
+  // which is the rule the guide states.
+  function nameSources(d) {
+    const A = analyze(d), out = [], n = d.seq.length;
+    for (const e of shownEnz(d, A)) e.sites.forEach((t, i) => {
+      let end = t.pos + t.len; if (end > n) end -= n;
+      out.push({ name: e.name, start: t.pos, end, strand: t.strand, kind: 'enzyme', key: `e:${e.name}:${i}` });
+    });
+    for (const f of d.features) if (!f.hidden) out.push({ name: f.name, start: f.start, end: f.end, strand: f.strand, kind: 'feature', key: 'f:' + f.id });
+    for (const p of d.primers) (A.psites[p.id] || []).forEach((b, i) => out.push({ name: p.name, start: b.start, end: b.end, strand: b.strand, kind: 'primer', key: `p:${p.id}:${i}` }));
+    return out;
+  }
+  function dlgSearchTips() {
+    dialog({
+      title: 'Search Tips', wide: true,
+      body: `<table class="grid"><thead><tr><th>Query</th><th>Finds</th></tr></thead><tbody>
+        <tr><td class="mono">GAATTC</td><td>that sequence on either strand</td></tr>
+        <tr><td class="mono">GGTCT(AG)CTTC</td><td>either A or G at that position</td></tr>
+        <tr><td class="mono">GGTCTRCTTC</td><td>the same, written as an IUPAC ambiguity code \u2014 it also matches a base written as R</td></tr>
+        <tr><td class="mono">GGTCT!RCTTC</td><td>anything but A, G or R at that position</td></tr>
+        <tr><td class="mono">GGTCT!(AG)CTTC</td><td>the same, with the excluded bases in brackets</td></tr>
+        <tr><td class="mono">"GGTCTRCTTC"</td><td>quoted: only a base literally written as R matches R</td></tr>
+        <tr><td colspan="2" style="background:var(--chrome)"><b>Similar DNA</b></td></tr>
+        <tr><td class="mono">GGTCTACTTC</td><td>with up to the chosen number of mismatches, or mismatches and gaps; mismatched bases are boxed in red</td></tr>
+        <tr><td colspan="2" style="background:var(--chrome)"><b>Protein</b></td></tr>
+        <tr><td class="mono">MKWVTF</td><td>that peptide in any translation, on either strand</td></tr>
+        <tr><td class="mono">MKXVTF</td><td>any amino acid at that position</td></tr>
+        <tr><td class="mono">MK!PVTF</td><td>anything but proline at that position</td></tr>
+        <tr><td class="mono">MK!(ST)VTF</td><td>neither serine nor threonine there</td></tr>
+        <tr><td class="mono">"MKXVTF"</td><td>quoted: only a residue literally written as X matches X</td></tr>
+        <tr><td colspan="2" style="background:var(--chrome)"><b>Enzyme, feature or primer</b></td></tr>
+        <tr><td class="mono">EcoRI</td><td>by name, ignoring case; hidden enzymes and features are not searched</td></tr>
+      </tbody></table>
+      <div class="hint">B, D, H, K, M, N, R, S, V, W and Y are the IUPAC nucleotide codes; Tools \u203a Letter Codes lists them all. For proteins, X stands for any residue, B for Asp or Asn and Z for Glu or Gln.</div>`,
+      buttons: [{ label: 'Close', primary: true }]
+    });
+  }
+
   // ---------------------------------------------------------------- find
   function bindFind() {
     const q = $('#findq'), m = $('#findmode');
+    if (!q) return;
     q.addEventListener('input', () => { S.find.q = q.value; runFind(false); });
-    m.addEventListener('change', () => { S.find.mode = m.value; runFind(false); });
-    q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); } if (e.key === 'Escape') { $('#seqscroll').focus(); } });
-    $('#findnext').onclick = () => stepFind(1);
-    $('#findprev').onclick = () => stepFind(-1);
+    m.addEventListener('change', () => { S.find.mode = m.value; renderView(); setTimeout(() => { const el = $('#findq'); if (el) el.focus(); }, 0); });
+    q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); rememberSearch(); stepFind(e.shiftKey ? -1 : 1); } if (e.key === 'Escape') { $('#seqscroll').focus(); } });
+    $('#findnext').onclick = () => { rememberSearch(); stepFind(1); };
+    $('#findprev').onclick = () => { rememberSearch(); stepFind(-1); };
+    $('#findtips').onclick = dlgSearchTips;
     $('#gotobtn').onclick = dlgGoto;
+    const rec = $('#findrec');
+    if (rec) rec.onchange = () => { if (rec.value) { S.find.q = rec.value; $('#findq').value = rec.value; runFind(true); } };
+    const ek = $('#finderrk'); if (ek) ek.onchange = () => { S.find.maxErr = +ek.value; runFind(false); };
+    const gp = $('#findgap'); if (gp) gp.onchange = () => { S.find.gaps = gp.value === '1'; runFind(false); };
+  }
+  function rememberSearch() {
+    const f = S.find, q = (f.q || '').trim();
+    if (!q) return;
+    f.recent = [q, ...f.recent.filter(x => x !== q)].slice(0, 12);
   }
   function runFind(jump) {
     const d = D(), f = S.find;
-    f.res = !f.q ? [] : (f.mode === 'dna' ? DNA.searchDNA(d.seq, d.circular, f.q) : DNA.searchProtein(d.seq, d.circular, f.q));
+    f.res = [];
+    f.note = '';
+    if (f.q) {
+      try {
+        if (f.mode === 'dna') f.res = SEARCH.exact(d.seq, d.circular, f.q);
+        else if (f.mode === 'similar') {
+          const parsed = SEARCH.parseQuery(f.q, 'dna');
+          const len = parsed ? parsed.toks.length : 0;
+          if (len < 10 && f.maxErr > 0) f.note = 'A similar search needs at least 10 bases.';
+          else if ((f.q || '').includes('"')) f.note = 'A similar search cannot be quoted.';
+          else f.res = SEARCH.similar(d.seq, d.circular, f.q, { maxErr: f.maxErr, gaps: f.gaps });
+        }
+        else if (f.mode === 'prot') {
+          // visible translations first, as the reference tool does, then every frame if those are shown
+          const regions = d.features.filter(x => x.translated && !x.hidden).map(x => ({ start: x.start, end: x.end }));
+          const everyFrame = d.opts.showTrans && d.opts.transMode !== 'orfs';
+          f.res = SEARCH.protein(d.seq, d.circular, f.q, {
+            code: d.opts.transCode,
+            regions: everyFrame || !regions.length ? null : regions
+          });
+          if (!everyFrame && regions.length) f.note = 'Searching the visible translations. Turn on a reading-frame display to search every frame.';
+        }
+        else if (f.mode === 'name') f.res = SEARCH.byName(nameSources(d), f.q);
+      } catch (e) { f.note = e.message; }
+    }
     f.i = -1;
     if (f.res.length) { const p = d.sel.start; f.i = f.res.findIndex(r => r.start >= p); if (f.i < 0) f.i = 0; selectRange(f.res[f.i]); }
     updateFindCount();
+    paintFindHits();
   }
   function stepFind(dir) {
     const f = S.find; if (!f.res.length) { runFind(true); return; }
     f.i = (f.i + dir + f.res.length) % f.res.length;
-    selectRange(f.res[f.i]); updateFindCount();
+    selectRange(f.res[f.i]);
+    updateFindCount(); paintFindHits();
   }
   function updateFindCount() {
     const c = $('#findcnt'); if (!c) return;
-    const f = S.find;
-    c.textContent = !f.q ? '' : (f.res.length ? `${f.i + 1} of ${f.res.length}` + (f.res[f.i] && f.res[f.i].strand < 0 ? ' (−)' : '') : 'No matches');
+    const f = S.find, cur = f.res[f.i];
+    if (!f.q) { c.textContent = ''; c.title = ''; return; }
+    if (!f.res.length) { c.textContent = f.note || 'No matches'; c.title = f.note || ''; return; }
+    let txt = `${f.i + 1} of ${f.res.length}`;
+    if (cur) {
+      if (cur.strand < 0) txt += ' \u2190';
+      if (cur.errors) txt += ` \u00b7 ${cur.errors} difference${cur.errors === 1 ? '' : 's'}`;
+      if (cur.kind) txt += ` \u00b7 ${cur.kind} \u201c${cur.name}\u201d`;
+      txt += ` \u00b7 ${fmt(cur.start + 1)}\u2013${fmt(cur.end)}`;
+    }
+    c.textContent = txt;
+    c.title = f.note || '';
   }
-  function openFind() { if (!D()) return; if (S.view !== 'seq') setView('seq'); setTimeout(() => { const q = $('#findq'); if (q) { q.focus(); q.select(); } }, 10); }
+  /* Every match is shaded yellow in the sequence view, the current one green, and a
+   * mismatch inside a similar match is boxed in red. */
+  function paintFindHits() {
+    const V = S.seq, d = D(), f = S.find;
+    if (!V || !V.els || !d || V.prot) return;
+    for (const el of V.els) el.querySelectorAll('.findhl').forEach(x => x.remove());
+    if (!f.res.length) return;
+    const n = d.seq.length;
+    f.res.forEach((h, idx) => {
+      for (const [a, b] of DNA.segs({ start: h.start, end: h.end }, n)) {
+        const r0 = Math.floor(a / V.bpr), r1 = Math.floor((b - 1) / V.bpr);
+        for (let ri = r0; ri <= r1; ri++) {
+          const el = V.els[ri]; if (!el) continue;
+          const rs = ri * V.bpr;
+          const x1 = Math.max(a, rs), x2 = Math.min(b, rs + V.bpr);
+          const row = V.rows[ri]; if (!row) continue;
+          const div = document.createElement('div');
+          div.className = 'findhl' + (idx === f.i ? ' cur' : '');
+          div.style.left = (V.G + (x1 - rs) * CW) + 'px';
+          div.style.width = ((x2 - x1) * CW) + 'px';
+          div.style.top = (row.y0 - 1) + 'px';
+          div.style.height = (row.y1 - row.y0 + 2) + 'px';
+          el.appendChild(div);
+          for (const mm of (h.mismatches || [])) {
+            const p = (h.start + mm) % n;
+            if (p < x1 || p >= x2) continue;
+            const bx = document.createElement('div');
+            bx.className = 'findhl mm';
+            bx.style.left = (V.G + (p - rs) * CW) + 'px';
+            bx.style.width = CW + 'px';
+            bx.style.top = (row.y0 - 1) + 'px';
+            bx.style.height = '17px';
+            el.appendChild(bx);
+          }
+        }
+      }
+    });
+  }
+  function openFind(mode) {
+    if (!D()) return;
+    if (mode) S.find.mode = mode;
+    if (S.view !== 'seq') setView('seq'); else renderView();
+    setTimeout(() => { const q = $('#findq'); if (q) { q.focus(); q.select(); } }, 10);
+  }
 
   // ================================================================ ENZYMES TABLE
   let enzFilter = '', enzSet = 'chosen', enzSort = 'name', enzDesc = false, enzStyle = 'numbers';
@@ -2306,7 +2451,7 @@ svg .prim { cursor: pointer; }
   }
 
   // ================================================================ FEATURES TABLE
-  let featSort = 'start', featDesc = false, featOpen = new Set(), featFull = true;
+  let featSort = 'start', featDesc = false, featOpen = new Set(), featFull = true, featFind = '', featOpenDone = false;
   function renderFeatures() {
     const d = D(), n = isProt(d) ? d.prot.length : d.seq.length, v = $('#view');
     const len = f => isProt(d) ? DNA.rlen(f, n) : DNA.featLen(f, n);
@@ -2347,7 +2492,9 @@ svg .prim { cursor: pointer; }
       <select id="fsort2"><option value="">Sort by…</option><option value="start" ${featSort === 'start' ? 'selected' : ''}>Position</option><option value="name" ${featSort === 'name' ? 'selected' : ''}>Name</option><option value="type" ${featSort === 'type' ? 'selected' : ''}>Type</option><option value="len" ${featSort === 'len' ? 'selected' : ''}>Length</option><option value="dir" ${featSort === 'dir' ? 'selected' : ''}>Direction</option><option value="vis" ${featSort === 'vis' ? 'selected' : ''}>Visibility</option></select>
       <label class="inl"><input type="checkbox" id="ffull" ${featFull ? 'checked' : ''}> Full descriptions</label>
       <button class="ib" id="fexpall" title="Expand or collapse every row">⇅</button>
-      <span class="note">${fs.length} features${featPicked.size ? ` · ${featPicked.size} checked` : ''} · double-click a row to edit</span></div>
+      <input type="text" id="ffind" placeholder="Find features — name, type or qualifier" value="${esc(featFind)}" style="width:230px">
+      <span class="note" id="ffindn"></span>
+      <span class="note">${fs.length} features${featPicked.size ? ` · ${featPicked.size} checked` : ''}</span></div>
       <div class="tscroll">${fs.length ? `<table class="grid"><thead><tr><th style="width:26px"></th><th style="width:26px">✓</th><th style="width:22px"></th><th class="sort" data-s="name">Name${arrow('name')}</th><th class="sort" data-s="type">Type${arrow('type')}</th><th class="sort" data-s="start">Location${arrow('start')}</th><th class="sort" data-s="len">Length${arrow('len')}</th><th class="sort" data-s="dir">Direction${arrow('dir')}</th><th>Molecule</th><th>Notes</th><th></th></tr></thead><tbody>
       ${fs.map(f => {
       const segList = DNA.featSegs(f, n);
@@ -2367,6 +2514,28 @@ svg .prim { cursor: pointer; }
         + (featOpen.has(f.id) ? detail(f) : '');
     }).join('')}
       </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let GeneCanvas detect common features such as promoters, tags and recombination sites. With no selection, Add Feature makes a zero-length point feature at the cursor.</p></div>`}</div></div>`;
+    // highlight what the Find Features field matched, and open those rows
+    if (featFind) {
+      const hits = SEARCH.featureMeta(fs, featFind);
+      const ids = new Set(hits.map(h => h.feature.id));
+      v.querySelectorAll('tbody tr[data-f]').forEach(tr => { if (ids.has(+tr.dataset.f)) tr.classList.add('fhit'); });
+      const nEl = $('#ffindn');
+      if (nEl) nEl.textContent = hits.length
+        ? `${hits.length} match${hits.length === 1 ? '' : 'es'} · in ${[...new Set(hits.flatMap(h => h.where))].join(', ')}`
+        : 'no matches';
+      if (hits.length && !featOpenDone) {
+        const missing = hits.filter(h => !featOpen.has(h.feature.id));
+        if (missing.length) { for (const h of hits) featOpen.add(h.feature.id); featOpenDone = true; renderFeatures(); return; }
+      }
+    } else if ($('#ffindn')) $('#ffindn').textContent = '';
+    const ff = $('#ffind');
+    if (ff) ff.oninput = e => {
+      featFind = e.target.value;
+      const pos = e.target.selectionStart;
+      featOpenDone = false;
+      renderFeatures();
+      const el = $('#ffind'); if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    };
     $('#fadd').onclick = () => (isProt(d) ? dlgProtFeature(null) : dlgFeature(null));
     $('#fdet').onclick = detectCommon;
     $('#fexp').onclick = dlgExportFeatures;
