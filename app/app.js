@@ -523,8 +523,8 @@ svg .prim { cursor: pointer; }
         { label: 'Redo', key: 'Ctrl+Y', dis: !has || d.hi >= d.hist.length - 1, act: redo },
         '-',
         { label: 'Copy', key: 'Ctrl+C', dis: !sl, act: () => copyText(selSeq(D()), 'Copied ' + fmt(selLen(D())) + ' bp') },
-        { label: 'Copy Reverse Complement', dis: !sl, act: () => copyText(DNA.rc(selSeq(D())), 'Copied reverse complement') },
-        { label: 'Copy Protein Translation', dis: !sl, act: () => copyText(DNA.translate(selSeq(D())), 'Copied translation') },
+        { label: 'Copy Reverse Complement', key: 'Ctrl+Shift+C', dis: !sl, act: () => copyText(DNA.rc(selSeq(D())), 'Copied the reverse complement') },
+        { label: 'Copy Protein Translation', key: 'Ctrl+Alt+C', dis: !sl, act: () => copyText(DNA.translate(selSeq(D())), 'Copied the translation') },
         { label: 'Paste', key: 'Ctrl+V', dis: !has, act: pasteFromClipboard },
         { label: 'Delete Selection', key: 'Del', dis: !sl, act: deleteSel },
         '-',
@@ -2413,70 +2413,83 @@ svg .prim { cursor: pointer; }
   /* Molecular weight, mass, composition, concentration and copy number, for the whole
    * sequence and for the selection. The weights come from the average masses of the
    * nucleotides; an ambiguity code counts as the mean of the bases it stands for. */
+  /* The figures a sequence carries: weight, base counts, GC, and the amount-to-molecule
+   * conversions, for the whole molecule and for whatever is selected. Typing in either
+   * amount box fills the other, which is what the window is for in practice. */
   function dlgCalculations() {
     const d = D(), n = d.seq.length, rna = isRNA(d);
     let ends = d.circular ? 'circular' : 'unphosphorylated';
-    let conc = 50, concUnit = 'ng';
-    const block = (seq, label, circular) => {
+    const state = {};                      // per block: the ng figure the user typed
+    const blockHTML = (seq, label, circular, id) => {
       const ss = DNA.strandMW(seq, { rna, ends: circular ? 'circular' : ends });
       const ssRC = rna ? null : DNA.strandMW(DNA.rc(seq), { rna, ends: circular ? 'circular' : ends });
-      const ds = rna ? null : ss + ssRC;
+      const mw = rna ? ss : ss + ssRC;
       const comp = DNA.composition(seq);
       const gc = DNA.gcPct(seq);
-      const mw = rna ? ss : ds;
-      // pmol per µg, and molecules per ng
       const pmolPerUg = 1e6 / mw;
-      const moleculesPerNg = 1e-9 / mw * 6.02214076e23;
-      return `<h4>${esc(label)}</h4>
-        <table class="grid" style="width:auto"><tbody>
-          <tr><td>Length</td><td><b>${fmt(seq.length)}</b> ${rna ? 'nt' : 'bp'}${circular ? ' · circular' : ''}</td></tr>
-          <tr><td>${rna ? 'Molecular weight' : 'Molecular weight (double-stranded)'}</td><td><b>${fmt(Math.round(mw))}</b> Da = ${(mw / 1000).toFixed(2)} kDa</td></tr>
-          ${rna ? '' : `<tr><td>Single strands</td><td>top ${fmt(Math.round(ss))} Da · bottom ${fmt(Math.round(ssRC))} Da</td></tr>`}
-          <tr><td>Composition</td><td class="mono">A ${fmt(comp.A)} · C ${fmt(comp.C)} · G ${fmt(comp.G)} · ${rna ? 'U' : 'T'} ${fmt(comp.T)}${comp.other ? ` · other ${fmt(comp.other)}` : ''}</td></tr>
-          <tr><td>GC content</td><td><b>${gc.toFixed(1)} %</b></td></tr>
-          <tr><td>Amount per µg</td><td><b>${pmolPerUg.toFixed(3)}</b> pmol</td></tr>
-          <tr><td>Molecules per ng</td><td><b>${moleculesPerNg.toExponential(3)}</b></td></tr>
-          <tr><td>At ${conc} ${concUnit}/µL</td><td>${concLine(mw, conc, concUnit)}</td></tr>
-        </tbody></table>`;
-    };
-    const concLine = (mw, c, unit) => {
-      // convert the entered concentration to both mass and molar terms
-      let ngPerUl;
-      if (unit === 'ng') ngPerUl = c;
-      else if (unit === 'ug') ngPerUl = c * 1000;
-      else if (unit === 'nM') ngPerUl = c * 1e-9 * mw * 1e-6 * 1e9;   // nmol/L -> ng/µL
-      else ngPerUl = c;
-      // 1 ng/µL is 1e-3 g/L, so mol/L = ngPerUl * 1e-3 / mw and nM is that times 1e9
-      const nM = ngPerUl * 1e6 / mw;
-      const molecules = ngPerUl * 1e-9 / mw * 6.02214076e23;
-      return `<b>${ngPerUl.toFixed(2)}</b> ng/µL = <b>${nM.toFixed(2)}</b> nM = ${molecules.toExponential(2)} molecules/µL`;
+      const ng = state[id] == null ? 1 : state[id];
+      const molecules = ng * 1e-9 / mw * 6.02214076e23;
+      const nM = ng * 1e6 / mw;            // 1 ng/uL is 1e-3 g/L
+      const expo = v => {
+        if (!isFinite(v) || v <= 0) return '0';
+        const e = Math.floor(Math.log10(v));
+        return `${(v / Math.pow(10, e)).toFixed(2)} x 10<sup>${e}</sup>`;
+      };
+      return `<div class="calcblock">
+        <div class="calchead"><span class="calcnum">${id === 'whole' ? '1' : '2'}</span>
+          <b>${esc(label)}</b> <span class="note">(${circular ? 'Circular' : 'Linear'} / ${fmt(seq.length)} ${rna ? 'nt' : 'bp'})</span></div>
+        <dl class="calcdl">
+          <dt>MW</dt><dd>${expo(mw)} Da</dd>
+          <dt>${rna ? 'Bases' : 'Top Strand Bases'}</dt><dd>${fmt(comp.A)} A, &nbsp;${fmt(comp.C)} C, &nbsp;${fmt(comp.G)} G, &nbsp;${fmt(comp.T)} ${rna ? 'U' : 'T'}${comp.other ? `, &nbsp;${fmt(comp.other)} other` : ''}</dd>
+          <dt>GC Content</dt><dd>${gc.toFixed(0)}%</dd>
+          <dt></dt><dd></dd>
+          <dt>1 pmol</dt><dd>${(mw / 1e6).toFixed(3)} µg</dd>
+          <dt>1 µg</dt><dd>${pmolPerUg.toFixed(3)} pmol</dd>
+          <dt></dt><dd></dd>
+          <dt><input type="number" step="any" data-calcng="${id}" value="${ng}"></dt><dd>ng &nbsp;=&nbsp; ${expo(molecules)} molecules</dd>
+          <dt><input type="number" step="any" data-calcnm="${id}" value="${ng}"></dt><dd>ng/µl &nbsp;=&nbsp; ${nM.toFixed(3)} nM</dd>
+        </dl></div>`;
     };
     const render = () => {
       const sel = selLen(d) ? selSeq(d) : null;
-      $('#calcBody').innerHTML = block(d.seq, d.name + ' — whole sequence', d.circular)
-        + (sel ? block(sel, `Selection ${fmt(d.sel.start + 1)}–${fmt(d.sel.end || n)}`, false)
-          : '<div class="hint">Select a region to see the same figures for it.</div>');
+      const selName = sel ? (featureAt(d, d.sel.start, d.sel.end) || `${fmt(d.sel.start + 1)}–${fmt(d.sel.end || n)}`) : '';
+      $('#calcBody').innerHTML = blockHTML(d.seq, d.name, d.circular, 'whole')
+        + (sel ? blockHTML(sel, 'Selected: ' + selName, false, 'sel')
+          : '<div class="hint">Select a region to see the same figures for it.</div>')
+        + `<div class="calcfoot">
+            1 A<sub>260</sub> unit double-stranded DNA &nbsp;=&nbsp; 50 µg/ml<br>
+            1 A<sub>260</sub> unit single-stranded DNA &nbsp;=&nbsp; 33 µg/ml<br>
+            1 A<sub>260</sub> unit single-stranded RNA &nbsp;=&nbsp; 40 µg/ml</div>`;
     };
     dialog({
-      title: rna ? 'RNA Calculations' : 'DNA Calculations', wide: true,
-      body: `<div class="ecbar">
-          <label class="inl">Ends <select id="calcEnds" ${d.circular ? 'disabled' : ''}>
-            <option value="unphosphorylated">unphosphorylated</option>
-            <option value="phosphorylated">5′ phosphorylated</option>
-          </select></label>
-          <label class="inl">Concentration <input type="number" id="calcC" value="50" step="any" style="width:80px">
-            <select id="calcU"><option value="ng">ng/µL</option><option value="ug">µg/µL</option><option value="nM">nM</option></select></label>
-        </div>
-        <div class="tscroll" style="max-height:56vh;padding:4px 8px" id="calcBody"></div>
-        <div class="hint">Weights are the average masses of the nucleotides, with one water lost at each bond; a circular molecule loses one more and has no free end. A degenerate position counts as the mean of the bases it stands for. ${d.circular ? 'This molecule is circular, so the ends setting does not apply.' : ''}</div>`,
+      title: rna ? 'RNA Calculations for ' + d.name : 'DNA Calculations for ' + d.name,
+      body: `${d.circular ? '' : `<div class="ecbar"><label class="inl">Ends <select id="calcEnds">
+          <option value="unphosphorylated">unphosphorylated</option>
+          <option value="phosphorylated">5′ phosphorylated</option></select></label></div>`}
+        <div class="tscroll" style="max-height:62vh" id="calcBody"></div>`,
       buttons: [{ label: 'Copy', act: () => { copyText($('#calcBody').innerText, 'Calculations copied'); return false; } }, { label: 'Close', primary: true }],
       onOpen: box => {
         render();
-        box.querySelector('#calcEnds').onchange = e => { ends = e.target.value; render(); };
-        box.querySelector('#calcC').oninput = e => { conc = parseFloat(e.target.value) || 0; render(); };
-        box.querySelector('#calcU').onchange = e => { concUnit = e.target.value; render(); };
+        const es = box.querySelector('#calcEnds');
+        if (es) es.onchange = e => { ends = e.target.value; render(); };
+        box.addEventListener('input', e => {
+          const t = e.target;
+          const id = t.dataset.calcng || t.dataset.calcnm;
+          if (!id) return;
+          const v = parseFloat(t.value);
+          state[id] = isFinite(v) ? v : 0;
+          const pos = t.selectionStart, which = t.dataset.calcng ? 'calcng' : 'calcnm';
+          render();
+          const again = box.querySelector(`[data-${which}="${id}"]`);
+          if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (err) { } }
+        });
       }
     });
+  }
+  // The name of a feature that matches the selection exactly, for the heading.
+  function featureAt(d, a, b) {
+    const f = d.features.find(x => x.start === a && x.end === (b || d.seq.length));
+    return f ? f.name : null;
   }
 
   // ================================================================ GC CONTENT PLOT
@@ -3368,7 +3381,9 @@ svg .prim { cursor: pointer; }
       for (const c of codons) {
         const aa = c.aa, mid = c.mid;
         const r = Math.floor(mid / bpr);
-        (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key, res: c.res, forced: c.forced });
+        // the codon's own span, so clicking the letter selects the three bases
+        const cs = Math.min(c.a, c.c), ce = Math.max(c.a, c.c) + 1;
+        (aaRows[r] = aaRows[r] || []).push({ mid, aa, key: it.key, res: c.res, forced: c.forced, cs, ce: ce > n ? ce - n : ce });
       }
     }
     // Reading-frame translations: whole-sequence rows, independent of features, which is
@@ -3382,13 +3397,13 @@ svg .prim { cursor: pointer; }
       if (strand === 1) {
         for (let i = off; i + 3 <= n; i += 3) {
           const mid = i + 1, aa = table[d.seq.substr(i, 3)] || 'X';
-          (buckets[Math.floor(mid / bpr)] = buckets[Math.floor(mid / bpr)] || []).push({ mid, aa, res: (i - off) / 3 + 1 });
+          (buckets[Math.floor(mid / bpr)] = buckets[Math.floor(mid / bpr)] || []).push({ mid, aa, res: (i - off) / 3 + 1, cs: i, ce: i + 3 });
         }
       } else {
         const rcs = DNA.rc(d.seq);
         for (let i = off; i + 3 <= n; i += 3) {
           const mid = n - 2 - i, aa = table[rcs.substr(i, 3)] || 'X';
-          (buckets[Math.floor(mid / bpr)] = buckets[Math.floor(mid / bpr)] || []).push({ mid, aa, res: (i - off) / 3 + 1 });
+          (buckets[Math.floor(mid / bpr)] = buckets[Math.floor(mid / bpr)] || []).push({ mid, aa, res: (i - off) / 3 + 1, cs: n - 3 - i, ce: n - i });
         }
       }
       return { strand, off, buckets, label: (strand === 1 ? '+' : '\u2212') + (off + 1) + (strand === 1 ? ' \u2192' : ' \u2190') };
@@ -3474,7 +3489,7 @@ svg .prim { cursor: pointer; }
       for (const a of (aaRows[ri] || [])) {
         const l = keyLane[a.key]; if (l === undefined || laneAA[l] === undefined) continue;
         const x = G + (a.mid - rs) * CW - CW;
-        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}${a.forced ? ' forced' : ''}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px" title="${esc(a.forced ? 'non-ATG start translated as methionine \u00b7 ' : '')}${esc(aaTip(a.aa, a.res))}">${esc(aaTxt(a.aa))}</div>`);
+        parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}${a.forced ? ' forced' : ''}" data-aa="${a.cs},${a.ce}" data-aak="${esc(a.key || '')}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px" title="${esc(a.forced ? 'non-ATG start translated as methionine \u00b7 ' : '')}${esc(aaTip(a.aa, a.res))}">${esc(aaTxt(a.aa))}</div>`);
         if (a.res % 5 === 0) parts.push(`<div class="aanum" style="left:${x - CW * 1.5}px;top:${laneNum[l]}px;width:${CW * 6}px">${a.res}</div>`);
       }
       // reading-frame rows, drawn below the features
@@ -3484,7 +3499,7 @@ svg .prim { cursor: pointer; }
           for (const a of (fr.buckets[ri] || [])) {
             if (a.mid < rs || a.mid >= re) continue;
             const x = G + (a.mid - rs) * CW - CW;
-            parts.push(`<div class="aa fr ${fr.strand === 1 ? 'fwd' : 'rev'}${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}" style="left:${x}px;top:${y}px;width:${CW * 3}px" title="${esc(aaTip(a.aa, a.res))} \u00b7 frame ${esc(fr.label)}">${esc(aaTxt(a.aa))}</div>`);
+            parts.push(`<div class="aa fr ${fr.strand === 1 ? 'fwd' : 'rev'}${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}" data-aa="${a.cs},${a.ce}" style="left:${x}px;top:${y}px;width:${CW * 3}px" title="${esc(aaTip(a.aa, a.res))} \u00b7 frame ${esc(fr.label)}">${esc(aaTxt(a.aa))}</div>`);
           }
           parts.push(`<div class="frlbl" style="left:${(G + len * CW + 6).toFixed(1)}px;top:${y}px">${fr.label}</div>`);
           y += AA_H;
@@ -3639,8 +3654,31 @@ svg .prim { cursor: pointer; }
       return r.rs + Math.max(0, Math.min(r.re - r.rs, col));
     };
     let drag = false, auto = null, lastEv = null;
+    // the codon under an amino acid, as a range of bases
+    const codonAt = el => {
+      const a = el && el.dataset && el.dataset.aa;
+      if (!a) return null;
+      const [cs, ce] = a.split(',').map(Number);
+      return { start: cs, end: ce };
+    };
+    let aaDrag = null;
     sc.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
+      // an amino acid selects the three bases that encode it, and dragging extends
+      // the selection codon by codon
+      const aaEl = e.target.closest('[data-aa]');
+      if (aaEl) {
+        e.preventDefault(); sc.focus();
+        const c = codonAt(aaEl);
+        if (e.shiftKey && selLen(D())) {
+          const d2 = D();
+          setSel(Math.min(d2.anchor, c.start), Math.max(d2.anchor, c.end), { anchor: d2.anchor });
+        } else {
+          aaDrag = c;
+          setSel(c.start, c.end, { anchor: c.start });
+        }
+        return;
+      }
       const k = e.target.closest('[data-k]');
       if (k) { clickItem(k.dataset.k, e); sc.focus(); e.preventDefault(); return; }
       const row = e.target.closest('.srow'); if (!row) return;
@@ -3649,7 +3687,20 @@ svg .prim { cursor: pointer; }
       if (e.shiftKey) { extendTo(p); return; }
       drag = true; setSel(p, p, { anchor: p });
     });
+    sc.addEventListener('mousemove', e => {
+      if (!aaDrag) return;
+      const aaEl = e.target.closest('[data-aa]'); if (!aaEl) return;
+      const c = codonAt(aaEl);
+      setSel(Math.min(aaDrag.start, c.start), Math.max(aaDrag.end, c.end), { anchor: aaDrag.start });
+    });
+    window.addEventListener('mouseup', () => { aaDrag = null; });
     sc.addEventListener('dblclick', e => {
+      // a double click on an amino acid selects the whole translated feature it is in
+      const aaEl = e.target.closest('[data-aa]');
+      if (aaEl && aaEl.dataset.aak) {
+        const it = findItem(D(), aaEl.dataset.aak);
+        if (it) { selectRange(it); return; }
+      }
       const k = e.target.closest('[data-k]'); if (!k) return;
       const it = findItem(D(), k.dataset.k);
       if (it && it.kind === 'f') dlgFeature(it.ref); else if (it && it.kind === 'p') dlgPrimer(it.ref);
@@ -5715,7 +5766,7 @@ svg .prim { cursor: pointer; }
   }
 
   function dlgShortcuts() {
-    const rows = [['Ctrl+N', 'New DNA file'], ['Ctrl+O', 'Open file'], ['Ctrl+S / Ctrl+Shift+S', 'Save / Save As'], ['Ctrl+W', 'Close file'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+C / Ctrl+V', 'Copy / Paste bases'], ['Ctrl+A', 'Select all'], ['Ctrl+F', 'Find DNA or protein'], ['Ctrl+G', 'Go to position'], ['Ctrl+K', 'Add feature from selection'], ['Ctrl+1 … Ctrl+7', 'Map, Sequence, Enzymes, Features, Primers, Alignment, History'], ['Ctrl+D', 'Open from NCBI'], ['Ctrl+P', 'Print'], ['Ctrl + / Ctrl − / Ctrl+0', 'Zoom the map'], ['A C G T N', 'Type bases in the Sequence view'], ['Shift+click, Shift+arrows', 'Extend the selection'], ['Double-click a feature', 'Edit the feature'], ['Right-click', 'Context menu']];
+    const rows = [['Ctrl+N', 'New DNA file'], ['Ctrl+O', 'Open file'], ['Ctrl+S / Ctrl+Shift+S', 'Save / Save As'], ['Ctrl+W', 'Close file'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+C / Ctrl+V', 'Copy / Paste bases'], ['Ctrl+Shift+C', 'Copy the reverse complement'], ['Ctrl+Alt+C', 'Copy the translation'], ['Ctrl+A', 'Select all'], ['Ctrl+F', 'Find DNA or protein'], ['Ctrl+G', 'Go to position'], ['Ctrl+K', 'Add feature from selection'], ['Ctrl+1 … Ctrl+7', 'Map, Sequence, Enzymes, Features, Primers, Alignment, History'], ['Ctrl+D', 'Open from NCBI'], ['Ctrl+P', 'Print'], ['Ctrl + / Ctrl − / Ctrl+0', 'Zoom the map'], ['A C G T N', 'Type bases in the Sequence view'], ['Shift+click, Shift+arrows', 'Extend the selection'], ['Click an amino acid', 'Select the three bases that encode it'], ['Drag across amino acids', 'Select codon by codon'], ['Double-click an amino acid', 'Select the whole translated feature'], ['Double-click a feature', 'Edit the feature'], ['Right-click', 'Context menu']];
     dialog({ title: 'Keyboard Shortcuts', body: `<table class="grid"><tbody>${rows.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td></tr>`).join('')}</tbody></table>`, buttons: [{ label: 'Close', primary: true }] });
   }
   function dlgAbout() {
@@ -8939,6 +8990,16 @@ svg .prim { cursor: pointer; }
     if (!inField) {
       map.z = () => (e.shiftKey ? redo() : undo()); map.y = redo;
       map.a = () => D() && setSel(0, D().seq.length, { anchor: 0 });
+      // Ctrl+Shift+C copies the reverse complement, Ctrl+Alt+C the translation
+      if (k === 'c' && (e.shiftKey || e.altKey)) {
+        const d2 = D();
+        if (d2 && isNuc(d2) && selLen(d2)) {
+          e.preventDefault();
+          if (e.altKey) copyText(DNA.translate(selSeq(d2)), 'Copied the translation');
+          else copyText(DNA.rc(selSeq(d2)), 'Copied the reverse complement');
+        }
+        return;
+      }
     }
     if (map[k]) { e.preventDefault(); map[k](); }
   });
