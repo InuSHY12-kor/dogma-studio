@@ -116,7 +116,9 @@ svg .prim { cursor: pointer; }
     commit(d, src.histLabel || 'Opened ' + d.name, { initial: true });
     return d;
   }
-  function snapshot(d) { return JSON.stringify({ name: d.name, seq: d.seq, prot: d.prot || '', circular: d.circular, features: d.features, primers: d.primers }); }
+  // The construction record and custom colours ride along in the snapshot, so trimming
+  // the history or recolouring a region can be undone like any other change.
+  function snapshot(d) { return JSON.stringify({ name: d.name, seq: d.seq, prot: d.prot || '', circular: d.circular, features: d.features, primers: d.primers, provenance: d.provenance || null, colors: d.colors || [] }); }
   function commit(d, label, o = {}) {
     d.hist = d.hist.slice(0, d.hi + 1);
     const last = d.hist[d.hist.length - 1];
@@ -132,6 +134,8 @@ svg .prim { cursor: pointer; }
     const s = JSON.parse(d.hist[i].snap);
     d.name = s.name; d.seq = s.seq; d.circular = s.circular; d.features = s.features; d.primers = s.primers;
     if (s.prot !== undefined) d.prot = s.prot;
+    if (s.provenance !== undefined) d.provenance = s.provenance;
+    if (s.colors !== undefined) d.colors = s.colors;
     d.hi = i; d.ver++; d.cache = null; d.dirty = true;
     const n = d.seq.length;
     d.sel = { start: Math.min(d.sel.start, n), end: Math.min(d.sel.end, n) };
@@ -387,6 +391,7 @@ svg .prim { cursor: pointer; }
         { label: 'Save As…', key: 'Ctrl+Shift+S', dis: !has, act: () => saveDoc(true) },
         { label: 'Export FASTA…', dis: !has, act: exportFasta },
         { label: 'Export Map Image (SVG)…', dis: !has, act: exportSVG },
+        { label: 'Export History…', dis: !has, act: exportHistory },
         '-',
         { label: 'Print…', key: 'Ctrl+P', dis: !has, act: dlgPrint },
         { label: 'Export PDF…', dis: !has, act: () => dlgPrint(true) },
@@ -410,7 +415,9 @@ svg .prim { cursor: pointer; }
         { label: 'Go To Position…', key: 'Ctrl+G', dis: !has, act: dlgGoto },
         '-',
         { label: 'Find', items: FIND_MODES.map(([k, t]) => ({ label: t + '…', key: k === 'dna' ? 'Ctrl+F' : '', chk: S.find.mode === k, dis: !has, act: () => openFind(k) })) },
-        { label: 'Rename Sequence…', dis: !has, act: dlgRename }
+        { label: 'Rename Sequence…', dis: !has, act: dlgRename },
+        '-',
+        { label: 'Copy History', dis: !has, act: () => copyText(historyText(d), 'History copied as text') }
       ] },
       { label: 'View', items: [
         { label: 'Map', key: 'Ctrl+1', chk: S.view === 'map', dis: !has, act: () => setView('map') },
@@ -2799,6 +2806,102 @@ svg .prim { cursor: pointer; }
     return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><line x1="${m}" y1="${y}" x2="${m + w}" y2="${y}" stroke="#2f3644" stroke-width="1.6"/>${boxes}</svg>`;
   }
 
+  // ---------------------------------------------------------------- history as text
+  /* The construction tree written out as plain text, which is what Show as Text,
+   * Export History, Copy History and the printed summary all use. */
+  function historyText(d) {
+    const out = [];
+    out.push(`History of ${d.name}`);
+    out.push(`${fmt(d.seq.length)} bp, ${d.circular ? 'circular' : 'linear'}`);
+    out.push('');
+    const walk = (node, depth) => {
+      const pad = '  '.repeat(depth);
+      out.push(`${pad}${depth ? '\u2514 ' : ''}${node.name}  (${fmt((node.seq || '').length)} bp${node.circular ? ', circular' : ''})`);
+      const k = node.source;
+      if (!k) return;
+      out.push(`${pad}   made by: ${k.method}${k.detail ? ' \u2014 ' + k.detail : ''}`);
+      if (k.primers && k.primers.length) out.push(`${pad}   primers: ${k.primers.join(', ')}`);
+      if (k.enzymes && k.enzymes.length) out.push(`${pad}   enzymes: ${k.enzymes.join(', ')}`);
+      for (const c of (k.inputs || [])) walk(c, depth + 1);
+    };
+    if (d.provenance) walk({ name: d.name, seq: d.seq, circular: d.circular, source: d.provenance }, 0);
+    else out.push('(no construction record \u2014 this sequence was opened rather than assembled here)');
+    out.push('');
+    out.push('Edits');
+    d.hist.forEach((h, i) => {
+      out.push(`  ${String(i + 1).padStart(3)}. ${new Date(h.t).toLocaleString()}  ${h.label}  (${fmt(h.len)} bp)${i === d.hi ? '   \u2190 current' : ''}`);
+    });
+    return out.join('\n');
+  }
+  function exportHistory() {
+    const d = D(), text = historyText(d);
+    const name = d.name.replace(/[^\w.-]+/g, '_') + '-history.txt';
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: name, content: text, filters: [{ name: 'Text', extensions: ['txt'] }] }).then(p2 => { if (p2) toast('Exported ' + p2.split(/[\\/]/).pop()); });
+    else downloadText(name, text);
+  }
+  // How deep the construction tree goes, and a trim to a chosen number of levels.
+  function provDepth(node) {
+    if (!node || !node.inputs || !node.inputs.length) return 1;
+    return 1 + Math.max(...node.inputs.map(c => provDepth(c.source)));
+  }
+  function trimProv(src, levels) {
+    if (!src) return null;
+    if (levels <= 0) return null;
+    return Object.assign({}, src, {
+      inputs: (src.inputs || []).map(c => Object.assign({}, c, { source: trimProv(c.source, levels - 1) }))
+    });
+  }
+  function dlgTrimHistory() {
+    const d = D();
+    const depth = d.provenance ? provDepth(d.provenance) : 0;
+    if (!depth) { toast('This file has no construction history to trim.'); return; }
+    dialog({
+      title: 'Trim History Tree',
+      body: `<div class="form">
+        <div class="full note">The history of ${esc(d.name)} is ${depth} level${depth === 1 ? '' : 's'} deep. Ancestral sequences are stored inside the file, so trimming makes the file smaller.</div>
+        <label for="thL">Keep</label><div class="row2"><input type="number" id="thL" value="${Math.max(1, depth - 1)}" min="0" max="${depth}" style="width:70px"> level(s) of ancestors</div>
+        <label></label><label><input type="checkbox" id="thAll"> Erase the entire history</label>
+        <div class="full hint">Undo puts the history back if this was a mistake.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Trim History', primary: true, danger: true, act: () => {
+        if ($('#thAll').checked) { d.provenance = null; commit(d, 'Erased the construction history'); renderAll(true); toast('History erased'); return; }
+        const levels = Math.max(0, Math.min(depth, parseInt(val('thL'), 10) || 0));
+        d.provenance = trimProv(d.provenance, levels);
+        commit(d, `Trimmed the construction history to ${levels} level${levels === 1 ? '' : 's'}`);
+        renderAll(true); toast(`History trimmed to ${levels} level${levels === 1 ? '' : 's'}`);
+      } }]
+    });
+  }
+  // Erase one operation and everything that fed into it, leaving its product in place.
+  function eraseFromHere(uid, seen) {
+    const d = D();
+    const node = seen.map[uid];
+    if (!node) return;
+    const strip = (src) => {
+      if (!src) return null;
+      if (src.__uid === uid) return null;
+      return Object.assign({}, src, { inputs: (src.inputs || []).map(c => Object.assign({}, c, { source: strip(c.source) })) });
+    };
+    // mark the stored tree so the right branch can be found again
+    const mark = (src, path) => {
+      if (!src) return;
+      src.__uid = path;
+      (src.inputs || []).forEach((c, i) => mark(c.source, path + '.' + i));
+    };
+    mark(d.provenance, 'r');
+    const target = node.source ? node.source.__uid : null;
+    if (!target) { toast('Nothing to erase below that step.'); return; }
+    const strip2 = src => {
+      if (!src) return null;
+      if (src.__uid === target) return null;
+      return Object.assign({}, src, { inputs: (src.inputs || []).map(c => Object.assign({}, c, { source: strip2(c.source) })) });
+    };
+    d.provenance = strip2(d.provenance);
+    commit(d, 'Erased an operation and its ancestors');
+    renderAll(true);
+    toast('Operation and its ancestors erased');
+  }
+
   function provCard(node, depth) {
     const sizeTxt = `${fmt((node.seq || '').length)} bp`;
     const kids = node.source ? [node.source] : [];
@@ -2810,7 +2913,7 @@ svg .prim { cursor: pointer; }
         ${node.features && node.features.length ? `<div class="pvfeat">${node.features.slice(0, 4).map(f => esc(f.name)).join(', ')}${node.features.length > 4 ? ` +${node.features.length - 4}` : ''}</div>` : ''}
         <button class="btn pvopen" data-open="${esc(node.uid)}">Open</button>
       </div>
-      ${kids.map(k => `<div class="pvstep"><span class="pvmethod">${esc(k.method)}</span>${k.detail ? `<span class="pvdetail">${esc(k.detail)}</span>` : ''}${k.primers && k.primers.length ? `<span class="pvprimers">${k.primers.map(esc).join(' · ')}</span>` : ''}</div>
+      ${kids.map(k => `<div class="pvstep" data-uid="${esc(node.uid)}" title="Click to colour what this step contributed"><span class="pvmethod">${esc(k.method)}</span>${k.detail ? `<span class="pvdetail">${esc(k.detail)}</span>` : ''}${k.primers && k.primers.length ? `<span class="pvprimers">${k.primers.map(x => `<a href="#" data-prim="${esc(x)}">${esc(x)}</a>`).join(' · ')}</span>` : ''}</div>
         <div class="pvrow">${(k.inputs || []).map(c => provCard(c, depth + 1)).join('')}</div>`).join('')}
     </div>`;
   }
@@ -2850,7 +2953,14 @@ svg .prim { cursor: pointer; }
     const v = $('#view');
     const tabBar = `<div class="ptools">
       <div class="seg" style="width:260px"><button data-ht="tree" class="${S.histTab === 'tree' ? 'on' : ''}">How it was made</button><button data-ht="edits" class="${S.histTab === 'edits' ? 'on' : ''}">Edits (${d.hist.length})</button></div>
+      <button class="btn${S.histText ? ' pri' : ''}" id="htText">${S.histText ? 'Show as Maps' : 'Show as Text'}</button>
+      <button class="btn" id="htAct">History Actions ▾</button>
       <span class="note">${d.provenance ? esc(d.provenance.method) : 'No construction record — this sequence was opened rather than assembled here.'}</span></div>`;
+    if (S.histText) {
+      v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll"><pre class="histtext">${esc(historyText(d))}</pre></div></div>`;
+      bindHistBar(d);
+      return;
+    }
     if (S.histTab === 'tree') {
       if (!d.provenance) {
         v.innerHTML = `<div class="panel">${tabBar}<div class="empty"><h2>No construction record</h2><p>When a sequence is built here by restriction cloning, Gibson or Golden Gate assembly, Gateway recombination or codon optimisation, this view shows what it was made from: the method, the pieces, the primers, and the sequence of each piece.</p></div></div>`;
@@ -2859,10 +2969,29 @@ svg .prim { cursor: pointer; }
         const root = tagProv(JSON.parse(JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, source: d.provenance })), seen);
         v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll"><div class="pvtree">${provCard(root, 0)}</div></div></div>`;
         v.querySelector('.pvtree').onclick = e => {
-          const b = e.target.closest('[data-open]'); if (!b) return;
-          const node = seen.map[b.dataset.open];
-          if (!node || !node.seq) return;
-          addDoc({ name: node.name, seq: node.seq, circular: !!node.circular, features: node.features || [], primers: [], histLabel: 'Opened from the construction history' });
+          const b = e.target.closest('[data-open]');
+          if (b) {
+            const node = seen.map[b.dataset.open];
+            if (!node || !node.seq) return;
+            addDoc({ name: node.name, seq: node.seq, circular: !!node.circular, features: node.features || [], primers: [], histLabel: 'Opened from the construction history' });
+            return;
+          }
+          const pr = e.target.closest('[data-prim]');
+          if (pr) { dlgHistoryPrimer(pr.dataset.prim); return; }
+          const st = e.target.closest('.pvstep');
+          if (st) {
+            v.querySelectorAll('.pvstep.on').forEach(x => x.classList.remove('on'));
+            st.classList.add('on');
+            S.provSel = st.dataset.uid || null;
+            showProvColors(d, seen.map[st.dataset.uid]);
+          }
+        };
+        v.querySelector('.pvtree').oncontextmenu = e => {
+          const st = e.target.closest('.pvstep'); if (!st) return;
+          e.preventDefault();
+          showCtx(e.clientX, e.clientY, [
+            { label: 'Erase Operation Plus Ancestors', act: () => eraseFromHere(st.dataset.uid, seen) }
+          ]);
         };
       }
     } else {
@@ -2877,7 +3006,64 @@ svg .prim { cursor: pointer; }
         restore(d, +it.dataset.h); renderAll();
       };
     }
-    v.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-ht]'); if (!b) return; S.histTab = b.dataset.ht; renderView(); };
+    bindHistBar(d);
+  }
+  function bindHistBar(d) {
+    const v = $('#view');
+    const seg = v.querySelector('.seg');
+    if (seg) seg.onclick = e => { const b = e.target.closest('[data-ht]'); if (!b) return; S.histTab = b.dataset.ht; renderView(); };
+    const tx = v.querySelector('#htText');
+    if (tx) tx.onclick = () => { S.histText = !S.histText; renderView(); };
+    const act = v.querySelector('#htAct');
+    if (act) act.onclick = e => {
+      const r = e.target.getBoundingClientRect();
+      showCtx(r.left, r.bottom, [
+        { label: 'Copy History', act: () => copyText(historyText(d), 'History copied as text') },
+        { label: 'Export History…', act: exportHistory },
+        '-',
+        { label: 'Erase Selected Operation Plus Ancestors', dis: !S.provSel, act: () => {
+          const seen = { n: 0, map: {} };
+          tagProv(JSON.parse(JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, source: d.provenance })), seen);
+          eraseFromHere(S.provSel, seen);
+        } },
+        { label: 'Trim History Tree…', dis: !d.provenance, act: dlgTrimHistory },
+        '-',
+        { label: 'Clear the Edit List', dis: d.hist.length < 2, act: () => {
+          d.hist = [d.hist[d.hi]]; d.hi = 0; renderAll(true); toast('Edit list cleared');
+        } }
+      ]);
+    };
+  }
+  // What one step of the construction contributed, coloured on the product.
+  function showProvColors(d, node) {
+    if (!node || !node.source) return;
+    const pieces = (node.source.inputs || []).map(c => c.seq).filter(Boolean);
+    if (!pieces.length) { toast(`${node.source.method}: no stored input sequence to match.`); return; }
+    const ranges = [];
+    for (const piece of pieces) {
+      const hits = DNA.searchDNA(d.seq, d.circular, piece.length > 200 ? piece.slice(0, 200) : piece);
+      for (const h of hits.slice(0, 4)) ranges.push({ start: h.start, end: (h.start + piece.length) % d.seq.length || d.seq.length });
+    }
+    if (!ranges.length) { toast(`${node.source.method}: the inputs are not found unchanged in this sequence.`); return; }
+    d.changed = ranges;
+    d.opts.colorScheme = 'history';
+    renderAll(true);
+    toast(`${node.source.method}: ${ranges.length} region${ranges.length === 1 ? '' : 's'} coloured`);
+  }
+  function dlgHistoryPrimer(name) {
+    const d = D();
+    const p = d.primers.find(x => x.name === name);
+    dialog({
+      title: 'Primer — ' + name,
+      body: p ? `<div class="form">
+        <label>Sequence</label><div class="mono wrap">${esc(p.seq)}</div>
+        <label>Length</label><div>${p.seq.length} nt</div>
+        <label>Tm</label><div>${DNA.tm(p.seq).toFixed(1)} °C</div>
+        <label>GC</label><div>${DNA.gcPct(p.seq).toFixed(0)} %</div>
+        <label>Note</label><div>${esc(p.notes || '—')}</div></div>`
+        : `<div class="hint">This primer was used to make the sequence but is not stored in this file. Its name is recorded in the history.</div>`,
+      buttons: [{ label: 'Close', primary: true }]
+    });
   }
 
   function oldRenderHistory() {
@@ -6023,6 +6209,9 @@ svg .prim { cursor: pointer; }
     if (opts.alignments && d.alignments.length) {
       parts.push(`<h2>Sequencing alignments</h2><table><thead><tr><th>Read</th><th>Strand</th><th>Covers</th><th>Identity</th><th>Differences</th></tr></thead><tbody>${d.alignments.map(a => `<tr><td>${esc(a.read.name)}</td><td>${a.strand > 0 ? 'forward' : 'reverse'}</td><td>${fmt(a.refStart + 1)}..${fmt(a.refEnd)}</td><td>${a.identity.toFixed(1)}%</td><td>${a.diffs.length ? esc(a.diffs.map(x => `${fmt(x.pos + 1)} ${x.type === 'mis' ? x.ref + '→' + x.read : x.type}`).join(', ')) : 'none'}</td></tr>`).join('')}</tbody></table>`);
     }
+    if (opts.history) {
+      parts.push(`<h2>History</h2><div class="seqblock">${esc(historyText(d))}</div>`);
+    }
     return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(d.name)}</title><style>${css}</style></head><body>${parts.join('')}</body></html>`;
   }
   function dlgPrint(pdf) {
@@ -6032,12 +6221,13 @@ svg .prim { cursor: pointer; }
       title: pdf ? 'Export PDF' : 'Print',
       body: `<div class="form"><label>Include</label><div>
         ${cb('prmap', 'Map', true)}${cb('prfeat', 'Feature table', true)}${cb('prprim', 'Primer table', d.primers.length > 0)}
-        ${cb('prenz', 'Restriction sites', false)}${cb('prseq', 'Full sequence', false)}${cb('pralign', 'Sequencing alignments', d.alignments.length > 0)}</div>
+        ${cb('prenz', 'Restriction sites', false)}${cb('prseq', 'Full sequence', false)}${cb('pralign', 'Sequencing alignments', d.alignments.length > 0)}
+        ${cb('prhist', 'History tree as text', false)}</div>
         <div class="full hint">The map is printed as it is currently shown, so switch between the circular and linear map before printing.</div>
         <div class="full err"></div></div>`,
       buttons: [{ label: 'Cancel' }, {
         label: pdf ? 'Save PDF…' : 'Print…', primary: true, act: () => {
-          const opts = { map: $('#prmap').checked, features: $('#prfeat').checked, primers: $('#prprim').checked, enzymes: $('#prenz').checked, sequence: $('#prseq').checked, alignments: $('#pralign').checked };
+          const opts = { map: $('#prmap').checked, features: $('#prfeat').checked, primers: $('#prprim').checked, enzymes: $('#prenz').checked, sequence: $('#prseq').checked, alignments: $('#pralign').checked, history: $('#prhist').checked };
           if (!Object.values(opts).some(Boolean)) return showErr('Choose at least one section.');
           const html = buildPrintHTML(d, opts);
           closeDialog();

@@ -442,3 +442,10 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .focusbar .fcmini svg { display: block; }
 .focusbar .fcbox { fill: rgba(37, 99, 201, .22); stroke: var(--accent); stroke-width: 1.5; }
 .focusbar.mini .fcmini { display: none; }
+
+/* History as text, and the selectable operation label */
+.histtext { font: 12px/1.55 var(--f-mono); white-space: pre; padding: 10px 12px; margin: 0; }
+.pvstep { cursor: pointer; }
+.pvstep.on { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.pvprimers a { color: var(--accent); text-decoration: none; }
+.pvprimers a:hover { text-decoration: underline; }
