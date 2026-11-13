@@ -143,6 +143,56 @@ function openAssemblyWindow(payload) {
   asmWin.on('closed', () => { asmWin = null; });
 }
 
+/* A tool window: its own OS window running one page of the app, so the main window
+ * stays usable beside it. Each kind keeps one window, which is reused and refreshed. */
+const toolWins = new Map();
+const TOOL_SPECS = {
+  featuredb: { file: 'tool-window.html', title: 'Common Features', w: 1040, h: 760 },
+  enzymedb: { file: 'tool-window.html', title: 'Restriction Enzymes', w: 980, h: 720 },
+  simulator: { file: 'tool-window.html', title: 'Simulation', w: 1280, h: 860 },
+  cloning: { file: 'tool-window.html', title: 'Cloning', w: 1200, h: 840 }
+};
+let toolPayloads = {};
+function openToolWindow(kind, payload) {
+  const spec = TOOL_SPECS[kind];
+  if (!spec) return;
+  toolPayloads[kind] = payload || {};
+  const existing = toolWins.get(kind);
+  if (existing && !existing.isDestroyed()) {
+    existing.webContents.send('tool-reload', { kind, payload: toolPayloads[kind] });
+    existing.show(); existing.focus();
+    return;
+  }
+  const w = new BrowserWindow({
+    width: spec.w, height: spec.h, minWidth: 700, minHeight: 520,
+    title: spec.title, backgroundColor: '#ffffff',
+    parent: win || undefined, modal: false, show: false,
+    icon: path.join(__dirname, 'build', 'icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true, nodeIntegration: false, spellcheck: false
+    }
+  });
+  w.setMenu(null);
+  w.loadFile(path.join(__dirname, 'app', spec.file), { query: { kind } });
+  w.once('ready-to-show', () => w.show());
+  w.webContents.on('will-navigate', e => e.preventDefault());
+  w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  w.on('closed', () => toolWins.delete(kind));
+  toolWins.set(kind, w);
+}
+ipcMain.handle('tool-open', (_e, { kind, payload }) => { openToolWindow(kind, payload); return { ok: true }; });
+ipcMain.handle('tool-init', (_e, kind) => ({ kind, payload: toolPayloads[kind] || {} }));
+// A tool window asks the main window to do something with the result.
+ipcMain.on('tool-send', (_e, msg) => { if (win && !win.isDestroyed()) win.webContents.send('tool-message', msg); });
+// The main window pushes fresh documents to every open tool window.
+ipcMain.on('tool-sync', (_e, docs) => {
+  for (const [kind, w] of toolWins) {
+    if (toolPayloads[kind]) toolPayloads[kind].docs = docs;
+    if (w && !w.isDestroyed()) w.webContents.send('tool-docs', docs);
+  }
+});
+
 ipcMain.handle('assembly-open', (_e, payload) => { openAssemblyWindow(payload); return { ok: true }; });
 ipcMain.handle('assembly-init', () => asmPayload || { method: 'gibson', docs: [] });
 // The main window pushes a fresh snapshot whenever its documents change.

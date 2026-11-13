@@ -450,6 +450,7 @@ svg .prim { cursor: pointer; }
   function renderAll(keepScroll) {
     renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderCompanion(); renderInfo(); renderStatus();
     if (host && host.assemblySync) { try { host.assemblySync(asmDocSnapshot()); } catch (e) { } }
+    if (host && host.toolSync) { try { host.toolSync(asmDocSnapshot()); } catch (e) { } }
     document.title = D() ? `${D().name}${D().dirty ? ' •' : ''} — GeneCanvas` : 'GeneCanvas';
   }
   function refreshSel(scroll) {
@@ -642,7 +643,7 @@ svg .prim { cursor: pointer; }
         '-',
         { label: 'Detect Common Features…', dis: !has, act: detectCommon },
         { label: 'Add to Common Features…', dis: !has || !targetFeature(d), act: addToCommon },
-        { label: 'Browse Common Features…', act: dlgFeatureDB },
+        { label: 'Browse Common Features…', act: () => openTool('featuredb') },
         '-',
         { label: 'Import Features from Another File…', dis: !has, act: () => dlgImport('features') },
         { label: 'Export Feature Data…', dis: !has || !d.features.length, act: dlgExportFeatures },
@@ -705,7 +706,7 @@ svg .prim { cursor: pointer; }
         { label: 'Highlight Selected Enzyme Site', dis: !has || !S.enzSel, act: () => toggleEnzHighlight(S.enzSel.name) },
         { label: 'Clear Highlighting for All Enzyme Sites', dis: !has || !enzHi(d).length, act: () => { d.enzHi = []; renderAll(true); } },
         '-',
-        { label: 'Restriction Enzymes…', act: () => dlgEnzymeDB() },
+        { label: 'Restriction Enzymes…', act: () => openTool('enzymedb') },
         { label: 'Noncutters…', dis: !has, act: dlgNoncutters },
         '-',
         { label: 'Save Enzyme Set…', dis: !has || !d.chosen.length, act: dlgSaveEnzSet },
@@ -753,8 +754,8 @@ svg .prim { cursor: pointer; }
       { label: 'Analyze', items: [
         { label: 'Choose Enzymes…', dis: !has, act: () => dlgEnzymeChooser() },
         { label: 'Enzyme Sets…', dis: !has, act: dlgEnzymeSets },
-        { label: 'Enzyme Database…', act: dlgEnzymeDB },
-        { label: 'Feature Database…', act: dlgFeatureDB },
+        { label: 'Enzyme Database…', act: () => openTool('enzymedb') },
+        { label: 'Feature Database…', act: () => openTool('featuredb') },
         '-',
         { label: 'Primer Structures…', dis: !has || !d.primers.length, act: () => dlgPrimerStruct(null, null) },
         { label: 'RNA Secondary Structure…', dis: !has, act: dlgRNA },
@@ -803,7 +804,7 @@ svg .prim { cursor: pointer; }
           { label: 'Make a DNA Copy', act: () => addDoc({ kind: 'dna', name: d.name + ' (DNA)', seq: d.seq, circular: d.circular, features: d.features, primers: [], histLabel: 'Copied from ' + d.name }) },
           '-',
           { label: 'Detect Common Features', act: detectCommon },
-          { label: 'Feature Database…', act: dlgFeatureDB }
+          { label: 'Feature Database…', act: () => openTool('featuredb') }
         ]
       });
       base.push(keep('Help'));
@@ -2841,13 +2842,13 @@ svg .prim { cursor: pointer; }
       choose: () => { done(); dlgEnzymeChooser(); },
       enzSets: () => { done(); dlgEnzymeSets(); },
       noncut: () => { done(); dlgNoncutters(); },
-      enzdb: () => { done(); dlgEnzymeDB(); },
+      enzdb: () => { done(); openTool('enzymedb'); },
       showAllEnz: () => { enzHidden(d).length = 0; renderAll(true); },
       useSet: () => { if (value) { d.chosen = SET.enzymeSets[value].slice(); o.enzMode = 'chosen'; renderAll(true); } },
       addFeat: () => { done(); dlgFeature(null); },
       detect: () => { done(); detectCommon(); },
       featTable: () => { done(); setView('feat'); },
-      featdb: () => { done(); dlgFeatureDB(); },
+      featdb: () => { done(); openTool('featuredb'); },
       addPrimer: () => { done(); dlgPrimer(null); },
       primerTable: () => { done(); setView('primer'); },
       hyb: () => { done(); dlgHybridization(); },
@@ -6432,9 +6433,71 @@ svg .prim { cursor: pointer; }
   function asmDocSnapshot() {
     return S.docs.filter(isNuc).map(d => ({
       id: d.id, name: d.name, seq: d.seq, circular: d.circular, kind: kindOf(d),
-      features: d.features.map(f => ({ name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand, color: f.color })),
+      features: d.features.map(f => ({ id: f.id, name: f.name, type: f.type, start: f.start, end: f.end, strand: f.strand, color: f.color })),
+      primers: d.primers.map(p2 => ({ id: p2.id, name: p2.name, seq: p2.seq, color: p2.color })),
       chosen: d.chosen.slice()
     }));
+  }
+  /* A tool window: its own OS window when Electron is there, a dialog in the same page
+   * otherwise, so nothing is lost in a browser. */
+  function openTool(kind, extra) {
+    const payload = Object.assign({
+      docs: asmDocSnapshot(), current: D() ? D().id : null,
+      myFeatures: SET.myFeatures || [], favourites: SET.favFeatures || []
+    }, extra || {});
+    if (host && host.openTool) { host.openTool(kind, payload); return; }
+    // in a browser the same page is shown in a wide dialog
+    const titles = { featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' };
+    dialog({
+      title: titles[kind] || 'GeneCanvas', wide: true,
+      body: `<div id="toolhost" style="height:70vh;display:flex;flex-direction:column"></div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        const el = box.querySelector('#toolhost');
+        const doc = payload.docs.find(x => x.id === payload.current) || payload.docs[0] || null;
+        const ctx = {
+          send: msg => handleToolMessage(msg),
+          copy: (t, m) => copyText(t, m), toast, menu: (anchor, items) => {
+            const r = anchor.getBoundingClientRect();
+            showCtx(r.left, r.bottom, items);
+          },
+          docs: payload.docs, doc,
+          sites: doc ? DNA.findSites(doc.seq, doc.circular) : null,
+          myFeatures: payload.myFeatures, favourites: payload.favourites,
+          saveFavourites: list => { SET.favFeatures = list; saveSettings(); }
+        };
+        if (kind === 'featuredb') TOOLUI.featureBrowser(el, ctx);
+        else if (kind === 'enzymedb') TOOLUI.enzymeBrowser(el, ctx);
+        else if (kind === 'simulator') SIMUI.open(el, ctx);
+        else if (kind === 'cloning') CLONEUI.open(el, ctx);
+      }
+    });
+  }
+  /* What a tool window asks the main window to do. */
+  function handleToolMessage(msg) {
+    if (!msg) return;
+    const d = D();
+    if (msg.kind === 'favourites') { SET.favFeatures = msg.list; saveSettings(); return; }
+    if (msg.kind === 'addFeature') {
+      if (!d || !isNuc(d)) { toast('Open a DNA sequence first.'); return; }
+      const f = msg.feature;
+      const hits = f.kind === 'protein'
+        ? DNA.searchProtein(d.seq, d.circular, f.seq)
+        : DNA.searchDNA(d.seq, d.circular, f.seq);
+      if (!hits.length) { toast(`“${f.name}” is not in ${d.name}.`); return; }
+      for (const h of hits) addFeature({ name: f.name, type: f.type || 'misc_feature', start: h.start, end: h.end, strand: h.strand, color: f.color, notes: f.note || '' });
+      toast(`Added ${hits.length} × ${f.name}`);
+      return;
+    }
+    if (msg.kind === 'editCommonFeature') { dlgFeatureDB(); return; }
+    if (msg.kind === 'exportCommon' || msg.kind === 'importCommon') { dlgFeatureDB(); return; }
+    if (msg.kind === 'product') { addDoc(msg.src); toast(`${esc(msg.src.name)} — ${fmt(msg.src.seq.length)} bp`); return; }
+    if (msg.kind === 'select') {
+      const doc = S.docs.find(x => x.id === msg.docId);
+      if (doc) { S.active = S.docs.indexOf(doc); setSel(msg.start, msg.end, { anchor: msg.start, scroll: true }); renderAll(true); }
+      return;
+    }
+    if (msg.kind === 'gel') { newGelDoc(msg.opts || {}); return; }
   }
   function dlgAssembly(method) {
     if (!S.docs.some(isNuc)) { toast('Open a sequence first.'); return; }
@@ -9147,6 +9210,7 @@ svg .prim { cursor: pointer; }
   // host integration (Electron)
   if (host) {
     if (host.onOpenFile) host.onOpenFile(f => { const bin = Uint8Array.from(atob(f.data), c => c.charCodeAt(0)); loadContent(f.name, /\.(dna|ab1)$/i.test(f.name) ? bin.buffer : new TextDecoder().decode(bin), f.path); });
+    if (host.onToolMessage) host.onToolMessage(handleToolMessage);
     if (host.onAssemblyProduct) host.onAssemblyProduct(src => {
       addDoc(src);
       toast(`${esc(src.name)} — ${fmt(src.seq.length)} bp from the cloning window`);

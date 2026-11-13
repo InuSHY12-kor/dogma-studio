@@ -581,3 +581,56 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .segtbl input[type=text] { width: 100%; padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .segtbl input[type=number] { padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .segtbl tr.on > td { background: #e8effb; }
+
+/* ---------------------------------------------------------------- tool windows */
+body.toolwin .win { height: 100vh; }
+.toolroot { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* feature and enzyme browsers share this shape */
+.fbwrap, .ebwrap { flex: 1; min-height: 0; display: flex; gap: 10px; padding: 10px; }
+.fbleft { flex: 0 0 260px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.fbleft select, .fbleft input[type=text] { width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
+.fblist { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--win); }
+.fbitem { display: flex; align-items: center; gap: 6px; padding: 3px 7px; cursor: default; font-size: 12px; }
+.fbitem:hover { background: var(--chrome); }
+.fbitem.on { background: var(--accent); color: #fff; }
+.fbitem.on .note { color: #dce7fb; }
+.fbitem .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fbitem .star { color: var(--faint); cursor: pointer; }
+.fbitem .star.on { color: #e8a33d; }
+.fbitem.on .star { color: #cfe0ff; }
+.fbitem.on .star.on { color: #ffd766; }
+.fbbtns { display: flex; gap: 5px; }
+.fbbtns .btn { flex: 1; font-size: 11.5px; }
+.ebsearch { border: 2px solid var(--danger) !important; border-radius: 14px !important; padding: 4px 10px !important; }
+
+.fbright { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+.fbhead { display: flex; align-items: baseline; gap: 10px; font-size: 16px; }
+.fbhead .fbtype { margin-left: auto; color: var(--muted); font-size: 12px; }
+.fbinfo { border: 1px solid var(--border); border-radius: 4px; background: #fffdf5; padding: 8px 10px; }
+.fbtbl { width: 100%; font-size: 12px; }
+.fbtbl th { text-align: left; vertical-align: top; width: 92px; color: var(--muted); font-weight: 500; padding: 2px 8px 2px 0; }
+.fbtbl td { vertical-align: top; padding: 2px 0; }
+.fbsum { margin-top: 6px; font-size: 12px; }
+.fbchk { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-soft); font-size: 12px; }
+.fbmapwrap { border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--canvas); }
+.fbmaphead { display: flex; justify-content: flex-end; }
+svg.imap text.ftxt { font-size: 10px; fill: #1c2230; }
+svg.imap [data-pick] { cursor: pointer; }
+svg.imap [data-pick]:hover { opacity: .78; }
+
+/* enzyme browser */
+.ebtitle { display: flex; align-items: center; gap: 10px; font-size: 17px; color: var(--accent); }
+.ebtitle .btn { margin-left: auto; font-size: 11.5px; }
+.ebcutbox { border: 1px solid var(--border); border-radius: 4px; background: #fffdf0; padding: 6px 10px; }
+.enzcut { margin: 0; font: 13px/1.35 var(--f-mono); white-space: pre; }
+.ebfacts { display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 12px; color: var(--muted); }
+.ebsup { border: 1px solid var(--border); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ebsup select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; font: inherit; width: 240px; }
+.ebbuf { border-collapse: collapse; font-size: 12px; }
+.ebbuf th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 10px 2px 0; }
+.ebbuf td { border: 1px solid var(--border-soft); padding: 2px 10px; background: #eef1fb; text-align: center; }
+.ebbuf td.best { background: #cfe8d2; font-weight: 600; }
+.ebrow { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ebrow label { flex: 0 0 180px; color: var(--muted); }
+.ebrow select { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
