@@ -255,7 +255,7 @@
       // and will be cut during the reaction, so they have to be removed first.
       if (n > 2) {
         undomesticated.push({ name: doc.name, sites: n });
-        notes.push(`“${doc.name}” has ${n} ${enzyme} sites, so ${n - 2} lie inside the part. Remove them with codon optimisation before assembling.`);
+        notes.push(`“${doc.name}” has ${n} ${enzyme} sites, so ${n - 2} lie inside the part. Remove them with codon optimization before assembling.`);
       }
       const pick = p.fragment != null ? all[p.fragment] : all.slice().sort((a, b) => b.size - a.size)[0];
       if (!pick) throw new Error(`“${doc.name}” has no usable fragment.`);

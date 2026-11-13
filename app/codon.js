@@ -1,4 +1,4 @@
-/* GeneCanvas — codon optimisation. Exposes window.CODON
+/* GeneCanvas — codon optimization. Exposes window.CODON
  *
  * Works on a coding sequence and rewrites synonymous codons for a chosen organism,
  * while respecting regions the user wants left alone, removing unwanted restriction
@@ -214,7 +214,7 @@
     const maxRun = opts.maxRun || 0;
     if (maxRun >= 4) cur = breakRuns(cur, maxRun, locked, u, protein, log);
 
-    if (translate(cur) !== protein) throw new Error('Internal error: the optimised sequence does not encode the same protein.');
+    if (translate(cur) !== protein) throw new Error('Internal error: the optimized sequence does not encode the same protein.');
 
     const changes = [];
     const after = codonsOf(cur);
@@ -361,7 +361,7 @@
     return cur;
   }
 
-  // Builds a coding sequence from a protein, then optimises it.
+  // Builds a coding sequence from a protein, then optimizes it.
   function fromProtein(protein, opts = {}) {
     const p = String(protein).toUpperCase().replace(/[^A-Z*]/g, '');
     if (!p) throw new Error('Enter a protein sequence.');

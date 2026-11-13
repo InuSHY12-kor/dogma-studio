@@ -733,7 +733,7 @@ svg .prim { cursor: pointer; }
         { label: 'Show att Sites in This Sequence', dis: !has, act: showAttSites }
       ] },
       { label: 'Tools', items: [
-        { label: 'Codon Optimisation…', dis: !has, act: dlgCodon },
+        { label: 'Codon Optimization…', dis: !has, act: dlgCodon },
         { label: 'Compare Sequences…', dis: S.docs.length < 2, act: dlgCompare },
         '-',
         { label: 'Design PCR Primers…', dis: !has, act: dlgDesignPCR },
@@ -822,7 +822,7 @@ svg .prim { cursor: pointer; }
         { label: 'Copy Sequence', act: () => copyText(hasSel ? d.prot.slice(sel.a, sel.b) : d.prot, 'Copied protein sequence') },
         { label: 'Export FASTA…', act: exportFasta },
         '-',
-        { label: 'Back-translate and Codon-optimise…', act: () => dlgCodonFromProtein() },
+        { label: 'Back-translate and Codon-optimize…', act: () => dlgCodonFromProtein() },
         '-',
         { label: 'Look Up the Structure…', act: dlgProteinTools }
       ]
@@ -2786,15 +2786,18 @@ svg .prim { cursor: pointer; }
       }
       if (arr.length && arr[0].ty < 12) { arr[0].ty = 12; for (let i = 1; i < arr.length; i++) if (arr[i].ty < arr[i - 1].ty + sp) arr[i].ty = arr[i - 1].ty + sp; }
     }
+    const leads = [], texts = [];
     for (const l of labels) {
       const dy = l.ty - cy;
       let dx = Math.abs(dy) < Rl ? Math.sqrt(Rl * Rl - dy * dy) : 0;
       dx = Math.max(dx, 28) + 6;
       const tx = l.side === 0 ? cx + dx : cx - dx;
       const e1 = P(l.r0 + 1, l.a), e2 = P(Rl - 10, l.a);
-      g.push(`<polyline class="lead" points="${fmtP(e1)} ${fmtP(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
-      g.push(`<text class="lbl ${l.cls}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}">${esc(l.text)}</text>`);
+      leads.push(`<polyline class="lead" points="${fmtP(e1)} ${fmtP(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
+      texts.push(`<text class="lbl ${l.cls}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}">${esc(l.text)}</text>`);
     }
+    // every leader line first, then every label, so no line is drawn across a name
+    g.push(leads.join(''), texts.join(''));
     // center
     g.push(`<text class="ctr1" x="${cx}" y="${cy - 4}" text-anchor="middle">${esc(d.name)}</text><text class="ctr2" x="${cx}" y="${cy + 16}" text-anchor="middle">${fmt(n)} bp</text>`);
     S.mapGeom = { type: 'c', cx, cy, n, r1: Math.max(8, innerAll - 24), r2: Rl - 14, R, ang, rot };
@@ -2856,12 +2859,15 @@ svg .prim { cursor: pointer; }
     const top = 26;
     const baseY = top + nRows * 14 + 22;
     const g = [];
+    const elabelTexts = [];
     for (const l of elabels) {
       const y = top + (nRows - 1 - l.row) * 14;
       g.push(`<line class="lead" x1="${l.x.toFixed(1)}" y1="${baseY - 7}" x2="${l.x.toFixed(1)}" y2="${y + 4}"/>`);
-      g.push(`<text class="lbl e${l.u ? ' u' : ''}${l.hl ? ' hl' : ''}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}">${esc(l.text)}</text>`);
+      elabelTexts.push(`<text class="lbl e${l.u ? ' u' : ''}${l.hl ? ' hl' : ''}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}">${esc(l.text)}</text>`);
       g.push(`<line class="ecut" x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
     }
+    // the names go on top of every tick and leader line
+    g.push(elabelTexts.join(''));
     if (o.showGC) {
       const gd = gcData(d), H2 = 34;
       const lo = o.gcMin == null ? Math.floor(gd.lo) : o.gcMin, hi = o.gcMax == null ? Math.ceil(gd.hi) : o.gcMax;
@@ -3899,37 +3905,68 @@ svg .prim { cursor: pointer; }
     });
   }
   // The genetic code tables, as a 4x4x4 matrix, with the non-standard codons marked.
+  /* The genetic code as the standard 4x4x4 matrix: the first base down the left, the
+   * second across the top, the third down the right. Each cell carries the codon, the
+   * amino acid as Three (X), and that codon's relative usage in the chosen organism,
+   * scaled so the commonest codon for an amino acid is 1.00. */
   function dlgGeneticCodes() {
     const d = D();
     let pick = (d && d.opts.transCode) || '1';
+    const tables = CODON.tables();
+    let org = (SET.lastCodonTable && tables.some(t => t.key === SET.lastCodonTable)) ? SET.lastCodonTable : (tables[0] && tables[0].key) || '';
     const B = ['T', 'C', 'A', 'G'];
     const render = () => {
+      if (!$('#gcT')) return;
       const table = DNA.GENETIC_CODES[pick] || DNA.CODON;
       const spec = DNA.CODE_LIST.find(c => String(c.id) === String(pick)) || { changed: [] };
       const changed = new Set(spec.changed);
-      let html = '<table class="grid codetbl"><thead><tr><th></th>' + B.map(b2 => `<th colspan="4">2nd: ${b2}</th>`).join('') + '</tr></thead><tbody>';
+      let use = null;
+      try { use = org ? CODON.usage(org) : null; } catch (e) { use = null; }
+      const cell = (b1, b2, b3) => {
+        const c = b1 + b2 + b3, aa = table[c] || 'X';
+        const w = use ? (use.w[c] || 0) : null;
+        const frac = use ? (use.frac[c] || 0) : null;
+        const three = aa === '*' ? 'Stop' : (DNA.AA3[aa] || 'Xaa');
+        return `<td class="${changed.has(c) ? 'chg' : ''}${aa === '*' ? ' stopc' : ''}"${w != null ? ` title="${esc(c)} · ${esc(three)} (${esc(aa)}) · ${(frac * 100).toFixed(1)} % of this amino acid's codons"` : ` title="${esc(c)}"`}>
+          <div class="cdn"><span class="mono">${esc(c)}</span> <span class="aa3">${esc(three)}</span> <span class="aa1">(${esc(aa === '*' ? '*' : aa)})</span></div>
+          ${w != null ? `<div class="wbar"><i style="width:${(w * 100).toFixed(0)}%"></i><b>${w.toFixed(2)}</b></div>` : ''}
+        </td>`;
+      };
+      let html = `<table class="grid codetbl"><thead><tr>
+          <th class="axis">1st</th>${B.map(b2 => `<th>2nd &nbsp;<b>${b2}</b></th>`).join('')}<th class="axis">3rd</th>
+        </tr></thead><tbody>`;
       for (const b1 of B) {
-        for (const b3 of B) {
-          html += `<tr>${b3 === B[0] ? `<th rowspan="4">1st: ${b1}</th>` : ''}`;
-          if (b3 !== B[0]) html = html.slice(0, -4) + '<tr>';
-          html += B.map(b2 => {
-            const c = b1 + b2 + b3, aa = table[c] || 'X';
-            return `<td class="${changed.has(c) ? 'chg' : ''}${aa === '*' ? ' stopc' : ''}" title="${esc(c)} = ${esc(DNA.AA3[aa] || aa)}"><span class="mono">${esc(c)}</span> ${esc(DNA.AA3[aa] || aa)}</td>`;
-          }).join('');
-          html += '</tr>';
-        }
+        B.forEach((b3, i) => {
+          html += '<tr>';
+          if (i === 0) html += `<th class="axis" rowspan="4"><b>${b1}</b></th>`;
+          html += B.map(b2 => cell(b1, b2, b3)).join('');
+          html += `<th class="axis"><b>${b3}</b></th></tr>`;
+        });
       }
       html += '</tbody></table>';
-      $('#gcT').innerHTML = html + `<div class="hint">${spec.changed.length ? `Shaded codons differ from the standard code: ${spec.changed.join(', ')}.` : 'This table is the standard genetic code.'}</div>`;
+      $('#gcT').innerHTML = html;
+      $('#gcNote').innerHTML = (spec.changed.length
+        ? `Shaded codons differ from the standard code: <span class="mono">${spec.changed.join(', ')}</span>.`
+        : 'This table is the standard genetic code.')
+        + (use ? ` Usage from <b>${esc(use.name || org)}</b>, scaled so the commonest codon for each amino acid is 1.00.` : '');
     };
     dialog({
       title: 'Genetic Code Tables', wide: true,
-      body: `<div class="ecbar"><label class="inl">Code <select id="gcPick">${DNA.CODE_LIST.map(c => `<option value="${c.id}" ${String(c.id) === String(pick) ? 'selected' : ''}>${c.id}. ${esc(c.name)}</option>`).join('')}</select></label></div>
-        <div id="gcT"></div>`,
+      body: `<div class="ecbar">
+          <label class="inl">Code <select id="gcPick">${DNA.CODE_LIST.map(c => `<option value="${c.id}" ${String(c.id) === String(pick) ? 'selected' : ''}>${c.id}. ${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="inl">Codon usage <select id="gcOrg"><option value="">— none —</option>${tables.map(t => `<option value="${esc(t.key)}" ${t.key === org ? 'selected' : ''}>${esc(t.name || t.key)}</option>`).join('')}</select></label>
+        </div>
+        <div id="gcT"></div>
+        <div class="hint" id="gcNote"></div>`,
       buttons: [{ label: 'Close', primary: true }],
-      onOpen: box => { render(); box.querySelector('#gcPick').onchange = e => { pick = e.target.value; render(); }; }
+      onOpen: box => {
+        render();
+        box.querySelector('#gcPick').onchange = e => { pick = e.target.value; render(); };
+        box.querySelector('#gcOrg').onchange = e => { org = e.target.value; if (org) SET.lastCodonTable = org; render(); };
+      }
     });
   }
+
   // Features -> Add Translated Feature: the selected ORF, or the selection, as a CDS.
   function addTranslatedFeature() {
     const d = D();
@@ -4674,7 +4711,7 @@ svg .prim { cursor: pointer; }
     }
     if (S.histTab === 'tree') {
       if (!d.provenance) {
-        v.innerHTML = `<div class="panel">${tabBar}<div class="empty"><h2>No construction record</h2><p>When a sequence is built here by restriction cloning, Gibson or Golden Gate assembly, Gateway recombination or codon optimisation, this view shows what it was made from: the method, the pieces, the primers, and the sequence of each piece.</p></div></div>`;
+        v.innerHTML = `<div class="panel">${tabBar}<div class="empty"><h2>No construction record</h2><p>When a sequence is built here by restriction cloning, Gibson or Golden Gate assembly, Gateway recombination or codon optimization, this view shows what it was made from: the method, the pieces, the primers, and the sequence of each piece.</p></div></div>`;
       } else {
         const seen = { n: 0, map: {} };
         const root = tagProv(JSON.parse(JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, source: d.provenance })), seen);
@@ -5440,7 +5477,7 @@ svg .prim { cursor: pointer; }
   function dlgAbout() {
     dialog({
       title: 'About GeneCanvas',
-      body: `<p><b>GeneCanvas</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>A desktop editor for plasmids, RNA and protein sequences: maps, sequence editing, restriction analysis, features with segments and introns, primers, cloning simulation, codon optimisation, sequencing alignments and simulated gels.</p>
+      body: `<p><b>GeneCanvas</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>A desktop editor for plasmids, RNA and protein sequences: maps, sequence editing, restriction analysis, features with segments and introns, primers, cloning simulation, codon optimization, sequencing alignments and simulated gels.</p>
         <p class="hint">Opens GenBank (.gb, .gbk), FASTA, .dna and .ab1 trace files, and downloads from NCBI by accession. Saves GenBank and FASTA. The example plasmid is a synthetic sequence made for demonstration.</p>
         <p class="hint">Melting temperatures and structure free energies use the SantaLucia 1998 nearest-neighbour parameters; codon usage tables were computed from real NCBI coding sequences. RNA folding free energies are approximate and are marked as such where they are shown.</p>`,
       buttons: [{ label: 'Close', primary: true }]
@@ -6082,7 +6119,7 @@ svg .prim { cursor: pointer; }
     host2.innerHTML = out.length ? out.join('') : '<div class="empty"><p>No differences between these sequences.</p></div>';
   }
 
-  // ================================================================ codon optimisation
+  // ================================================================ codon optimization
   function dlgCodon() {
     const d = D(), n = d.seq.length;
     const orfs = analyze(d).orfs;
@@ -6148,7 +6185,7 @@ svg .prim { cursor: pointer; }
           const s = regionSeq();
           if (!s) throw new Error('Enter a range inside the sequence.');
           const r = CODON.inspectORF(s);
-          if (!r.ok && !$('#coForce').checked) throw new Error(`This is not a clean reading frame (${r.issues.join('; ')}). Fix the range, or tick “optimise anyway”.`);
+          if (!r.ok && !$('#coForce').checked) throw new Error(`This is not a clean reading frame (${r.issues.join('; ')}). Fix the range, or tick “optimize anyway”.`);
           const off = parseInt(val('coFrom'), 10) - 1;
           opts.preserve = preserve.map(p => $('#coRev').checked
             ? { start: s.length - (p.end - off), end: s.length - (p.start - off) }
@@ -6178,7 +6215,7 @@ svg .prim { cursor: pointer; }
         <div class="hint">${fmt(r.changedCodons)} of ${fmt(r.totalCodons)} codons changed (${(r.changedCodons / r.totalCodons * 100).toFixed(0)}%) for <b>${esc(r.organism.name)}</b>. CAI 1.00 means every codon is the host’s commonest choice.${a.gc3 > 70 ? ' <span style="color:var(--danger)">GC at third positions is very high, which can make the gene hard to synthesise.</span>' : ''}</div>
         ${r.remaining.length ? `<div class="err">Still present: ${r.remaining.map(x => `${esc(x.name)} ×${x.count}`).join(', ')}</div>` : ''}
         ${r.log.length ? `<div class="hint">${r.log.map(esc).join('<br>')}</div>` : ''}
-        <div style="margin-top:8px"><b>Optimised sequence</b></div>
+        <div style="margin-top:8px"><b>Optimized sequence</b></div>
         <div class="aa-box" style="max-height:170px">${seqHtml.join('<br>')}</div>`;
       $('#coApply').disabled = false;
       $('#coOpen').disabled = false;
@@ -6197,9 +6234,9 @@ svg .prim { cursor: pointer; }
     const sel = selLen(d);
 
     dialog({
-      title: 'Codon Optimisation', wide: true,
+      title: 'Codon Optimization', wide: true,
       body: `<div class="form">
-        <label>Optimise</label><div class="row2">
+        <label>Optimize</label><div class="row2">
           <label><input type="radio" name="comode" value="region" checked> a region of ${esc(d.name)}</label>
           <label><input type="radio" name="comode" value="protein"> a protein sequence</label></div>
 
@@ -6214,7 +6251,7 @@ svg .prim { cursor: pointer; }
               ${orfs.map((o, i) => `<option value="o${i}">ORF ${fmt(o.start + 1)}–${fmt(o.end)} (${o.aa} aa, ${o.strand > 0 ? 'forward' : 'reverse'})</option>`).join('')}
             </select></div>
           <label>Reading frame</label><div class="full" id="coOrf" style="grid-column:2/-1"></div>
-          <label></label><label><input type="checkbox" id="coForce"> Optimise anyway, even if it is not a clean reading frame</label>
+          <label></label><label><input type="checkbox" id="coForce"> Optimize anyway, even if it is not a clean reading frame</label>
         </div></div>
 
         <div class="full" id="coProteinBox" style="display:none"><div class="form" style="margin:0">
@@ -6244,24 +6281,24 @@ svg .prim { cursor: pointer; }
         <div class="full" id="coRes"></div></div>`,
       buttons: [
         { label: 'Close' },
-        { label: 'Copy', id: 'coCopy', disabled: true, act: () => { if (result) copyText(result.seq, 'Copied optimised sequence'); return false; } },
+        { label: 'Copy', id: 'coCopy', disabled: true, act: () => { if (result) copyText(result.seq, 'Copied optimized sequence'); return false; } },
         { label: 'Open as New Sequence', id: 'coOpen', disabled: true, act: () => {
           if (!result) return false;
           const srcSeq = mode === 'protein' ? '' : regionSeq();
           closeDialog();
           addDoc({
-            name: (mode === 'protein' ? 'optimised' : d.name + '-opt'), seq: result.seq, circular: false,
-            features: [{ name: 'optimised CDS', type: 'CDS', start: 0, end: result.seq.length, strand: 1 }], primers: [],
-            histLabel: `Codon-optimised for ${result.organism.short}`,
+            name: (mode === 'protein' ? 'optimized' : d.name + '-opt'), seq: result.seq, circular: false,
+            features: [{ name: 'optimized CDS', type: 'CDS', start: 0, end: result.seq.length, strand: 1 }], primers: [],
+            histLabel: `Codon-optimized for ${result.organism.short}`,
             provenance: {
-              method: `Codon optimisation for ${result.organism.name}`,
+              method: `Codon optimization for ${result.organism.name}`,
               detail: `${result.algorithm} · ${fmt(result.changedCodons)} of ${fmt(result.totalCodons)} codons changed · CAI ${result.before.cai.toFixed(3)} → ${result.after.cai.toFixed(3)}`,
               inputs: srcSeq ? [{ name: d.name + ' (source region)', seq: srcSeq, circular: false, features: [], detail: `${val('coFrom')}..${val('coTo')}` }] : []
             }
           });
         } },
         { label: 'Replace in Sequence', id: 'coApply', disabled: true, act: () => { applyCodon(); return false; } },
-        { label: 'Optimise', primary: true, act: () => { run(); return false; } }
+        { label: 'Optimize', primary: true, act: () => { run(); return false; } }
       ],
       onOpen: box => {
         if (S.pendingProtein) {
@@ -6343,10 +6380,10 @@ svg .prim { cursor: pointer; }
       if (b <= a) { toast('A region that wraps the origin cannot be replaced in place.'); return; }
       const dd = D();
       editSeq(dd, a, b - a, repl);
-      dd.features.push({ id: uid(), name: `optimised for ${result.organism.short}`, type: 'CDS', start: a, end: a + repl.length, strand: rev ? -1 : 1, color: '#9fd6b4', notes: `Codon-optimised, CAI ${result.after.cai.toFixed(3)}` });
-      commit(dd, `Codon-optimised ${fmt(result.changedCodons)} codons for ${result.organism.short}`);
+      dd.features.push({ id: uid(), name: `optimized for ${result.organism.short}`, type: 'CDS', start: a, end: a + repl.length, strand: rev ? -1 : 1, color: '#9fd6b4', notes: `Codon-optimized, CAI ${result.after.cai.toFixed(3)}` });
+      commit(dd, `Codon-optimized ${fmt(result.changedCodons)} codons for ${result.organism.short}`);
       closeDialog(); renderAll(true);
-      toast(`Replaced ${fmt(b - a)} bp with the optimised sequence`);
+      toast(`Replaced ${fmt(b - a)} bp with the optimized sequence`);
     }
   }
 
@@ -6905,7 +6942,7 @@ svg .prim { cursor: pointer; }
     });
   }
 
-  // Opens the codon-optimisation dialog already set to this protein.
+  // Opens the codon-optimization dialog already set to this protein.
   function dlgCodonFromProtein() {
     const d = D(), { a, b } = protSel(d);
     S.pendingProtein = b > a ? d.prot.slice(a, b) : d.prot;
@@ -8047,7 +8084,7 @@ svg .prim { cursor: pointer; }
       body: `<div class="ecbar"><div class="seg" style="width:260px"><button data-tab="built" class="on">Built in</button><button data-tab="mine">My features</button></div>
         <input type="text" id="fdbQ" placeholder="Filter by name, type or sequence" style="width:200px"><span class="sp" style="flex:1"></span><span class="note" id="fdbN"></span></div>
         <div class="tscroll" style="max-height:52vh" id="fdbT"></div>
-        <div class="hint">Features matched <b>on protein</b> are found whatever codons were used, which is what makes a tag turn up in a gene that was codon-optimised. Entries marked short are skipped by Detect Common Features unless you ask for them, because a motif of a few residues appears by chance.</div>`,
+        <div class="hint">Features matched <b>on protein</b> are found whatever codons were used, which is what makes a tag turn up in a gene that was codon-optimized. Entries marked short are skipped by Detect Common Features unless you ask for them, because a motif of a few residues appears by chance.</div>`,
       buttons: [{ label: 'Export as CSV', act: () => { exportFeatureCSV(); return false; } }, { label: 'Close', primary: true }],
       onOpen: box => {
         render();

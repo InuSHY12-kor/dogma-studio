@@ -103,8 +103,10 @@ button { cursor: pointer; }
 .status .r { margin-left: auto; }
 
 /* ---------- Map view ---------- */
-.mapwrap { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.mapwrap svg { display: block; }
+/* The drawing is centred with auto margins rather than flex alignment, because that
+   keeps a drawing taller than the window scrollable from its top edge. */
+.mapwrap { flex: 1; min-height: 0; overflow: auto; position: relative; display: flex; }
+.mapwrap svg { display: block; margin: auto; }
 .map-zoom { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 4px; }
 .map-zoom button { width: 28px; height: 26px; border: 1px solid var(--border); background: var(--win); border-radius: 4px; }
 
@@ -420,9 +422,20 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .srow .frlbl { position: absolute; font: 10px/15px var(--f-ui); color: var(--faint); white-space: nowrap; }
 
 /* Genetic code tables */
-.codetbl td { font-size: 11.5px; white-space: nowrap; }
+/* Genetic code matrix: fixed layout so every cell lines up, whatever is in it */
+.codetbl { table-layout: fixed; width: 100%; }
+.codetbl th { text-align: center; font-weight: 500; color: var(--muted); }
+.codetbl th.axis { width: 34px; background: var(--chrome); color: var(--ink); font-size: 12px; }
+.codetbl td { font-size: 11px; white-space: nowrap; padding: 2px 6px; vertical-align: middle; }
 .codetbl td.chg { background: #fff3d6; }
-.codetbl td.stopc { color: var(--danger); font-weight: 600; }
+.codetbl td.stopc .aa3, .codetbl td.stopc .aa1 { color: var(--danger); font-weight: 600; }
+.codetbl .cdn { display: flex; align-items: baseline; gap: 4px; }
+.codetbl .cdn .mono { font-weight: 600; letter-spacing: .5px; }
+.codetbl .cdn .aa3 { width: 30px; display: inline-block; }
+.codetbl .cdn .aa1 { color: var(--faint); }
+.codetbl .wbar { position: relative; height: 10px; margin-top: 1px; background: #eef1f4; border-radius: 2px; overflow: hidden; }
+.codetbl .wbar i { position: absolute; left: 0; top: 0; bottom: 0; background: #b7d0f0; }
+.codetbl .wbar b { position: absolute; right: 3px; top: -1px; font-size: 9.5px; font-weight: 500; color: var(--muted); }
 
 .hist-item .hlbl { cursor: pointer; }
 .hist-item .hlbl:hover { color: var(--accent); text-decoration: underline; }

@@ -49,7 +49,7 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | RNA | File, Edit, View, Features, **RNA**, Help | Map, Sequence, Features, **Structure**, History |
 | Protein | File, Edit, View, Features, **Protein**, Help | Sequence, Features, **Properties**, History |
 
-RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(내부에는 T로 저장해서 ORF·번역·Feature 기능이 그대로 동작합니다). Structure 탭에서 바로 접을 수 있고, Protein 파일은 Properties 탭에서 분자량·pI·흡광계수·hydropathy·전하 곡선·조성을 보여줍니다. Protein 메뉴의 `Back-translate and Codon-optimise…`를 누르면 그 단백질이 코돈 최적화 창에 미리 채워집니다.
+RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(내부에는 T로 저장해서 ORF·번역·Feature 기능이 그대로 동작합니다). Structure 탭에서 바로 접을 수 있고, Protein 파일은 Properties 탭에서 분자량·pI·흡광계수·hydropathy·전하 곡선·조성을 보여줍니다. Protein 메뉴의 `Back-translate and Codon-optimize…`를 누르면 그 단백질이 코돈 최적화 창에 미리 채워집니다.
 
 **Feature / Primer 가져오기** — Features → Import Features from Another File, Primers → Import Primers. 새 창 위쪽에 **지금 열려 있는 파일**과 **최근 파일 30개**가 나오고 맨 아래 `Browse…`가 있습니다. Feature는 **자기 서열을 대상 파일에서 찾아서** 넣기 때문에 번호가 달라도, origin이 돌아가 있어도, 가닥이 뒤집혀 있어도 제자리에 들어갑니다(원래 좌표 그대로 넣는 선택지도 있습니다).
 
@@ -83,7 +83,7 @@ RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(�
 
 **서열 비교** — Tools → Compare Sequences. 맨 처음 고른 서열이 기준이 되고 나머지가 거기에 맞춰집니다. 원형 플라스미드는 origin이 달라도, 심지어 역상보로 저장돼 있어도 알아서 맞춥니다. 같은 자리는 점으로, 다른 자리는 색으로 표시합니다.
 
-**코돈 최적화** — Tools → Codon Optimisation. 순서대로 정하시면 됩니다.
+**코돈 최적화** — Tools → Codon Optimization. 순서대로 정하시면 됩니다.
 
 1. **무엇을 최적화할지**: 열려 있는 서열의 한 구간, 또는 붙여넣은 단백질 서열
 2. **ORF 확인**: `Use` 드롭다운에서 CDS feature나 자동으로 찾은 ORF를 고르면 범위가 정확히 들어갑니다. 바로 아래에 `✓ Valid reading frame — 287 codons…`처럼 확인 결과가 나오고, 길이가 3의 배수가 아니거나 중간에 종결코돈이 있으면 무엇이 문제인지 알려줍니다
