@@ -654,14 +654,44 @@ ZraI GACGTC 3 3`;
     const lines = txt.split(/\r?\n/);
     let name = 'Untitled', circular = false, mode = '', seq = '', cur = null, lastQ = null, definition = '';
     let histLines = null;
+    // The header fields the Info panel shows, kept as they are read.
+    const header = { accession: '', organism: '', source: '', division: '', comments: [], references: [] };
+    let refKey = null, comment = null;
     const raw = [];
     for (const ln of lines) {
-      if (ln.startsWith('LOCUS')) { const t = ln.split(/\s+/); name = t[1] || name; circular = /\bcircular\b/i.test(ln); continue; }
-      if (ln.startsWith('DEFINITION')) { definition = ln.slice(12).trim(); mode = ''; continue; }
-      if (ln.startsWith('COMMENT')) { mode = 'C'; if (ln.slice(12).trim() === HIST_TAG) histLines = []; continue; }
+      if (ln.startsWith('LOCUS')) {
+        const t = ln.split(/\s+/); name = t[1] || name; circular = /\bcircular\b/i.test(ln);
+        const dv = ln.slice(64, 67).trim(); if (/^[A-Z]{3}$/.test(dv)) header.division = dv;
+        continue;
+      }
+      if (ln.startsWith('DEFINITION')) { definition = ln.slice(12).trim(); mode = 'D'; continue; }
+      if (mode === 'D' && /^\s{5,}\S/.test(ln)) { definition += ' ' + ln.trim(); continue; }
+      if (ln.startsWith('ACCESSION')) { header.accession = ln.slice(12).trim().split(/\s+/)[0] || ''; mode = ''; continue; }
+      if (ln.startsWith('SOURCE')) { header.source = ln.slice(12).trim(); mode = 'S'; continue; }
+      if (/^\s{2}ORGANISM/.test(ln)) { header.organism = ln.slice(12).trim(); mode = 'S'; continue; }
+      if (ln.startsWith('REFERENCE')) { header.references.push({ authors: '', title: '', journal: '', pmid: '' }); refKey = null; mode = 'R'; continue; }
+      if (mode === 'R') {
+        const cur2 = header.references[header.references.length - 1];
+        const m2 = ln.match(/^\s{2}(AUTHORS|TITLE|JOURNAL)\s+(.*)$/);
+        if (m2) { refKey = m2[1].toLowerCase(); cur2[refKey] = m2[2].trim(); continue; }
+        const mp = ln.match(/^\s{3}PUBMED\s+(\d+)/);
+        if (mp) { cur2.pmid = mp[1]; refKey = null; continue; }
+        if (/^\s{5,}\S/.test(ln) && refKey) { cur2[refKey] += ' ' + ln.trim(); continue; }
+        if (/^\S/.test(ln)) { mode = ''; refKey = null; }
+      }
+      if (ln.startsWith('COMMENT')) {
+        mode = 'C';
+        if (ln.slice(12).trim() === HIST_TAG) { histLines = []; comment = null; }
+        else { comment = [ln.slice(12).trim()]; header.comments.push(comment); }
+        continue;
+      }
       if (mode === 'C') {
-        if (/^\s/.test(ln)) { if (histLines) histLines.push(ln.trim()); continue; }
-        mode = ''; // a new top-level key ends the comment
+        if (/^\s/.test(ln)) {
+          if (histLines) histLines.push(ln.trim());
+          else if (comment) comment.push(ln.trim());
+          continue;
+        }
+        mode = ''; comment = null; // a new top-level key ends the comment
       }
       if (ln.startsWith('FEATURES')) { mode = 'F'; continue; }
       if (ln.startsWith('ORIGIN')) { mode = 'O'; continue; }
@@ -695,11 +725,25 @@ ZraI GACGTC 3 3`;
         nf.segs = loc.parts.map(([a, b]) => ({ start: a, end: b }));
       features.push(nf);
     }
-    let provenance = null;
+    let provenance = null, info = null;
     if (histLines && histLines.length) {
-      try { provenance = JSON.parse(b64decode(histLines.join(''))); } catch (e) { provenance = null; }
+      try {
+        const obj = JSON.parse(b64decode(histLines.join('')));
+        // the block used to hold the provenance alone; now it is a wrapper
+        if (obj && obj.__gc) { provenance = obj.provenance || null; info = obj.info || null; }
+        else provenance = obj;
+      } catch (e) { provenance = null; }
     }
-    return { name, seq, circular, features, primers, definition, provenance };
+    if (!info) {
+      info = {
+        molType: /synthetic/i.test(header.source || '') ? 'synthetic' : (header.source ? 'natural' : ''),
+        organism: header.organism || '', accession: header.accession || '',
+        description: definition.replace(/\.$/, ''), comments: (header.comments || []).map(c => c.join(' ')).join('\n\n'),
+        references: header.references || [], author: '', code: '', host: '', strain: '', methylation: '',
+        seqClass: header.division || '', confirmed: false, files: []
+      };
+    }
+    return { name, seq, circular, features, primers, definition, provenance, info };
   }
 
   function parseFASTA(txt) {
@@ -795,11 +839,42 @@ ZraI GACGTC 3 3`;
     const now = new Date();
     const date = `${String(now.getDate()).padStart(2, '0')}-${months[now.getMonth()]}-${now.getFullYear()}`;
     const nm = d.name.replace(/\s+/g, '_').slice(0, 16);
-    let s = `LOCUS       ${nm.padEnd(16)} ${String(n).padStart(11)} bp    DNA     ${d.circular ? 'circular' : 'linear  '} SYN ${date}\n`;
-    s += `DEFINITION  ${d.name}.\nACCESSION   .\nVERSION     .\nKEYWORDS    GeneCanvas\nSOURCE      synthetic DNA construct\n  ORGANISM  synthetic DNA construct\n`;
-    if (d.provenance) {
-      // Base64 keeps the record on simple ASCII lines that any GenBank reader will skip.
-      const enc = b64encode(JSON.stringify(d.provenance));
+    const info = d.info || {};
+    const natural = info.molType === 'natural';
+    const org = (natural && info.organism) ? info.organism : 'synthetic DNA construct';
+    const division = natural ? (info.seqClass || 'UNA').slice(0, 3).toUpperCase() : 'SYN';
+    const wrapField = (key, text, width = 67) => {
+      const words = String(text).replace(/\s+/g, ' ').trim().split(' ');
+      const lines = []; let line = '';
+      for (const w of words) { if ((line + ' ' + w).trim().length > width) { lines.push(line.trim()); line = w; } else line += ' ' + w; }
+      if (line.trim()) lines.push(line.trim());
+      if (!lines.length) lines.push('');
+      return lines.map((l, i) => (i === 0 ? key.padEnd(12) : ' '.repeat(12)) + l).join('\n') + '\n';
+    };
+    let s = `LOCUS       ${nm.padEnd(16)} ${String(n).padStart(11)} bp    DNA     ${d.circular ? 'circular' : 'linear  '} ${division} ${date}\n`;
+    s += wrapField('DEFINITION', (info.description || d.name).replace(/\.$/, '') + '.');
+    s += `ACCESSION   ${info.accession || '.'}\nVERSION     ${info.accession || '.'}\n`;
+    s += `KEYWORDS    ${[info.code, 'GeneCanvas'].filter(Boolean).join('; ')}\n`;
+    s += wrapField('SOURCE', org);
+    s += wrapField('  ORGANISM', org);
+    (info.references || []).forEach((r, i) => {
+      s += `REFERENCE   ${i + 1}${r.from ? `  (bases ${r.from} to ${r.to || n})` : ''}\n`;
+      if (r.authors) s += wrapField('  AUTHORS', r.authors);
+      if (r.title) s += wrapField('  TITLE', r.title);
+      if (r.journal) s += wrapField('  JOURNAL', r.journal);
+      if (r.pmid) s += `   PUBMED   ${r.pmid}\n`;
+    });
+    if (info.author) { s += `REFERENCE   ${(info.references || []).length + 1}  (bases 1 to ${n})\n`; s += wrapField('  AUTHORS', info.author); s += wrapField('  TITLE', 'Direct Submission'); }
+    const notes = [];
+    if (info.comments) notes.push(info.comments);
+    if (info.molType === 'synthetic') notes.push(`Synthetic DNA${info.confirmed ? ', confirmed experimentally' : ''}${info.host ? `; laboratory host ${info.host}` : ''}${info.strain ? `; transformation strain ${info.strain}` : ''}${info.methylation ? `; methylation ${info.methylation}` : ''}.`);
+    for (const t of notes) s += wrapField('COMMENT', t);
+    // Anything GenBank has no field for rides in a base64 block any reader will skip.
+    const extra = {};
+    if (d.provenance) extra.provenance = d.provenance;
+    if (d.info) extra.info = d.info;
+    if (Object.keys(extra).length) {
+      const enc = b64encode(JSON.stringify({ __gc: 1, ...extra }));
       s += 'COMMENT     ' + HIST_TAG + '\n';
       for (let i = 0; i < enc.length; i += 68) s += '            ' + enc.slice(i, i + 68) + '\n';
     }

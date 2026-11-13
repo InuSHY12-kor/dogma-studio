@@ -104,6 +104,7 @@ svg .prim { cursor: pointer; }
       }),
       primers: (src.primers || []).map(p => ({ id: uid(), name: p.name, seq: DNA.clean(p.seq), notes: p.notes || '' })),
       provenance: src.provenance || null,
+      info: src.info || { molType: '', references: [], files: [] },
       opts: Object.assign(defaultOpts(!!src.circular), SET.mapView || {}, SET.baseColors ? { baseColors: { ...SET.baseColors } } : {}), chosen: [], sel: { start: 0, end: 0 }, anchor: 0, alignments: [], designed: [],
       hist: [], hi: -1, ver: 0, cache: null, dirty: false, path: src.path || null
     };
@@ -123,6 +124,7 @@ svg .prim { cursor: pointer; }
         translated: false, frame: 0, matchProtein: true, quals: f.quals || {}
       })),
       primers: [], provenance: src.provenance || null,
+      info: src.info || { molType: '', references: [], files: [] },
       opts: defaultOpts(false), chosen: [], sel: { start: 0, end: 0 }, anchor: 0,
       alignments: [], designed: [], hist: [], hi: -1, ver: 0, cache: null, dirty: false, path: src.path || null
     };
@@ -342,7 +344,7 @@ svg .prim { cursor: pointer; }
 
   // ---------------------------------------------------------------- render orchestration
   function renderAll(keepScroll) {
-    renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderCompanion(); renderStatus();
+    renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderCompanion(); renderInfo(); renderStatus();
     if (host && host.assemblySync) { try { host.assemblySync(asmDocSnapshot()); } catch (e) { } }
     document.title = D() ? `${D().name}${D().dirty ? ' •' : ''} — GeneCanvas` : 'GeneCanvas';
   }
@@ -502,6 +504,7 @@ svg .prim { cursor: pointer; }
         { label: 'Font Size', items: FONT_SIZES.map(px => ({ label: px + ' px', chk: (SET.fontSize || 13) === px, act: () => setFontSize(px) })) },
         '-',
         { label: 'Show Side Panel', chk: !S.sideHidden, act: () => { S.sideHidden = !S.sideHidden; renderAll(); } },
+        { label: 'Info Panel', chk: !!S.infoShown, dis: !has, act: () => { S.infoShown = !S.infoShown; renderAll(true); } },
         { label: 'Zoom In', key: 'Ctrl++', dis: !has, act: () => zoom(1.25) },
         { label: 'Zoom Out', key: 'Ctrl+-', dis: !has, act: () => zoom(0.8) },
         { label: 'Reset Zoom', key: 'Ctrl+0', dis: !has, act: () => { S.zoom = 1; renderView(); } }
@@ -927,6 +930,272 @@ svg .prim { cursor: pointer; }
       sel = `Selected <b>${fmtc(d, d.sel.start)} – ${fmtc(d, (d.sel.end === 0 ? n : d.sel.end) - 1)}</b> = <b>${fmt(L)} bp</b> &nbsp; GC ${DNA.gcPct(s).toFixed(0)}%` + (L <= 80 ? ` &nbsp; Tm ${DNA.tm(s).toFixed(1)} °C` : '');
     } else sel = `Cursor after base <b>${fmtc(d, d.sel.start - 1)}</b>`;
     st.innerHTML = `<span><b>${esc(d.name)}</b> &nbsp; ${fmt(n)} bp &nbsp; ${d.circular ? 'circular' : 'linear'}</span><span>${sel}</span><span class="r">${S.view === 'seq' ? 'Type A/C/G/T to edit · Shift+arrows extend' : ''}</span>`;
+  }
+
+  // ================================================================ INFO PANEL
+  /* Everything a sequence file carries besides its bases: where it came from, what it
+   * is for, who made it, the papers behind it and any files kept with it. The fields
+   * are the ones GenBank has a place for, so they survive export and import. */
+  const HOSTS = ['', 'Escherichia coli', 'Saccharomyces cerevisiae', 'Bacillus subtilis', 'Pichia pastoris', 'Mammalian cell culture', 'Insect cell culture', 'Plant'];
+  const STRAINS = ['', 'DH5α', 'DH10B', 'TOP10', 'XL1-Blue', 'Stbl3', 'JM109', 'BL21(DE3)', 'NEB 10-beta', 'dam⁻/dcm⁻ (JM110)', 'NEB Stable'];
+  const METHYLATION = ['', 'Dam and Dcm methylated', 'Dam⁻ Dcm⁻ (unmethylated)', 'CpG methylated', 'unmethylated (synthesised)'];
+  const SEQ_CLASSES = [['UNA', 'UNA — unannotated'], ['PRI', 'PRI — primate'], ['ROD', 'ROD — rodent'], ['MAM', 'MAM — other mammal'], ['VRT', 'VRT — other vertebrate'],
+  ['INV', 'INV — invertebrate'], ['PLN', 'PLN — plant, fungal or algal'], ['BCT', 'BCT — bacterial'], ['VRL', 'VRL — viral'], ['PHG', 'PHG — phage'], ['SYN', 'SYN — synthetic'], ['ENV', 'ENV — environmental']];
+  const REF_TYPES = ['Journal article', 'Patent', 'Thesis', 'Book', 'Unpublished', 'Direct submission'];
+  const infoOf = d => (d.info = d.info || { molType: '', references: [], files: [] });
+
+  function renderInfo() {
+    const pane = $('#infopanel');
+    if (!pane) return;
+    const d = D();
+    const on = !!S.infoShown && d && !isGel(d);
+    pane.hidden = !on;
+    if (!on) { pane.innerHTML = ''; return; }
+    const i = infoOf(d), n = isProt(d) ? d.prot.length : d.seq.length;
+    const kind = isProt(d) ? 'protein' : (isRNA(d) ? 'RNA' : 'DNA');
+    const opt = (list, v) => list.map(x => Array.isArray(x)
+      ? `<option value="${esc(x[0])}" ${x[0] === v ? 'selected' : ''}>${esc(x[1])}</option>`
+      : `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x || '—')}</option>`).join('');
+    pane.innerHTML = `<div class="infohead"><b>${esc(d.name)}</b><span class="note">${fmt(n)} ${isProt(d) ? 'aa' : (isRNA(d) ? 'nt' : 'bp')}${i.confirmed ? ' ✓' : ''}</span>
+        <span style="flex:1"></span><button class="ib" id="infoClose" title="Hide the info panel">✕</button></div>
+      <div class="infobody">
+        <h4>Source</h4>
+        <div class="irow"><label>Type</label><select data-ik="molType">
+          <option value="" ${!i.molType ? 'selected' : ''}>—</option>
+          <option value="natural" ${i.molType === 'natural' ? 'selected' : ''}>Natural ${kind}</option>
+          <option value="synthetic" ${i.molType === 'synthetic' ? 'selected' : ''}>Synthetic ${kind}</option>
+        </select></div>
+        ${i.molType === 'synthetic' ? `
+          <div class="irow"><label></label><label class="inl"><input type="checkbox" data-ik="confirmed" ${i.confirmed ? 'checked' : ''}> Confirmed experimentally</label></div>
+          <div class="irow"><label>Laboratory host</label><input type="text" list="ihosts" data-ik="host" value="${esc(i.host || '')}"></div>
+          ${!isProt(d) && d.circular ? `<div class="irow"><label>Transformation strain</label><input type="text" list="istrains" data-ik="strain" value="${esc(i.strain || '')}"></div>` : ''}
+          ${isProt(d) ? '' : `<div class="irow"><label>Methylation</label><select data-ik="methylation">${opt(METHYLATION, i.methylation || '')}</select></div>`}`
+      : i.molType === 'natural' ? `
+          <div class="irow"><label>Organism</label><input type="text" data-ik="organism" value="${esc(i.organism || '')}" placeholder="e.g. Homo sapiens"></div>
+          ${isProt(d) ? '' : `<div class="irow"><label>Sequence class</label><select data-ik="seqClass">${opt(SEQ_CLASSES, i.seqClass || 'UNA')}</select></div>`}`
+      : '<div class="hint">Choose a type to record where this sequence came from.</div>'}
+        <h4>Description</h4>
+        <div class="irow full"><textarea data-ik="description" rows="3" placeholder="What this sequence is">${esc(i.description || '')}</textarea></div>
+        <div class="irow"><label>Accession</label><input type="text" data-ik="accession" value="${esc(i.accession || '')}" placeholder="database accession"></div>
+        <div class="irow"><label>Code number</label><input type="text" data-ik="code" value="${esc(i.code || '')}" placeholder="your own code"></div>
+        <div class="irow"><label>Author</label><input type="text" data-ik="author" value="${esc(i.author || '')}"></div>
+        <h4>Comments</h4>
+        <div class="irow full"><textarea data-ik="comments" rows="3" placeholder="Notes kept with the file">${esc(i.comments || '')}</textarea></div>
+        <h4>References</h4>
+        <div class="ilist">${(i.references || []).length
+        ? i.references.map((r, k) => `<div class="iitem"><b>${k + 1}.</b> ${esc(r.authors || '—')}<br>${esc(r.title || '')}<br><span class="note">${esc(r.journal || '')}</span>
+            ${r.pmid ? ` <a href="https://pubmed.ncbi.nlm.nih.gov/${esc(r.pmid)}/" target="_blank" rel="noreferrer">PMID ${esc(r.pmid)}</a>` : ''}
+            ${r.doi ? ` <a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noreferrer">doi</a>` : ''}</div>`).join('')
+        : '<div class="hint">No references yet.</div>'}</div>
+        <div class="irow"><button class="btn" id="infoRefs">Edit References…</button></div>
+        <h4>Embedded files</h4>
+        <div class="ilist">${(i.files || []).length
+        ? i.files.map((f, k) => `<div class="iitem"><a href="#" data-ifile="${k}">${esc(f.name)}</a> <span class="note">${fmt(Math.round(f.size / 1024))} kB</span></div>`).join('')
+        : '<div class="hint">No files embedded. Drop files here to keep them with this sequence.</div>'}</div>
+        <div class="irow"><button class="btn" id="infoFiles">Embedded Files…</button></div>
+      </div>
+      <datalist id="ihosts">${HOSTS.map(h => `<option>${esc(h)}</option>`).join('')}</datalist>
+      <datalist id="istrains">${STRAINS.map(h => `<option>${esc(h)}</option>`).join('')}</datalist>`;
+    // field edits are written straight onto the document
+    pane.querySelectorAll('[data-ik]').forEach(el => {
+      const key = el.dataset.ik;
+      const commitField = () => {
+        const v = el.type === 'checkbox' ? el.checked : el.value;
+        if (i[key] === v) return;
+        i[key] = v;
+        d.dirty = true;
+        if (key === 'molType' || key === 'confirmed') renderInfo();
+        renderStatus();
+      };
+      el.addEventListener('change', commitField);
+      if (el.tagName === 'TEXTAREA' || el.type === 'text') el.addEventListener('blur', commitField);
+    });
+    pane.querySelector('#infoClose').onclick = () => { S.infoShown = false; renderAll(true); };
+    pane.querySelector('#infoRefs').onclick = dlgReferences;
+    pane.querySelector('#infoFiles').onclick = dlgEmbedded;
+    pane.querySelector('.infobody').addEventListener('click', e => {
+      const a = e.target.closest('[data-ifile]');
+      if (a) { e.preventDefault(); saveEmbedded(i.files[+a.dataset.ifile]); }
+    });
+    // drag and drop straight onto the panel
+    pane.ondragover = e => { e.preventDefault(); pane.classList.add('drop'); };
+    pane.ondragleave = () => pane.classList.remove('drop');
+    pane.ondrop = async e => {
+      e.preventDefault(); e.stopPropagation();
+      pane.classList.remove('drop');
+      await embedFiles([...(e.dataTransfer.files || [])]);
+    };
+  }
+  async function embedFiles(list) {
+    const d = D(); if (!d || !list.length) return;
+    const i = infoOf(d);
+    i.files = i.files || [];
+    let added = 0, skipped = 0;
+    for (const f of list) {
+      if (f.size > 4 * 1024 * 1024) { skipped++; continue; }
+      const data = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(f); });
+      i.files.push({ name: f.name, type: f.type || 'application/octet-stream', size: f.size, data });
+      added++;
+    }
+    if (added) { commit(d, `Embedded ${added} file${added === 1 ? '' : 's'}`); renderAll(true); }
+    toast(added ? `${added} file${added === 1 ? '' : 's'} embedded${skipped ? `, ${skipped} skipped (over 4 MB)` : ''}` : 'Nothing embedded — files over 4 MB are skipped');
+  }
+  function saveEmbedded(f) {
+    if (!f) return;
+    const bytes = atob(f.data);
+    if (host && host.saveFile) {
+      host.saveFile({ path: null, defaultName: f.name, content: f.data, encoding: 'base64' })
+        .then(p2 => { if (p2) toast('Saved ' + p2.split(/[\\/]/).pop()); })
+        .catch(() => toast('That file could not be written.'));
+      return;
+    }
+    const arr = new Uint8Array(bytes.length);
+    for (let k = 0; k < bytes.length; k++) arr[k] = bytes.charCodeAt(k);
+    const url = URL.createObjectURL(new Blob([arr], { type: f.type }));
+    const a = document.createElement('a'); a.href = url; a.download = f.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  function dlgEmbedded() {
+    const d = D(), i = infoOf(d);
+    let pick = -1;
+    const render = () => {
+      const total = (i.files || []).reduce((t, f) => t + f.size, 0);
+      $('#emList').innerHTML = (i.files || []).length
+        ? `<table class="grid"><thead><tr><th>Name</th><th>Type</th><th>Size</th></tr></thead><tbody>
+            ${i.files.map((f, k) => `<tr data-k="${k}"${k === pick ? ' class="on"' : ''}><td>${esc(f.name)}</td><td>${esc(f.type || '')}</td><td>${fmt(Math.round(f.size / 1024))} kB</td></tr>`).join('')}
+          </tbody></table><div class="note">${i.files.length} file${i.files.length === 1 ? '' : 's'}, ${(total / 1048576).toFixed(2)} MB in total</div>`
+        : '<div class="hint">No files embedded yet.</div>';
+      const nameBox = $('#emName');
+      if (nameBox) { nameBox.value = pick >= 0 ? i.files[pick].name : ''; nameBox.disabled = pick < 0; }
+      for (const id of ['emUp', 'emDown', 'emRemove', 'emExport']) { const b = $('#' + id); if (b) b.disabled = pick < 0; }
+    };
+    dialog({
+      title: 'Embedded Files', wide: true,
+      body: `<div class="form">
+        <div class="full" id="emList"></div>
+        <label for="emName">Name</label><input type="text" id="emName" disabled>
+        <label></label><div class="row2">
+          <button class="btn" id="emUp" type="button">Move up</button>
+          <button class="btn" id="emDown" type="button">Move down</button>
+          <button class="btn" id="emExport" type="button">Export selected…</button>
+          <button class="btn dng" id="emRemove" type="button">Remove</button>
+          <button class="btn dng" id="emRemoveAll" type="button">Remove all</button>
+        </div>
+        <label></label><div class="row2"><button class="btn pri" id="emAdd" type="button">Embed Files…</button><span class="note">or drop files onto the info panel</span></div>
+        <div class="full hint">Files are kept inside the sequence file, in a block other programs skip, so they travel with it. Each file must be under 4 MB.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#emList').addEventListener('click', e => {
+          const tr = e.target.closest('tr[data-k]'); if (!tr) return;
+          pick = +tr.dataset.k; render();
+        });
+        box.querySelector('#emName').onchange = e => { if (pick >= 0) { i.files[pick].name = e.target.value.trim() || i.files[pick].name; d.dirty = true; render(); renderInfo(); } };
+        box.querySelector('#emUp').onclick = () => { if (pick > 0) { const t = i.files[pick - 1]; i.files[pick - 1] = i.files[pick]; i.files[pick] = t; pick--; d.dirty = true; render(); renderInfo(); } };
+        box.querySelector('#emDown').onclick = () => { if (pick >= 0 && pick < i.files.length - 1) { const t = i.files[pick + 1]; i.files[pick + 1] = i.files[pick]; i.files[pick] = t; pick++; d.dirty = true; render(); renderInfo(); } };
+        box.querySelector('#emExport').onclick = () => { if (pick >= 0) saveEmbedded(i.files[pick]); };
+        box.querySelector('#emRemove').onclick = () => { if (pick >= 0) { const nm = i.files[pick].name; i.files.splice(pick, 1); pick = -1; commit(d, `Removed the embedded file ${nm}`); render(); renderAll(true); } };
+        box.querySelector('#emRemoveAll').onclick = () => { if ((i.files || []).length) { i.files = []; pick = -1; commit(d, 'Removed all embedded files'); render(); renderAll(true); } };
+        box.querySelector('#emAdd').onclick = async () => {
+          const inp = document.createElement('input');
+          inp.type = 'file'; inp.multiple = true;
+          inp.onchange = async () => { await embedFiles([...inp.files]); render(); };
+          inp.click();
+        };
+      }
+    });
+  }
+  /* References, with a PubMed lookup. The citation is fetched from NCBI's E-utilities,
+   * the same service the Open from NCBI dialog uses. */
+  function dlgReferences() {
+    const d = D(), i = infoOf(d);
+    const refs = JSON.parse(JSON.stringify(i.references || []));
+    let pick = refs.length ? 0 : -1;
+    const renderList = () => {
+      $('#rfList').innerHTML = refs.length
+        ? refs.map((r, k) => `<div class="iitem${k === pick ? ' on' : ''}" data-k="${k}"><b>${k + 1}.</b> ${esc(r.title || r.authors || '(empty)')}</div>`).join('')
+        : '<div class="hint">No references yet. Press + to add one.</div>';
+    };
+    const render = () => {
+      renderList();
+      const form = $('#rfForm');
+      if (pick < 0) { form.innerHTML = '<div class="hint">Select a reference, or add one.</div>'; return; }
+      const r = refs[pick];
+      form.innerHTML = `<div class="form">
+        <label for="rfT">Type</label><select id="rfT">${REF_TYPES.map(t => `<option ${t === (r.type || 'Journal article') ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label for="rfA">Authors</label><input type="text" id="rfA" value="${esc(r.authors || '')}" placeholder="Smith,A., Jones,B.">
+        <label for="rfTi">Title</label><input type="text" id="rfTi" value="${esc(r.title || '')}">
+        <label for="rfJ">Journal / source</label><input type="text" id="rfJ" value="${esc(r.journal || '')}">
+        <label for="rfP">PubMed ID</label><div class="row2"><input type="text" id="rfP" value="${esc(r.pmid || '')}" style="width:120px"><button class="btn" id="rfImp" type="button">Import from PubMed</button></div>
+        <label for="rfD">DOI</label><input type="text" id="rfD" value="${esc(r.doi || '')}">
+        <label for="rfR">Bases</label><div class="row2"><input type="number" id="rfR" value="${r.from || ''}" placeholder="from" style="width:90px"><input type="number" id="rfR2" value="${r.to || ''}" placeholder="to" style="width:90px"></div>
+      </div>`;
+      // only the list is refreshed on a change, so a half-typed field beside it survives
+      const bind = (id, key) => { const el = $('#' + id); if (el) el.onchange = () => { refs[pick][key] = el.value.trim(); renderList(); }; };
+      bind('rfT', 'type'); bind('rfA', 'authors'); bind('rfTi', 'title'); bind('rfJ', 'journal');
+      bind('rfP', 'pmid'); bind('rfD', 'doi'); bind('rfR', 'from'); bind('rfR2', 'to');
+      $('#rfImp').onclick = async () => {
+        const pmid = ($('#rfP').value || '').replace(/\D+/g, '');
+        if (!pmid) return showErr('Enter a PubMed ID first.');
+        const btn = $('#rfImp'); btn.disabled = true; btn.textContent = 'Fetching…';
+        try {
+          const cite = await fetchPubMed(pmid);
+          Object.assign(refs[pick], cite, { pmid });
+          render();
+          toast('Citation imported from PubMed');
+        } catch (e) {
+          showErr(e.message);
+          const b2 = $('#rfImp'); if (b2) { b2.disabled = false; b2.textContent = 'Import from PubMed'; }
+        }
+      };
+    };
+    dialog({
+      title: 'Edit References', wide: true,
+      body: `<div style="display:flex;gap:14px;align-items:flex-start">
+        <div style="width:230px;flex:0 0 230px">
+          <div class="ilist" id="rfList" style="max-height:40vh;overflow:auto"></div>
+          <div class="row2" style="margin-top:6px"><button class="btn" id="rfAdd" type="button">+</button><button class="btn dng" id="rfDel" type="button">−</button></div>
+        </div>
+        <div style="flex:1;min-width:0"><div id="rfForm"></div><div class="err"></div></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        i.references = refs.filter(r => r.authors || r.title || r.journal || r.pmid);
+        d.dirty = true; renderAll(true);
+        toast(`${i.references.length} reference${i.references.length === 1 ? '' : 's'} saved`);
+      } }],
+      onOpen: box => {
+        render();
+        box.querySelector('#rfList').addEventListener('click', e => { const it = e.target.closest('[data-k]'); if (it) { pick = +it.dataset.k; render(); } });
+        box.querySelector('#rfAdd').onclick = () => { refs.push({ type: 'Journal article', authors: '', title: '', journal: '', pmid: '' }); pick = refs.length - 1; render(); };
+        box.querySelector('#rfDel').onclick = () => { if (pick >= 0) { refs.splice(pick, 1); pick = refs.length ? 0 : -1; render(); } };
+      }
+    });
+  }
+  /* A PubMed citation, read from the MEDLINE text E-utilities returns. */
+  async function fetchPubMed(pmid) {
+    if (!host || !host.ncbiFetch) throw new Error('PubMed lookup needs the desktop app, which talks to NCBI for you.');
+    const text = await host.ncbiFetch({ db: 'pubmed', id: pmid, rettype: 'medline' });
+    const f = {};
+    let key = null;
+    for (const ln of String(text).split(/\r?\n/)) {
+      const m = ln.match(/^([A-Z]{2,4})\s*-\s*(.*)$/);
+      if (m) { key = m[1]; (f[key] = f[key] || []).push(m[2].trim()); }
+      else if (/^\s{4,}\S/.test(ln) && key) f[key][f[key].length - 1] += ' ' + ln.trim();
+    }
+    if (!f.TI && !f.AU) throw new Error(`PubMed has no record for ${pmid}.`);
+    // built to read like a GenBank JOURNAL line: Nat Methods 11(8):783-784 (2014)
+    const name2 = f.TA ? f.TA[0] : (f.JT ? f.JT[0] : '');
+    const vol = (f.VI ? f.VI[0] : '') + (f.IP ? `(${f.IP[0]})` : '');
+    const pages = f.PG ? ':' + f.PG[0] : '';
+    const year = f.DP ? ` (${f.DP[0].split(' ')[0]})` : '';
+    const journal = [name2, vol + pages].filter(Boolean).join(' ') + year;
+    return {
+      authors: (f.AU || []).join(', '),
+      title: (f.TI || ['']).join(' '),
+      journal,
+      doi: (f.AID || []).map(x => (x.match(/^(10\.\S+)\s*\[doi\]/) || [])[1]).filter(Boolean)[0] || '',
+      type: 'Journal article'
+    };
   }
 
   // ---------------------------------------------------------------- split window

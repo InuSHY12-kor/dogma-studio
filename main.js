@@ -94,14 +94,16 @@ ipcMain.handle('read-file', async (_e, { path: target }) => {
   } catch (err) { return { ok: false, error: err.message }; }
 });
 
-ipcMain.handle('save-file', async (_e, { path: p, defaultName, content, filters }) => {
+ipcMain.handle('save-file', async (_e, { path: p, defaultName, content, filters, encoding }) => {
   let target = p;
   if (!target) {
     const r = await dialog.showSaveDialog(win, { title: 'Save', defaultPath: defaultName, filters: [...(filters || []), { name: 'All files', extensions: ['*'] }] });
     if (r.canceled || !r.filePath) return null;
     target = r.filePath;
   }
-  fs.writeFileSync(target, content, 'utf8');
+  // base64 is used for the files embedded in a sequence, which may be binary
+  if (encoding === 'base64') fs.writeFileSync(target, Buffer.from(content, 'base64'));
+  else fs.writeFileSync(target, content, 'utf8');
   return target;
 });
 
