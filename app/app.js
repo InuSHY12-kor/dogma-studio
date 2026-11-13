@@ -107,6 +107,7 @@ svg .prim { cursor: pointer; }
   }
   const FEATURE_TYPES = Object.keys(TYPE_COL).filter(t => t !== 'ORF');
   let featPicked = new Set();   // features ticked in the Features table
+  let primPicked = new Set();   // primers ticked in the Primers table
   // Forward ORFs orange, reverse ORFs green, as the reference tool draws them
   const ORF_FWD = '#e8a33d', ORF_REV = '#4fa86a';
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
@@ -217,17 +218,59 @@ svg .prim { cursor: pointer; }
   function redo() { const d = D(); if (d && d.hi < d.hist.length - 1) { restore(d, d.hi + 1); toast('Redo: ' + d.hist[d.hi].label); renderAll(); } }
 
   // ---------------------------------------------------------------- analysis
+  /* Where a primer binds. A primer with a 5' tail only anneals by its 3' end, so the
+   * search falls back to the last `minMatch` bases; a site counts only if the annealed
+   * stretch melts at or above `minTm`. Both are the hybridisation parameters of the
+   * file, which Primers > Hybridization Parameters sets. */
+  const hybOf = d => Object.assign({ minMatch: 15, minTm: 40 }, d.hyb || {});
   function primerBind(d, p) {
     const n = d.seq.length, s = p.seq; if (!s || s.length > n || s.length < 6) return [];
+    const h = hybOf(d);
     const out = [];
-    const push = (h, full) => out.push({ start: h.start, end: h.end, strand: h.strand, full });
+    const push = (x, full, annealed) => {
+      const tmv = DNA.tm(annealed);
+      if (!full && tmv < h.minTm) return;
+      out.push({ start: x.start, end: x.end, strand: x.strand, full, annealed: annealed.length, tm: tmv });
+    };
     const hits = DNA.searchDNA(d.seq, d.circular, s);
-    for (const h of hits) push(h, true);
-    if (!hits.length && s.length > 15) {
-      const tail = s.slice(-15);
-      for (const h of DNA.searchDNA(d.seq, d.circular, tail)) push(h, false);
+    for (const x of hits) push(x, true, s);
+    if (!hits.length) {
+      // walk inwards from the 3' end until a match is found, which is how a tailed
+      // primer anneals: the longest 3' stretch that matches wins
+      for (let len = s.length - 1; len >= Math.max(6, h.minMatch); len--) {
+        const tail = s.slice(-len);
+        const found = DNA.searchDNA(d.seq, d.circular, tail);
+        if (found.length) { for (const x of found) push(x, false, tail); break; }
+      }
     }
     return out;
+  }
+  function dlgHybridization() {
+    const d = D(), h = hybOf(d);
+    dialog({
+      title: 'Hybridization Parameters',
+      body: `<div class="form">
+        <label for="hyM">Matching bases at the 3′ end</label><div class="row2"><input type="number" id="hyM" value="${h.minMatch}" min="6" max="40" style="width:80px"> at least</div>
+        <label for="hyT">Minimum melting temperature</label><div class="row2"><input type="number" id="hyT" value="${h.minTm}" min="0" max="90" step="0.5" style="width:80px"> °C</div>
+        <div class="full hint">A primer whose whole sequence is present always binds. One with a 5′ tail anneals by its 3′ end only, and is reported as a site when at least this many bases match and the annealed stretch melts at or above this temperature. Loosen these to see more sites, tighten them to see fewer.</div>
+        <div class="full note" id="hyN"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        d.hyb = { minMatch: Math.max(6, Math.min(40, parseInt(val('hyM'), 10) || 15)), minTm: Math.max(0, Math.min(90, parseFloat(val('hyT')) || 0)) };
+        d.cache = null; renderAll(true);
+        toast(`Hybridisation: at least ${d.hyb.minMatch} bases, Tm ${d.hyb.minTm} °C`);
+      } }],
+      onOpen: box => {
+        const upd = () => {
+          const probe = { minMatch: parseInt(val('hyM'), 10) || 15, minTm: parseFloat(val('hyT')) || 0 };
+          const keep = d.hyb; d.hyb = probe;
+          let sites = 0, bind = 0;
+          for (const p2 of d.primers) { const b = primerBind(d, p2); sites += b.length; if (b.length) bind++; }
+          d.hyb = keep;
+          $('#hyN').textContent = `${bind} of ${d.primers.length} primers would bind, at ${sites} site${sites === 1 ? '' : 's'} in total.`;
+        };
+        box.addEventListener('input', upd); upd();
+      }
+    });
   }
   function analyze(d) {
     const orfKey = [d.opts.orfMin, d.opts.transCode, (d.opts.orfStarts || []).join('+'), d.opts.orfStrands].join('|');
@@ -268,7 +311,10 @@ svg .prim { cursor: pointer; }
       if (f.hidden) continue;
       items.push({ kind: 'f', key: 'f:' + f.id, ref: f, start: f.start, end: f.end, strand: f.strand, name: f.name, color: f.color, type: f.type, segs: f.segs, priority: !!f.priority, cleave: f.cleave });
     }
-    if (o.showPrimers) for (const p of d.primers) (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: b.full ? '#2f6fd0' : '#7d9fd6', type: 'primer' }));
+    if (o.showPrimers) for (const p of d.primers) {
+      if (p.hidden) continue;
+      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? '#2f6fd0' : '#7d9fd6'), type: 'primer' }));
+    }
     if (o.showORFs && o.transMode === 'orfs') A.orfs.forEach((r, i) => items.push({
       kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand,
       name: 'ORF: ' + r.aa + ' aa', color: r.strand === 1 ? ORF_FWD : ORF_REV, type: 'ORF'
@@ -606,10 +652,29 @@ svg .prim { cursor: pointer; }
       ] },
       { label: 'Primers', items: [
         { label: 'Add Primer…', dis: !has, act: () => dlgPrimer(null) },
-        { label: 'Import Primers…', dis: !has, act: () => dlgImport('primers') },
-        { label: 'Primer Sets…', dis: !has, act: dlgPrimerSets },
+        { label: 'Edit Primer…', dis: !has || !S.primSel, act: () => dlgPrimer(d.primers.find(x => x.id === S.primSel)) },
+        { label: 'Edit Primers…', dis: !has || !d.primers.length, act: dlgEditPrimers },
         { label: 'Primer from Selection (Top Strand)', dis: !sl, act: () => primerFromSel(1) },
         { label: 'Primer from Selection (Bottom Strand)', dis: !sl, act: () => primerFromSel(-1) },
+        '-',
+        { label: 'Show or Hide Primers', items: [
+          { label: 'Show All Primers', dis: !has, act: () => { for (const x of d.primers) x.hidden = false; renderAll(true); } },
+          { label: 'Hide All Primers', dis: !has, act: () => { for (const x of d.primers) x.hidden = true; renderAll(true); } },
+          '-',
+          { label: 'Show Selected Primers', dis: !has, act: () => setPrimVisible(primPicked.size ? d.primers.filter(x => primPicked.has(x.id)) : d.primers.filter(x => x.id === S.primSel), true) },
+          { label: 'Hide Selected Primers', dis: !has, act: () => setPrimVisible(primPicked.size ? d.primers.filter(x => primPicked.has(x.id)) : d.primers.filter(x => x.id === S.primSel), false) }
+        ] },
+        { label: 'Hybridization Parameters…', dis: !has, act: dlgHybridization },
+        '-',
+        { label: 'Import Primers', items: [
+          { label: 'Import Primers from Another File…', dis: !has, act: () => dlgImport('primers') },
+          { label: 'Import Primers from a List…', dis: !has, act: dlgImportPrimerList }
+        ] },
+        { label: 'Export Primer Data…', dis: !has || !d.primers.length, act: dlgExportPrimers },
+        { label: 'Primer Sets…', dis: !has, act: dlgPrimerSets },
+        '-',
+        { label: 'Primer Structures…', dis: !has || !d.primers.length, act: () => dlgPrimerStruct(null, null) },
+        { label: 'Analyze Selected Primers at IDT…', dis: !has || !d.primers.length, act: analyzeAtIDT },
         '-',
         { label: 'Show Primers Table', dis: !has, act: () => setView('primer') }
       ] },
@@ -3846,24 +3911,124 @@ svg .prim { cursor: pointer; }
     const A = analyze(d), n = d.seq.length;
     return d.primers.filter(p => (A.psites[p.id] || []).some(b => DNA.overlaps(b, fo, n)));
   }
+  let primSort = 'pos', primDesc = false, primOpen = new Set(), primFull = true;
   function renderPrimers() {
     const d = D(), A = analyze(d), v = $('#view');
-    v.innerHTML = `<div class="panel"><div class="ptools"><button class="btn pri" id="padd">Add Primer…</button><button class="btn" id="ptop" ${selLen(d) ? '' : 'disabled'}>From Selection (Top)</button><button class="btn" id="pbot" ${selLen(d) ? '' : 'disabled'}>From Selection (Bottom)</button><button class="btn" id="pstruct" ${d.primers.length ? '' : 'disabled'}>Structures…</button><span class="note">Tm: nearest-neighbour, 50 mM Na⁺, 250 nM primer${focusOf(d) ? ` · within ${fmt(focusOf(d).start + 1)}–${fmt(focusOf(d).end)}` : ''}</span></div>
-      <div class="tscroll">${primerRows(d).length ? `<table class="grid"><thead><tr><th>Name</th><th>Sequence (5′→3′)</th><th>Length</th><th>Tm</th><th>GC</th><th>Binding sites</th><th></th></tr></thead><tbody>
-      ${primerRows(d).map(p => { const b = A.psites[p.id] || []; return `<tr data-p="${p.id}"><td><b>${esc(p.name)}</b></td><td class="mono wrap">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${DNA.gcPct(p.seq).toFixed(0)}%</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}${x.full ? '' : ' (3′ 15 nt)'}`).join('<br>') : '<span style="color:var(--danger)">does not bind</span>'}</td><td><button class="ib" data-struct="${p.id}">Structure</button><button class="ib" data-ed="${p.id}">Edit</button><button class="ib dng" data-del="${p.id}">Delete</button></td></tr>`; }).join('')}
-      </tbody></table>` : `<div class="empty"><h2>No primers yet</h2><p>Select bases and choose Primer from Selection, or add a primer by sequence. Primers with 5′ tails are matched by their 3′ end.</p></div>`}</div></div>`;
+    const list0 = primerRows(d);
+    const firstSite = p => { const b = (A.psites[p.id] || [])[0]; return b ? b.start : Infinity; };
+    const cmp = {
+      pos: (a, b) => firstSite(a) - firstSite(b) || a.name.localeCompare(b.name),
+      name: (a, b) => a.name.localeCompare(b.name),
+      len: (a, b) => a.seq.length - b.seq.length,
+      tm: (a, b) => DNA.tm(a.seq) - DNA.tm(b.seq),
+      gc: (a, b) => DNA.gcPct(a.seq) - DNA.gcPct(b.seq),
+      sites: (a, b) => (A.psites[a.id] || []).length - (A.psites[b.id] || []).length,
+      added: (a, b) => (a.added || 0) - (b.added || 0),
+      vis: (a, b) => (a.hidden ? 1 : 0) - (b.hidden ? 1 : 0) || a.name.localeCompare(b.name)
+    }[primSort] || ((a, b) => a.name.localeCompare(b.name));
+    const list = list0.slice().sort(primDesc ? (a, b) => -cmp(a, b) : cmp);
+    const arrow = k => primSort === k ? (primDesc ? ' ▾' : ' ▴') : '';
+    const show = p => p.case === 'lower' ? p.seq.toLowerCase() : p.seq;
+    // the expanded row, which is where the structure buttons live
+    const detail = p => {
+      const b = A.psites[p.id] || [];
+      const ev = PRIMER.evaluate(p.seq, {});
+      return `<tr class="sub"><td></td><td colspan="9"><div class="fdet">
+        <div><b>Sequence</b> <span class="mono">${esc(show(p))}</span></div>
+        <div><b>Properties</b> ${p.seq.length} nt · Tm ${DNA.tm(p.seq).toFixed(1)} °C · GC ${DNA.gcPct(p.seq).toFixed(0)} % · MW ${fmt(Math.round(DNA.strandMW(p.seq, { ends: p.phos ? 'phosphorylated' : 'unphosphorylated' })))} Da${p.phos ? ' · 5′ phosphorylated' : ''}</div>
+        <div><b>Self-structure</b> hairpin ${ev.hairpin} bp · 3′ self-dimer ${ev.selfDimer} bp · longest run ${ev.run}</div>
+        ${b.length ? b.map(x => `<div><b>Binds</b> ${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? 'top strand →' : 'bottom strand ←'} · ${x.annealed} of ${p.seq.length} bases annealed · annealed Tm ${x.tm.toFixed(1)} °C</div>`).join('')
+          : '<div style="color:var(--danger)">Does not bind with the current hybridisation parameters.</div>'}
+        ${p.notes ? `<div><b>Description</b> ${esc(p.notes)}</div>` : ''}
+        ${p.added ? `<div class="note">Added ${new Date(p.added).toLocaleString()}</div>` : ''}
+        <div class="row2"><button class="btn" data-struct="${p.id}">Show Structure…</button><button class="btn" data-ed="${p.id}">Edit…</button></div>
+      </div></td></tr>`;
+    };
+    v.innerHTML = `<div class="panel"><div class="ptools">
+        <button class="btn pri" id="padd">Add Primer…</button>
+        <button class="btn" id="ptop" ${selLen(d) ? '' : 'disabled'}>From Selection (Top)</button>
+        <button class="btn" id="pbot" ${selLen(d) ? '' : 'disabled'}>From Selection (Bottom)</button>
+        <button class="btn" id="pact">Actions ▾</button>
+        <select id="psort2"><option value="">Sort by…</option><option value="pos" ${primSort === 'pos' ? 'selected' : ''}>Position</option><option value="name" ${primSort === 'name' ? 'selected' : ''}>Name</option><option value="len" ${primSort === 'len' ? 'selected' : ''}>Length</option><option value="tm" ${primSort === 'tm' ? 'selected' : ''}>Tm</option><option value="gc" ${primSort === 'gc' ? 'selected' : ''}>GC</option><option value="sites" ${primSort === 'sites' ? 'selected' : ''}>Binding sites</option><option value="added" ${primSort === 'added' ? 'selected' : ''}>Date added</option><option value="vis" ${primSort === 'vis' ? 'selected' : ''}>Visibility</option></select>
+        <label class="inl"><input type="checkbox" id="pfull" ${primFull ? 'checked' : ''}> Full descriptions</label>
+        <button class="ib" id="pexpall" title="Expand or collapse every row">⇅</button>
+        <span class="note">Tm: nearest-neighbour, 50 mM Na⁺, 250 nM primer${focusOf(d) ? ` · within ${fmt(focusOf(d).start + 1)}–${fmt(focusOf(d).end)}` : ''}</span></div>
+      <div class="tscroll">${list.length ? `<table class="grid"><thead><tr>
+          <th style="width:26px"></th><th style="width:26px">✓</th><th style="width:22px"></th>
+          <th class="sort" data-s="name">Name${arrow('name')}</th><th>Sequence (5′→3′)</th>
+          <th class="sort" data-s="len">Length${arrow('len')}</th><th class="sort" data-s="tm">Tm${arrow('tm')}</th>
+          <th class="sort" data-s="gc">GC${arrow('gc')}</th><th class="sort" data-s="sites">Binding sites${arrow('sites')}</th><th></th></tr></thead><tbody>
+      ${list.map(p => {
+      const b = A.psites[p.id] || [];
+      return `<tr data-p="${p.id}"${p.hidden ? ' class="dimmed"' : ''}>
+          <td><button class="ib eye" data-pvis="${p.id}" title="${p.hidden ? 'Hidden — click to show' : 'Visible — click to hide'}">${p.hidden ? '○' : '◉'}</button></td>
+          <td><input type="checkbox" data-pck="${p.id}" ${primPicked.has(p.id) ? 'checked' : ''}></td>
+          <td><span class="disc" data-pex="${p.id}">${primOpen.has(p.id) ? '▾' : '▸'}</span></td>
+          <td><span class="sw" style="background:${p.color || '#2f6fd0'}"></span> <b>${esc(p.name)}</b>${p.phos ? ' <span class="note">5′P</span>' : ''}</td>
+          <td class="mono wrap">${esc(primFull ? show(p) : show(p).slice(0, 28) + (p.seq.length > 28 ? '…' : ''))}</td>
+          <td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${DNA.gcPct(p.seq).toFixed(0)}%</td>
+          <td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}${x.full ? '' : ` (3′ ${x.annealed} nt)`}`).join('<br>') : '<span style="color:var(--danger)">does not bind</span>'}</td>
+          <td><button class="ib" data-struct="${p.id}">Structure</button><button class="ib" data-ed="${p.id}">Edit</button><button class="ib dng" data-del="${p.id}">Delete</button></td></tr>`
+        + (primOpen.has(p.id) ? detail(p) : '');
+    }).join('')}
+      </tbody></table>` : `<div class="empty"><h2>No primers yet</h2><p>Select bases and choose Primer from Selection, or add a primer by sequence. A primer with a 5′ tail is matched by its 3′ end, under the hybridisation parameters in the Primers menu.</p></div>`}</div></div>`;
     $('#padd').onclick = () => dlgPrimer(null);
     $('#ptop').onclick = () => primerFromSel(1);
     $('#pbot').onclick = () => primerFromSel(-1);
-    $('#pstruct').onclick = () => dlgPrimerStruct(null, null);
+    $('#psort2').onchange = e => { if (e.target.value) { primSort = e.target.value; primDesc = false; renderPrimers(); } };
+    $('#pfull').onchange = e => { primFull = e.target.checked; renderPrimers(); };
+    $('#pexpall').onclick = () => { if (primOpen.size) primOpen.clear(); else for (const p of list) primOpen.add(p.id); renderPrimers(); };
+    $('#pact').onclick = e => {
+      const r = e.target.getBoundingClientRect();
+      const picked = d.primers.filter(x => primPicked.has(x.id));
+      showCtx(r.left, r.bottom, [
+        { label: `Edit Selected Primers… (${picked.length})`, dis: !picked.length, act: dlgEditPrimers },
+        { label: `Show Selected Primers (${picked.length})`, dis: !picked.length, act: () => setPrimVisible(picked, true) },
+        { label: `Hide Selected Primers (${picked.length})`, dis: !picked.length, act: () => setPrimVisible(picked, false) },
+        '-',
+        { label: `Analyze Selected Primers at IDT…`, dis: !picked.length, act: analyzeAtIDT },
+        { label: 'Export Primer Data…', dis: !d.primers.length, act: dlgExportPrimers },
+        '-',
+        { label: `Delete Selected Primers (${picked.length})`, dis: !picked.length, act: () => { const ids = picked.map(x => x.id); d.primers = d.primers.filter(x => !ids.includes(x.id)); primPicked.clear(); commit(d, `Removed ${ids.length} primers`); renderAll(true); } },
+        '-',
+        { label: 'Check All', act: () => { for (const p of list) primPicked.add(p.id); renderPrimers(); } },
+        { label: 'Clear Check Boxes', dis: !picked.length, act: () => { primPicked.clear(); renderPrimers(); } }
+      ]);
+    };
+    v.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (primSort === th.dataset.s) primDesc = !primDesc; else { primSort = th.dataset.s; primDesc = false; } renderPrimers(); });
     const tb = v.querySelector('tbody'); if (!tb) return;
     tb.onclick = e => {
+      const vis = e.target.closest('[data-pvis]');
+      if (vis) { const p = d.primers.find(x => x.id === +vis.dataset.pvis); p.hidden = !p.hidden; renderAll(true); return; }
+      const ck = e.target.closest('[data-pck]');
+      if (ck) { const id = +ck.dataset.pck; if (ck.checked) primPicked.add(id); else primPicked.delete(id); return; }
+      const ex = e.target.closest('[data-pex]');
+      if (ex) {
+        const id = +ex.dataset.pex;
+        if (e.altKey) { if (primOpen.size) primOpen.clear(); else for (const p of list) primOpen.add(p.id); }
+        else if (primOpen.has(id)) primOpen.delete(id); else primOpen.add(id);
+        renderPrimers(); return;
+      }
       const st = e.target.closest('[data-struct]'); if (st) { dlgPrimerStruct(d.primers.find(p => p.id === +st.dataset.struct), null); return; }
       const ed = e.target.closest('[data-ed]'); if (ed) { dlgPrimer(d.primers.find(p => p.id === +ed.dataset.ed)); return; }
       const del = e.target.closest('[data-del]'); if (del) { removePrimer(+del.dataset.del); return; }
       const tr = e.target.closest('tr[data-p]'); if (!tr) return;
+      S.primSel = +tr.dataset.p;
       const b = (A.psites[+tr.dataset.p] || [])[0]; if (b) selectRange(b);
       tb.querySelectorAll('tr.on').forEach(r => r.classList.remove('on')); tr.classList.add('on');
+    };
+    tb.oncontextmenu = e => {
+      const tr = e.target.closest('tr[data-p]'); if (!tr) return;
+      e.preventDefault();
+      const p = d.primers.find(x => x.id === +tr.dataset.p);
+      S.primSel = p.id;
+      showCtx(e.clientX, e.clientY, [
+        { label: `Edit Primer “${p.name}”…`, act: () => dlgPrimer(p) },
+        { label: p.hidden ? 'Show Primer' : 'Hide Primer', act: () => { p.hidden = !p.hidden; renderAll(true); } },
+        { label: 'Show Structure…', act: () => dlgPrimerStruct(p, null) },
+        '-',
+        { label: 'Delete Primer', act: () => removePrimer(p.id) }
+      ]);
     };
   }
 
@@ -4455,33 +4620,288 @@ svg .prim { cursor: pointer; }
     }
   }
 
+  /* The Add / Edit Primer dialog. A primer can be typed in, or taken from the selection
+   * on either strand, then extended with a codon, an enzyme site or a short peptide;
+   * added bases are shown in red, and the panel underneath shows the primer annealed to
+   * the template so a tail is obvious. */
+  const PEPTIDES = [['', '—'], ['GGSGG', 'GGSGG linker'], ['GSGSGS', 'GSGSGS linker'], ['HHHHHH', '6xHis'], ['DYKDDDDK', 'FLAG'], ['EQKLISEEDL', 'Myc'], ['GGGGS', 'GGGGS linker']];
   function dlgPrimer(p, preset) {
     const d = D(), isNew = !p;
-    const cur = p || preset || { name: `Primer ${d.primers.length + 1}`, seq: '' };
+    const n = d.seq.length;
+    const sel = selLen(d) ? { a: d.sel.start, b: d.sel.end || n } : null;
+    const fromSel = isNew && !!sel && !(preset && preset.seq);
+    let strand = (preset && preset.strand) || 1;
+    const baseOf = () => {
+      if (!fromSel) return '';
+      const raw = DNA.sub(d.seq, sel.a, sel.b);
+      return strand === 1 ? raw : DNA.rc(raw);
+    };
+    const cur = p || preset || { name: `Primer ${d.primers.length + 1}`, seq: fromSel ? baseOf() : '' };
+    let seq = cur.seq || '';
+    let template = seq;                       // the part that came from the template
+    let caret = seq.length;
+    const upd = () => {
+      const box = $('#dlg'); if (!box) return;
+      const b = seq.length >= 6 ? primerBind(d, { seq }) : [];
+      const site = b[0];
+      const addedCount = Math.max(0, seq.length - (template ? template.length : 0));
+      // the sequence with any added bases marked
+      const tailLen = seq.length - (site && !site.full ? site.annealed : (site ? seq.length : 0));
+      const marked = seq.split('').map((c, i) => (site && !site.full && i < tailLen) ? `<b style="color:#c0392b">${c}</b>` : esc(c)).join('');
+      $('#pSeqView').innerHTML = `<span class="mono">${marked}</span>`;
+      // enzyme sites created in the primer
+      const made = [];
+      for (const e of DNA.ENZYMES) {
+        if (e.core < 6) continue;
+        const hits = SEARCH.exact(seq, false, e.site);
+        for (const h of hits) made.push({ name: e.name, at: h.start, len: e.site.length });
+      }
+      $('#pinfo').innerHTML = seq.length
+        ? `${seq.length} nt · Tm ${DNA.tm(seq).toFixed(1)} °C · GC ${DNA.gcPct(seq).toFixed(0)} % · MW ${fmt(Math.round(DNA.strandMW(seq, { ends: $('#pPhos') && $('#pPhos').checked ? 'phosphorylated' : 'unphosphorylated' })))} Da`
+        + `<br>${b.length ? `${b.length} binding site${b.length === 1 ? '' : 's'} · ${site.annealed} of ${seq.length} bases annealed · annealed Tm ${site.tm.toFixed(1)} °C` : '<span style="color:var(--danger)">no binding site with the current hybridisation parameters</span>'}`
+        + (addedCount ? `<br>${addedCount} base${addedCount === 1 ? '' : 's'} added to the 5′ end` : '')
+        + (made.length ? `<br>enzyme sites in the primer: ${made.map(m => `<span title="at ${m.at + 1}" style="color:#1a7f37">${esc(m.name)}</span>`).join(', ')}` : '')
+        : 'Enter a sequence, or select a region before opening this dialog.';
+      // the primer drawn against the template
+      const panel = $('#pAlign');
+      if (!panel) return;
+      if (!site) { panel.innerHTML = '<div class="hint">The binding site is shown here once the primer matches the template.</div>'; return; }
+      const topStrand = site.strand === 1;
+      const from = Math.max(0, site.start - 6), to = Math.min(n, site.end + 6);
+      const ref = DNA.sub(d.seq, from, to);
+      const refRC = DNA.comp(ref);
+      const pad = site.start - from;
+      const pr = topStrand ? seq : DNA.rc(seq);
+      const lead = pad - (seq.length - site.annealed) * (topStrand ? 1 : 0);
+      const prLine = ' '.repeat(Math.max(0, topStrand ? pad - (seq.length - site.annealed) : pad)) + pr;
+      panel.innerHTML = `<div class="palign">
+        <div class="arow"><span class="lbl">${topStrand ? "primer 5′→3′" : ''}</span><span class="mono">${topStrand ? esc(prLine) : ''}</span></div>
+        <div class="arow"><span class="lbl">template</span><span class="mono">${esc(ref)}</span></div>
+        <div class="arow"><span class="lbl"></span><span class="mono">${esc(refRC)}</span></div>
+        <div class="arow"><span class="lbl">${topStrand ? '' : "primer 3′←5′"}</span><span class="mono">${topStrand ? '' : esc(prLine)}</span></div>
+        <div class="note">binds ${fmt(site.start + 1)}..${fmt(site.end)} on the ${topStrand ? 'top' : 'bottom'} strand${site.full ? '' : ' by its 3′ end'}</div>
+      </div>`;
+    };
     dialog({
-      title: isNew ? 'Add Primer' : `Edit Primer “${cur.name}”`,
-      body: `<div class="form"><label for="pn">Name</label><input type="text" id="pn" value="${esc(cur.name)}">
-        <label for="ps">Sequence 5′→3′</label><textarea id="ps" rows="3" style="min-height:60px">${esc(cur.seq)}</textarea>
-        <label>Properties</label><div id="pinfo" class="hint" style="margin:0"></div>
+      title: isNew ? 'Add Primer' : `Edit Primer “${cur.name}”`, wide: true,
+      body: `<div class="form">
+        <label for="pn">Name</label><input type="text" id="pn" value="${esc(cur.name)}">
+        ${fromSel ? `<label>From the selection</label><div class="row2">
+          <label class="inl"><input type="radio" name="pStrand" value="1" checked> Top strand 5′→3′</label>
+          <label class="inl"><input type="radio" name="pStrand" value="-1"> Bottom strand 5′→3′</label>
+          <span class="note">${fmt(sel.a + 1)}–${fmt(sel.b)}, ${fmt(sel.b - sel.a)} bp</span></div>` : ''}
+        <label for="ps">Sequence 5′→3′</label><textarea id="ps" rows="3" style="min-height:58px">${esc(seq)}</textarea>
+        <label></label><div class="full" id="pSeqView" style="word-break:break-all;font-size:12px"></div>
+        <label>Insert at the cursor</label><div class="row2" style="flex-wrap:wrap">
+          <select id="pInsEnz" style="width:150px"><option value="">Enzyme site…</option>${DNA.ENZYMES.filter(e => e.core >= 6).map(e => `<option value="${esc(e.name)}">${esc(e.name)} ${esc(e.site)}</option>`).join('')}</select>
+          <label class="inl"><input type="checkbox" id="pInsPad" checked> with 3 upstream bases</label>
+          <select id="pInsCodon" style="width:120px"><option value="">Codon…</option>${Object.keys(DNA.CODON).sort().map(c => `<option value="${c}">${c} (${DNA.AA3[DNA.CODON[c]] || DNA.CODON[c]})</option>`).join('')}</select>
+          <select id="pInsPep" style="width:150px">${PEPTIDES.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
+          <button class="btn" id="pInsGo" type="button">Insert</button>
+        </div>
+        <label>Properties</label><div class="row2">
+          <label class="inl"><input type="checkbox" id="pPhos" ${cur.phos ? 'checked' : ''}> 5′ phosphorylated</label>
+          <label class="inl">Colour <input type="color" id="pColor" value="${cur.color || '#2f6fd0'}"></label>
+        </div>
+        <label for="pNotes">Description</label><input type="text" id="pNotes" value="${esc(cur.notes || '')}">
+        <div class="full" id="pinfo" class="hint"></div>
+        <div class="full" id="pAlign"></div>
         <div class="full err"></div></div>`,
-      buttons: [...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => removePrimer(p.id) }]), { label: 'Cancel' }, {
-        label: isNew ? 'Add' : 'Save', primary: true, act: () => {
-          const name = val('pn').trim(), s = DNA.clean(val('ps'));
+      buttons: [...(isNew ? [] : [{ label: 'Delete', danger: true, act: () => removePrimer(p.id) }]),
+      { label: 'Structure…', act: () => { closeDialog(); dlgPrimerStruct({ id: p ? p.id : 0, name: val('pn') || 'primer', seq }, null); return false; } },
+      { label: 'Cancel' }, {
+        label: isNew ? 'Add Primer to Template' : 'Save', primary: true, act: () => {
+          const name = val('pn').trim(), s2 = DNA.clean(val('ps'));
           if (!name) return showErr('Enter a primer name.');
-          if (s.length < 6) return showErr('A primer needs at least 6 bases.');
-          if (isNew) { d.primers.push({ id: uid(), name, seq: s, notes: '' }); commit(d, `Added primer ${name}`); }
-          else { p.name = name; p.seq = s; commit(d, `Edited primer ${name}`); }
+          if (s2.length < 6) return showErr('A primer needs at least 6 bases.');
+          const rec = { name, seq: s2, notes: val('pNotes').trim(), phos: $('#pPhos').checked, color: val('pColor') };
+          if (isNew) { d.primers.push({ id: uid(), added: Date.now(), ...rec }); commit(d, `Added primer ${name}`); }
+          else { Object.assign(p, rec); commit(d, `Edited primer ${name}`); }
           renderAll(true);
         }
       }],
-      onOpen: () => {
-        const upd = () => {
-          const s = DNA.clean(val('ps'));
-          const b = s.length >= 6 ? primerBind(d, { seq: s }) : [];
-          $('#pinfo').innerHTML = s.length ? `${s.length} nt · Tm ${DNA.tm(s).toFixed(1)} °C · GC ${DNA.gcPct(s).toFixed(0)}% · ${b.length ? `binds at ${b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}`).join(', ')}` : 'no binding site in this sequence'}` : 'Enter a sequence.';
+      onOpen: box => {
+        const ta = box.querySelector('#ps');
+        const sync = () => { seq = DNA.clean(ta.value); upd(); };
+        ta.addEventListener('input', sync);
+        ta.addEventListener('keyup', () => { caret = ta.selectionStart; });
+        ta.addEventListener('click', () => { caret = ta.selectionStart; });
+        box.querySelectorAll('[name="pStrand"]').forEach(r => r.addEventListener('change', () => {
+          strand = +r.value;
+          seq = baseOf(); template = seq; ta.value = seq; caret = 0; upd();
+        }));
+        box.querySelector('#pPhos').addEventListener('change', upd);
+        box.querySelector('#pInsGo').onclick = () => {
+          let ins = '';
+          const enz = val('pInsEnz'), codon = val('pInsCodon'), pep = val('pInsPep');
+          if (enz) {
+            const e = DNA.ENZ_BY_NAME[enz];
+            // an enzyme needs a few bases upstream of its site to cut efficiently
+            ins += ($('#pInsPad').checked ? 'TTA' : '') + e.site.replace(/[^ACGT]/g, m => 'ACGT'[0]);
+          }
+          if (codon) ins += codon;
+          if (pep) for (const aa of pep) {
+            const best = Object.keys(DNA.CODON).find(c => DNA.CODON[c] === aa);
+            if (best) ins += best;
+          }
+          if (!ins) return showErr('Choose a site, a codon or a peptide first.');
+          const at = Math.max(0, Math.min(seq.length, caret));
+          seq = seq.slice(0, at) + ins + seq.slice(at);
+          ta.value = seq; caret = at + ins.length;
+          ta.setSelectionRange(caret, caret);
+          upd();
         };
-        $('#ps').addEventListener('input', upd); upd();
+        upd();
       }
+    });
+  }
+  // Several primers at once: colour, phosphorylation and the case the sequence is shown in.
+  function dlgEditPrimers() {
+    const d = D();
+    const picked = d.primers.filter(x => primPicked.has(x.id));
+    const list = picked.length ? picked : (S.primSel ? d.primers.filter(x => x.id === S.primSel) : []);
+    if (!list.length) { toast('Check the primers to change in the Primers table first.'); return; }
+    dialog({
+      title: `Edit ${list.length} Primer${list.length === 1 ? '' : 's'}`,
+      body: `<div class="form">
+        <div class="full note">${esc(list.map(x => x.name).slice(0, 8).join(', '))}${list.length > 8 ? ` and ${list.length - 8} more` : ''}</div>
+        <label></label><label><input type="checkbox" id="epCC"> Set the colour to <input type="color" id="epC" value="#2f6fd0"></label>
+        <label></label><label><input type="checkbox" id="epCP"> <select id="epP"><option value="1">Phosphorylate</option><option value="0">Do not phosphorylate</option></select> the 5′ end</label>
+        <label></label><label><input type="checkbox" id="epCF"> Show the sequence in <select id="epF"><option value="upper">UPPER CASE</option><option value="lower">lower case</option></select></label>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
+        let touched = 0;
+        for (const x of list) {
+          if ($('#epCC').checked) { x.color = val('epC'); touched++; }
+          if ($('#epCP').checked) { x.phos = val('epP') === '1'; touched++; }
+          if ($('#epCF').checked) { x.case = val('epF'); touched++; }
+        }
+        if (!touched) return showErr('Check at least one property to change.');
+        commit(d, `Edited ${list.length} primer${list.length === 1 ? '' : 's'}`);
+        renderAll(true);
+      } }]
+    });
+  }
+  function setPrimVisible(list, show) {
+    const d = D();
+    for (const x of list) x.hidden = !show;
+    renderAll(true);
+    toast(`${list.length} primer${list.length === 1 ? '' : 's'} ${show ? 'shown' : 'hidden'}`);
+  }
+  // Export for ordering: a delimited list with the columns the user picks.
+  function dlgExportPrimers() {
+    const d = D(), A = analyze(d);
+    const picked = d.primers.filter(x => primPicked.has(x.id));
+    const list = picked.length ? picked : d.primers;
+    const COLS = [
+      ['name', 'Name', x => x.name],
+      ['seq', 'Sequence (5′→3′)', x => (x.case === 'lower' ? x.seq.toLowerCase() : x.seq)],
+      ['length', 'Length', x => x.seq.length],
+      ['tm', 'Tm (°C)', x => DNA.tm(x.seq).toFixed(1)],
+      ['gc', 'GC (%)', x => DNA.gcPct(x.seq).toFixed(0)],
+      ['mw', 'MW (Da)', x => Math.round(DNA.strandMW(x.seq, { ends: x.phos ? 'phosphorylated' : 'unphosphorylated' }))],
+      ['phos', '5′ phosphate', x => x.phos ? 'yes' : 'no'],
+      ['sites', 'Binding sites', x => (A.psites[x.id] || []).map(b => `${b.start + 1}..${b.end}${b.strand > 0 ? '+' : '-'}`).join(' ')],
+      ['notes', 'Description', x => (x.notes || '').replace(/[\r\n]+/g, ' ')]
+    ];
+    const on = new Set(['name', 'seq', 'length', 'tm']);
+    dialog({
+      title: 'Export Primer Data', wide: true,
+      body: `<div class="form">
+        <div class="full note">${list.length} primer${list.length === 1 ? '' : 's'}${picked.length ? ' (checked)' : ' (all)'}</div>
+        <label>Columns</label><div class="enz-pick" style="columns:2 160px;max-height:170px">${COLS.map(([k, t]) => `<label><input type="checkbox" data-pc2="${k}" ${on.has(k) ? 'checked' : ''}> ${t}</label>`).join('')}</div>
+        <label>Format</label><select id="xpFmt"><option value="tsv">Tab-separated (.tsv)</option><option value="csv">Comma-separated (.csv)</option></select>
+        <div class="full hint">Sequences are written 5′→3′, ready to paste into an oligo order form.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Export', primary: true, act: () => {
+        const keys = [...document.querySelectorAll('#dlg [data-pc2]:checked')].map(i => i.dataset.pc2);
+        if (!keys.length) return showErr('Choose at least one column.');
+        const cols = COLS.filter(c => keys.includes(c[0]));
+        const tsv = val('xpFmt') === 'tsv', sep = tsv ? '\t' : ',';
+        const q = v => { const t = String(v); return tsv ? t.replace(/\t/g, ' ') : (/[",]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t); };
+        const rows = [cols.map(c => c[1]).join(sep), ...list.map(x => cols.map(c => q(c[2](x))).join(sep))];
+        const text = rows.join('\n') + '\n';
+        const name = d.name.replace(/[^\w.-]+/g, '_') + '-primers.' + (tsv ? 'tsv' : 'csv');
+        if (host && host.saveFile) host.saveFile({ path: null, defaultName: name, content: text, filters: [{ name: tsv ? 'Tab-separated' : 'CSV', extensions: [tsv ? 'tsv' : 'csv'] }] }).then(p2 => { if (p2) toast('Exported ' + p2.split(/[\\/]/).pop()); });
+        else downloadText(name, text);
+      } }]
+    });
+  }
+  /* Primers can also be pasted in as a list, which is how an order sheet comes back.
+   * Each line is a name and a sequence in either order, separated by a tab or a comma. */
+  function dlgImportPrimerList() {
+    const d = D();
+    dialog({
+      title: 'Import Primers from a List', wide: true,
+      body: `<div class="form">
+        <label for="iplText">Paste the list</label><textarea id="iplText" rows="8" placeholder="M13-F&#9;GTAAAACGACGGCCAGT&#10;M13-R, CAGGAAACAGCTATGAC" style="min-height:140px;font-family:var(--f-mono)"></textarea>
+        <label></label><label><input type="checkbox" id="iplBind" checked> Only import primers that bind to this sequence</label>
+        <label></label><label><input type="checkbox" id="iplDup"> Allow primers this file already has</label>
+        <div class="full" id="iplPrev"></div>
+        <div class="full hint">One primer per line: a name and a sequence, in either order, separated by a tab, a comma or two or more spaces. A line with only a sequence is named automatically.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Import', primary: true, id: 'iplGo', act: () => {
+        const list = parsePrimerList(val('iplText'));
+        const onlyBind = $('#iplBind').checked, allowDup = $('#iplDup').checked;
+        const add = list.filter(x => (allowDup || !d.primers.some(y => y.seq === x.seq)) && (!onlyBind || primerBind(d, x).length));
+        if (!add.length) return showErr('Nothing to import — no line held a usable primer, or none of them bind.');
+        for (const x of add) d.primers.push({ id: uid(), added: Date.now(), name: x.name, seq: x.seq, notes: x.notes || 'Imported from a list' });
+        commit(d, `Imported ${add.length} primer${add.length === 1 ? '' : 's'} from a list`);
+        renderAll(true);
+        toast(`${add.length} primer${add.length === 1 ? '' : 's'} imported`);
+      } }],
+      onOpen: box => {
+        const upd = () => {
+          const list = parsePrimerList(val('iplText'));
+          const onlyBind = $('#iplBind').checked;
+          const rows = list.map(x => ({ x, b: primerBind(d, x).length, dup: d.primers.some(y => y.seq === x.seq) }));
+          const usable = rows.filter(r => (!onlyBind || r.b) && !r.dup).length;
+          $('#iplPrev').innerHTML = rows.length
+            ? `<table class="grid"><thead><tr><th>Name</th><th>Sequence</th><th>Length</th><th>Tm</th><th>Binds</th></tr></thead><tbody>
+                ${rows.slice(0, 40).map(r => `<tr${(onlyBind && !r.b) || r.dup ? ' style="color:var(--faint)"' : ''}><td>${esc(r.x.name)}</td><td class="mono">${esc(r.x.seq)}</td><td>${r.x.seq.length}</td><td>${DNA.tm(r.x.seq).toFixed(1)}</td><td>${r.dup ? 'already here' : (r.b ? r.b + ' site' + (r.b === 1 ? '' : 's') : 'no')}</td></tr>`).join('')}
+              </tbody></table><div class="note">${usable} of ${rows.length} would be imported</div>`
+            : '<div class="hint">Nothing recognised yet.</div>';
+        };
+        box.querySelector('#iplText').addEventListener('input', upd);
+        box.addEventListener('change', upd);
+        upd();
+      }
+    });
+  }
+  function parsePrimerList(text) {
+    const out = [];
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || /^[#>]/.test(line)) continue;
+      const parts = line.split(/\t|,|\s{2,}/).map(x => x.trim()).filter(Boolean);
+      if (!parts.length) continue;
+      // whichever field looks like DNA is the sequence
+      let seqPart = parts.find(x => /^[ACGTUacgtu\s]{6,}$/.test(x) && DNA.clean(x).length >= 6);
+      if (!seqPart && parts.length === 1 && DNA.clean(parts[0]).length >= 6) seqPart = parts[0];
+      if (!seqPart) continue;
+      const seq = DNA.clean(seqPart);
+      if (seq.length < 6) continue;
+      const rest = parts.filter(x => x !== seqPart);
+      out.push({ name: rest[0] || `Primer ${out.length + 1}`, seq, notes: rest.slice(1).join(' ') });
+    }
+    return out;
+  }
+  // the reference tool hands primer sequences to IDT's OligoAnalyzer; so do we, one tab each.
+  function analyzeAtIDT() {
+    const d = D();
+    const picked = d.primers.filter(x => primPicked.has(x.id));
+    const list = picked.length ? picked : (S.primSel ? d.primers.filter(x => x.id === S.primSel) : d.primers);
+    if (!list.length) { toast('No primers to analyse.'); return; }
+    dialog({
+      title: 'Analyze Primers at IDT',
+      body: `<div class="form">
+        <div class="full">${list.length} primer${list.length === 1 ? '' : 's'} will be opened in IDT's OligoAnalyzer, one browser tab each, with the sequence filled in.</div>
+        <div class="full"><ul style="margin:4px 0 8px 18px">${list.slice(0, 10).map(x => `<li>${esc(x.name)} — <span class="mono">${esc(x.seq)}</span></li>`).join('')}${list.length > 10 ? `<li>and ${list.length - 10} more</li>` : ''}</ul></div>
+        <div class="full hint">OligoAnalyzer gives the extinction coefficient, hairpins, self-dimers and hetero-dimers. A free IDT account is needed. GeneCanvas also computes hairpins and dimers itself — see Structure… on a primer.</div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: `Open ${list.length} tab${list.length === 1 ? '' : 's'}`, primary: true, act: () => {
+        for (const x of list) window.open('https://sg.idtdna.com/calc/analyzer?sequence=' + encodeURIComponent(x.seq), '_blank', 'noreferrer');
+        toast('Opened OligoAnalyzer');
+      } }]
     });
   }
 
@@ -7229,16 +7649,27 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- primer structures
   function dgClass(dg) { return dg <= -9 ? 'bad' : (dg <= -6 ? 'warn' : 'okdg'); }
   function dgNote(dg) { return dg <= -9 ? 'strong — likely to interfere' : (dg <= -6 ? 'moderate' : 'weak'); }
+  // Reopens the structure window with a chosen temperature, which is what the
+  // calculation-parameters dialog does when it closes.
+  function dlgPrimerStructAt(list, aId, bId, tab, tempC) {
+    const a = list.find(p => p.id === aId);
+    S.__psTemp = tempC; S.__psTab = tab; S.__psB = bId;
+    dlgPrimerStruct(a, bId ? list.find(p => p.id === bId) : null);
+  }
+
   function dlgPrimerStruct(primer, partner) {
     const d = D();
-    const list = d.primers;
+    // a primer passed in that is not on the file (one being edited) is shown on its own
+    const list = (primer && !d.primers.some(x => x.id === primer.id)) ? [primer, ...d.primers] : d.primers;
     let aId = primer ? primer.id : (list[0] && list[0].id);
     let bId = partner ? partner.id : (list.find(p => p.id !== aId) || {}).id || '';
+    let tab = S.__psTab || 'monomer', tempC = S.__psTemp == null ? 37 : S.__psTemp;
+    S.__psTab = null; S.__psTemp = null;
     const render = () => {
       const a = list.find(p => p.id === aId);
       if (!a) { $('#psRes').innerHTML = '<div class="hint">This sequence has no primers yet.</div>'; return; }
-      const b = bId ? list.find(p => p.id === bId) : null;
-      const r = STRUCT.primerStructures(a.seq, b ? b.seq : null);
+      const b = tab === 'cross' && bId ? list.find(p => p.id === bId) : null;
+      const r = STRUCT.primerStructures(a.seq, tab === 'homodimer' ? a.seq : (b ? b.seq : null), { tempC });
       const dupBlock = (title, seqA, seqB, dups, note) => {
         if (!dups.length) return `<h4 class="psh">${esc(title)}</h4><div class="hint">None found.</div>`;
         return `<h4 class="psh">${esc(title)}</h4>` + dups.map(x => {
@@ -7259,25 +7690,62 @@ svg .prim { cursor: pointer; }
           return `<div class="psbox"><div class="pshead"><span class="dg ${dgClass(h.dg)}">ΔG ${h.dg.toFixed(2)} kcal/mol</span> <span class="note">stem ${h.stem} bp, loop ${h.loop} nt, at ${fmt(h.start + 1)}–${fmt(h.end + 1)} · ${dgNote(h.dg)}</span></div><pre class="psdiag">${esc(l1)}\n${esc(l2)}\n${esc(l3)}</pre></div>`;
         }).join('');
       };
-      $('#psRes').innerHTML = `
-        <div class="note" style="margin-bottom:6px"><b>${esc(a.name)}</b> <span class="mono">${esc(a.seq)}</span> · ${a.seq.length} nt · Tm ${DNA.tm(a.seq).toFixed(1)} °C</div>
-        ${hpBlock('Hairpins in ' + a.name, a.seq, r.fwd.hairpins)}
-        ${dupBlock('Self-dimers of ' + a.name, a.seq, a.seq, r.fwd.self)}
-        ${b ? `<div class="note" style="margin:10px 0 6px"><b>${esc(b.name)}</b> <span class="mono">${esc(b.seq)}</span> · ${b.seq.length} nt · Tm ${DNA.tm(b.seq).toFixed(1)} °C</div>
-        ${hpBlock('Hairpins in ' + b.name, b.seq, r.rev.hairpins)}
-        ${dupBlock('Self-dimers of ' + b.name, b.seq, b.seq, r.rev.self)}
-        ${dupBlock('Cross-dimers between the two', a.seq, b.seq, r.cross, 'A cross-dimer that pairs the 3′ ends is the one that produces primer-dimer product.')}` : ''}
-        <div class="hint">Free energies use the SantaLucia 1998 nearest-neighbour parameters at 37 °C. A structure weaker than about −6 kcal/mol rarely matters; below about −9 it usually does, especially when the 3′ end is involved.</div>`;
+      const head = `<div class="note" style="margin-bottom:6px"><b>${esc(a.name)}</b> <span class="mono">${esc(a.seq)}</span> · ${a.seq.length} nt · Tm ${DNA.tm(a.seq).toFixed(1)} °C</div>`;
+      let body;
+      if (tab === 'monomer') {
+        body = head + hpBlock('Hairpins in ' + a.name, a.seq, r.fwd.hairpins)
+          + dupBlock('Self-dimers of ' + a.name, a.seq, a.seq, r.fwd.self);
+      } else if (tab === 'homodimer') {
+        body = head + dupBlock(`Homodimer of ${a.name}`, a.seq, a.seq, r.cross || r.fwd.self,
+          'The lowest free energy pairing of two copies of this oligo. One that pairs the 3′ ends is the one that makes primer-dimer product.');
+      } else {
+        body = head + (b
+          ? `<div class="note" style="margin:10px 0 6px"><b>${esc(b.name)}</b> <span class="mono">${esc(b.seq)}</span> · ${b.seq.length} nt · Tm ${DNA.tm(b.seq).toFixed(1)} °C</div>`
+          + hpBlock('Hairpins in ' + b.name, b.seq, r.rev.hairpins)
+          + dupBlock('Self-dimers of ' + b.name, b.seq, b.seq, r.rev.self)
+          + dupBlock('Cross-dimers between the two', a.seq, b.seq, r.cross, 'A cross-dimer that pairs the 3′ ends is the one that produces primer-dimer product.')
+          : '<div class="hint">Choose a second primer to compare with.</div>');
+      }
+      $('#psRes').innerHTML = body
+        + `<div class="hint">Free energies use the SantaLucia 1998 nearest-neighbour parameters at ${tempC} °C. A structure weaker than about −6 kcal/mol rarely matters; below about −9 it usually does, especially when the 3′ end is involved.</div>`;
+      const t2 = $('#psTitle'); if (t2) t2.textContent = `Primer Structures — ${tempC} °C`;
     };
     dialog({
       title: 'Primer Structures', wide: true,
-      body: `<div class="form">
+      body: `<div class="ecbar">
+          <div class="seg" style="width:300px">${['monomer', 'homodimer', 'cross'].map(k => `<button data-pst="${k}" class="${tab === k ? 'on' : ''}">${k === 'monomer' ? 'Monomer' : (k === 'homodimer' ? 'Homodimer' : 'Two primers')}</button>`).join('')}</div>
+          <span class="sp" style="flex:1"></span><span class="note" id="psTitle"></span>
+        </div>
+        <div class="form">
         <label for="psA">Primer</label><select id="psA">${list.map(p => `<option value="${p.id}" ${p.id === aId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
         <label for="psB">Compare with</label><select id="psB"><option value="">— none —</option>${list.map(p => `<option value="${p.id}" ${String(p.id) === String(bId) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
         <div class="full" id="psRes"></div></div>`,
-      buttons: [{ label: 'Close', primary: true }],
+      buttons: [
+        { label: 'Calculation parameters…', act: () => {
+          dialog({
+            title: 'Calculation Parameters',
+            body: `<div class="form">
+              <label for="pcT">Temperature</label><div class="row2"><input type="number" id="pcT" value="${tempC}" min="0" max="95" step="1" style="width:80px"> °C</div>
+              <div class="full hint">Structures are scored at this temperature from the SantaLucia 1998 enthalpies and entropies, so a structure that matters at 25 °C may not at 60 °C.</div></div>`,
+            buttons: [{ label: 'Cancel', act: () => { closeDialog(); dlgPrimerStructAt(list, aId, bId, tab, tempC); return false; } },
+            { label: 'OK', primary: true, act: () => {
+              const t3 = Math.max(0, Math.min(95, parseFloat(val('pcT')) || 37));
+              closeDialog();
+              dlgPrimerStructAt(list, aId, bId, tab, t3);
+              return false;
+            } }]
+          });
+          return false;
+        } },
+        { label: 'Close', primary: true }],
       onOpen: box => {
         render();
+        box.querySelector('.seg').onclick = e => {
+          const b2 = e.target.closest('[data-pst]'); if (!b2) return;
+          tab = b2.dataset.pst;
+          box.querySelectorAll('[data-pst]').forEach(x => x.classList.toggle('on', x === b2));
+          render();
+        };
         box.addEventListener('change', e => {
           if (e.target.id === 'psA') aId = +e.target.value;
           else if (e.target.id === 'psB') bId = e.target.value ? +e.target.value : '';
@@ -7286,6 +7754,8 @@ svg .prim { cursor: pointer; }
         });
       }
     });
+    // reopening with the state carried over is how the parameters dialog comes back
+
   }
 
   // ---------------------------------------------------------------- RNA structure

@@ -26,11 +26,23 @@
     CT: [-7.8, -21.0], AG: [-7.8, -21.0], GA: [-8.2, -22.2], TC: [-8.2, -22.2],
     CG: [-10.6, -27.2], GC: [-9.8, -24.4], GG: [-8.0, -19.9], CC: [-8.0, -19.9]
   };
-  const dgOf = (h, s) => h - T37 * s / 1000;
-  const DG = {};
-  for (const [k, [h, s]] of Object.entries(NN)) DG[k] = dgOf(h, s);
+  const dgOf = (h, s, T = T37) => h - T * s / 1000;
+  // The tables are built at a temperature, so a structure can be scored at the
+  // temperature it will actually be held at. 37 C is the default everywhere.
+  const tableCache = new Map();
+  function dgTable(tempC) {
+    const T = 273.15 + (tempC == null ? 37 : tempC);
+    const key = T.toFixed(2);
+    if (tableCache.has(key)) return tableCache.get(key);
+    const dg = {};
+    for (const [k, [h, s2]] of Object.entries(NN)) dg[k] = dgOf(h, s2, T);
+    const t = { T, dg, initGC: dgOf(0.1, -2.8, T), initAT: dgOf(2.3, 4.1, T) };
+    tableCache.set(key, t);
+    return t;
+  }
+  const DG = dgTable(37).dg;
   // Helix initiation, split between the two ends by which base closes them.
-  const INIT_GC = dgOf(0.1, -2.8), INIT_AT = dgOf(2.3, 4.1);
+  const INIT_GC = dgTable(37).initGC, INIT_AT = dgTable(37).initAT;
   const initFor = b => (b === 'G' || b === 'C') ? INIT_GC : INIT_AT;
 
   const COMP = { A: 'T', T: 'A', G: 'C', C: 'G' };
@@ -42,6 +54,8 @@
   function duplexes(a, b, opts = {}) {
     a = DNA.clean(a); b = DNA.clean(b);
     if (!a || !b) return [];
+    const T = dgTable(opts.tempC);
+    const DGx = T.dg, initAt = ch => (ch === 'G' || ch === 'C') ? T.initGC : T.initAT;
     const br = [...b].reverse().join('');       // b written 3'→5', which is how it faces a
     const out = [];
     for (let k = -(a.length - 1); k <= br.length - 1; k++) {
@@ -60,10 +74,10 @@
         if (!pat[i]) { cur = 0; continue; }
         total++;
         cur++; if (cur > best) best = cur;
-        if (cur === 1) { runs++; dg += initFor(a[i]); }
-        else dg += DG[a[i - 1] + a[i]];
+        if (cur === 1) { runs++; dg += initAt(a[i]); }
+        else dg += DGx[a[i - 1] + a[i]];
         // closing penalty when the run ends
-        if (i === a.length - 1 || !pat[i + 1]) dg += initFor(a[i]);
+        if (i === a.length - 1 || !pat[i + 1]) dg += initAt(a[i]);
       }
       if (runs > 1) dg += (runs - 1) * 1.6;     // crossing an internal mismatch costs energy
       // how many of the last five bases of each primer are paired, which is what primes
@@ -110,6 +124,7 @@
   // A stem of paired bases closing a loop of at least three unpaired bases.
   function hairpins(s, opts = {}) {
     s = DNA.clean(s);
+    const TT = dgTable(opts.tempC), DGx = TT.dg;
     const n = s.length, minLoop = opts.minLoop || 3, minStem = opts.minStem || 3;
     const found = [];
     for (let i = 0; i < n; i++) {
@@ -123,7 +138,7 @@
         if (i > 0 && j < n - 1 && pairs(s[i - 1], s[j + 1])) continue;
         const loop = y - x + 1;
         let dg = 0;
-        for (let q = 1; q < stem; q++) dg += DG[s[i + q - 1] + s[i + q]];
+        for (let q = 1; q < stem; q++) dg += DGx[s[i + q - 1] + s[i + q]];
         dg += loopPenalty(loop);
         found.push({ start: i, end: j, stem, loop, loopStart: x, dg });
       }
@@ -157,13 +172,14 @@
   }
 
   // Everything a primer pair can do to itself and to its partner.
-  function primerStructures(fwd, rev) {
-    const r = { fwd: { seq: fwd }, };
-    r.fwd.hairpins = hairpins(fwd);
-    r.fwd.self = duplexes(fwd, fwd, { limit: 3 });
+  function primerStructures(fwd, rev, opts = {}) {
+    const o = { limit: 3, tempC: opts.tempC, minPairs: opts.minPairs };
+    const r = { fwd: { seq: fwd }, tempC: opts.tempC == null ? 37 : opts.tempC };
+    r.fwd.hairpins = hairpins(fwd, { tempC: opts.tempC, minStem: opts.minStem, minLoop: opts.minLoop });
+    r.fwd.self = duplexes(fwd, fwd, o);
     if (rev) {
-      r.rev = { seq: rev, hairpins: hairpins(rev), self: duplexes(rev, rev, { limit: 3 }) };
-      r.cross = duplexes(fwd, rev, { limit: 3 });
+      r.rev = { seq: rev, hairpins: hairpins(rev, { tempC: opts.tempC, minStem: opts.minStem, minLoop: opts.minLoop }), self: duplexes(rev, rev, o) };
+      r.cross = duplexes(fwd, rev, o);
     }
     return r;
   }
@@ -427,7 +443,7 @@
   }
 
   root.STRUCT = {
-    DG, duplexes, duplexDiagram, hairpins, hairpinDiagram, primerStructures, loopPenalty,
+    DG, dgTable, duplexes, duplexDiagram, hairpins, hairpinDiagram, primerStructures, loopPenalty,
     rnaFold, stemList, toRNA,
     proteinStats, hydropathy, chargeCurve, KD, AA_NAME, PKA_SET
   };
