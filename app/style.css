@@ -557,6 +557,18 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .mspop .msbtns { display: flex; gap: 5px; }
 .mspop .msbtns .btn { flex: 1; min-width: 0; font-size: 11.5px; padding: 3px 6px; }
 .mspop .msnote { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.mspop .mslist { max-height: 210px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 4px; padding: 4px 6px;
+  display: flex; flex-direction: column; gap: 2px; background: var(--chrome2); }
+.mspop .mslist .mschk { font-size: 11.5px; }
+
+/* a map with the strip beside it, in a tool window */
+.imappane { position: relative; display: flex; align-items: stretch; }
+.imappane .imapbox { flex: 1; min-width: 0; }
+.imappane .imapbox .imap { width: 100%; }
+.imappane .tmapside { position: static; align-self: flex-start; margin: 4px 0 0 6px; box-shadow: none; }
+/* the strip's popover belongs to a window that may itself sit above the page */
+#tmspop { z-index: 150; }
+#tmstip { z-index: 155; }
 
 .srow .aa[data-aa] { cursor: pointer; }
 .srow .aa[data-aa]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -623,6 +635,16 @@ body.toolwin .win { height: 100vh; }
 svg.imap text.ftxt { font-size: 10px; fill: #1c2230; }
 svg.imap [data-pick] { cursor: pointer; }
 svg.imap [data-pick]:hover { opacity: .78; }
+svg.imap line.bb { stroke: #2f3644; stroke-width: 1.2; }
+svg.imap line.tick { stroke: #8d95a3; stroke-width: 1; }
+svg.imap text.tickl { font-size: 9.5px; fill: #5e6776; }
+svg.imap rect.selarea { fill: rgba(37, 99, 201, .16); stroke: rgba(37, 99, 201, .5); stroke-width: 1; }
+svg.imap line.ecut { stroke: #4a5160; stroke-width: 1.1; }
+svg.imap line.lead { stroke: #c3c9d3; stroke-width: .8; }
+svg.imap text.lbl { font-size: 10.5px; fill: #1c2230; }
+svg.imap text.lbl.p { fill: #2f6fd0; font-size: 10px; }
+svg.imap polygon.orfp { stroke: #8d95a3; }
+svg.imap text.ctr1 { fill: #1c2230; font-weight: 600; }
 
 /* enzyme browser */
 .ebtitle { display: flex; align-items: center; gap: 10px; font-size: 17px; color: var(--accent); }

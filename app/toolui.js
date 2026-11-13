@@ -16,7 +16,8 @@
    * caller says what to do with a click, so the same picture serves the feature
    * browser, the enzyme browser and the cloning window. */
   function interactiveMap(opts) {
-    const { seq, circular, features = [], sites = {}, sel, W = 560, H = 150, name = '', primers = [] } = opts;
+    const { seq, circular, features = [], sites = {}, sel, W = 560, H = 150, name = '', primers = [], orfs = [] } = opts;
+    const showRuler = opts.showRuler !== false, showLoc = opts.showLocations !== false;
     const n = seq.length;
     if (!n) return '<div class="hint">No sequence.</div>';
     const m = 26, w = W - 2 * m, baseY = Math.round(H * 0.56);
@@ -26,7 +27,7 @@
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
     // ticks
     const step = niceStep(n / Math.max(3, Math.floor(w / 90)));
-    for (let t = 0; t <= n; t += step) {
+    for (let t = 0; showRuler && t <= n; t += step) {
       const x = X(t);
       g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${fmt(t || 1)}</text>`);
     }
@@ -52,9 +53,23 @@
       g.push(`<polygon class="feat" points="${pts}" fill="${f.color || '#c9ced6'}" data-pick="f:${f.id != null ? f.id : f.name}" data-a="${f.start}" data-b="${f.end}"><title>${esc(f.name)} ${fmt(f.start + 1)}..${fmt(f.end)}</title></polygon>`);
       if (x2 - x1 > esc(f.name).length * 6) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${y + 6}" dy=".35em" text-anchor="middle">${esc(f.name)}</text>`);
     }
+    // open reading frames just under the backbone, drawn hollow so features stay clear
+    const orfLanes = [];
+    orfs.forEach(o => {
+      let k = 0;
+      while (orfLanes[k] && orfLanes[k].some(q => o.start < q.end && q.start < o.end)) k++;
+      (orfLanes[k] = orfLanes[k] || []).push(o);
+      const x1 = X(o.start), x2 = X(o.end), y = baseY + 10 + k * 11;
+      const hd = Math.min(7, (x2 - x1) * 0.4);
+      const pts = o.strand === -1
+        ? `${x1},${y + 4} ${x1 + hd},${y} ${x2},${y} ${x2},${y + 8} ${x1 + hd},${y + 8}`
+        : `${x1},${y} ${x2 - hd},${y} ${x2},${y + 4} ${x2 - hd},${y + 8} ${x1},${y + 8}`;
+      g.push(`<polygon class="orfp" points="${pts}" fill="none" stroke="#8d95a3" stroke-width="1"><title>ORF ${fmt(o.start + 1)}..${fmt(o.end)} ${o.strand === -1 ? '\u2190' : '\u2192'}${o.aa ? ', ' + fmt(o.aa) + ' aa' : ''}</title></polygon>`);
+    });
     // primers under the line
+    const orfRows = orfLanes.length;
     primers.forEach((p, i) => {
-      const x1 = X(p.start), x2 = X(p.end), y = baseY + 26 + (i % 2) * 12;
+      const x1 = X(p.start), x2 = X(p.end), y = baseY + 26 + orfRows * 11 + (i % 2) * 12;
       const lo = Math.min(x1, x2), hi = Math.max(x1, x2), rev = p.strand === -1 || x2 < x1;
       const hd = Math.min(7, Math.max(3, (hi - lo) * 0.5));
       const pts = rev
@@ -68,7 +83,7 @@
     for (const [nm, list] of Object.entries(sites)) for (const s of list) if (s.cut != null) cuts.push({ nm, pos: s.cut, start: s.pos, len: s.len });
     cuts.sort((a, b) => a.pos - b.pos);
     const rowEnd = [];
-    const labelOf = c => `${c.nm} (${fmt(c.pos)})`;
+    const labelOf = c => showLoc ? `${c.nm} (${fmt(c.pos)})` : c.nm;
     for (const c of cuts) {
       const x = X(c.pos), wd = labelOf(c).length * 6.2 + 8;
       const left = x + wd > W - 2 ? x - wd : x;             // hung the other way at the right edge
@@ -92,7 +107,7 @@
     }
     // leader lines first, so a name is never crossed by one
     g.push(leads.join(''), names.join(''));
-    const hh = Math.max(H, baseY + 50) + dy;
+    const hh = Math.max(H, baseY + 50 + orfRows * 11 + (primers.length ? 14 : 0)) + dy;
     return `<svg class="imap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${hh}" width="100%" height="${hh}" font-family="Segoe UI, Arial, sans-serif">
       <rect width="${W}" height="${hh}" fill="var(--canvas)"/><g transform="translate(0,${dy})">${g.join('')}</g>
       ${name ? `<text class="ctr1" x="${m}" y="14" style="font-size:12px;pointer-events:none">${esc(name)}</text>` : ''}</svg>`;
@@ -326,5 +341,280 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
     return e.site.slice(Math.max(0, a), Math.min(e.site.length, b));
   }
 
-  root.TOOLUI = { interactiveMap, featureBrowser, enzymeBrowser, SUPPLIERS, bufferActivity, overhangSeq, niceStep };
+  // ---------------------------------------------------------------- the side strip
+  /* The same strip of icons the main window puts beside its map, for the windows that
+   * show a map of their own: the cloning window and the simulation. It works on a plain
+   * view state rather than on a document, so a tool window can keep its own settings. */
+  const MS_ICONS = {
+    enz: '<path d="M6 4v7h7" stroke-width="1.8"/><path d="M12 11h6" stroke-width="1.8"/><path d="M18 11v9" stroke-width="1.8"/><text x="4" y="22" font-size="7.5" stroke="none" fill="currentColor" font-family="Georgia,serif">SalI</text>',
+    feat: '<path d="M3 8h12l5 4-5 4H3z" stroke-width="1.5"/>',
+    primer: '<path d="M3 9h11" stroke-width="1.6"/><path d="m11 6 4 3-4 3" stroke-width="1.6" fill="none"/><path d="M21 16H10" stroke-width="1.6"/><path d="m13 13-4 3 4 3" stroke-width="1.6" fill="none"/>',
+    orf: '<path d="M3 7h10l3 2.5-3 2.5H3z" stroke-width="1.3"/><path d="M21 17H11l-3-2.5L11 12h10z" stroke-width="1.3"/>',
+    paint: '<rect x="3" y="5" width="4.5" height="14" rx="1"/><rect x="9.75" y="5" width="4.5" height="14" rx="1"/><rect x="16.5" y="5" width="4.5" height="14" rx="1"/>',
+    num: '<text x="2" y="17" font-size="11" stroke="none" fill="currentColor" font-family="Segoe UI, Arial">(123)</text>'
+  };
+  const mapState = init => Object.assign({
+    enzMode: 'unique6', chosen: [], hiddenEnz: [],
+    showFeat: true, hiddenFeat: [],
+    showPrimers: true, hiddenPrim: [],
+    showORFs: false, orfMin: 100,
+    colors: true, showRuler: true, showLocations: true
+  }, init || {});
+
+  // Which enzymes the mode asks for, before the individual ticks are applied.
+  function enzSetOf(sites, st) {
+    const out = [];
+    for (const e of DNA.ENZYMES) {
+      const list = sites[e.name]; if (!list || !list.length) continue;
+      const m = st.enzMode;
+      let ok = false;
+      if (m === 'unique6') ok = list.length === 1 && e.core >= 6;
+      else if (m === 'unique') ok = list.length === 1;
+      else if (m === 'dual6') ok = list.length <= 2 && e.core >= 6;
+      else if (m === 'chosen' || m === 'none') ok = st.chosen.includes(e.name);
+      if (ok) out.push(e.name);
+    }
+    return out;
+  }
+  function shownSites(sites, st) {
+    if (st.enzMode === 'none') return {};
+    const out = {};
+    for (const nm of enzSetOf(sites, st)) if (!st.hiddenEnz.includes(nm)) out[nm] = sites[nm];
+    return out;
+  }
+  const shownFeatures = (doc, st) => st.showFeat ? (doc.features || []).filter(f => !st.hiddenFeat.includes(String(f.id != null ? f.id : f.name))) : [];
+  const shownPrimers = (doc, st) => st.showPrimers ? (doc.primers || []).filter(p => !st.hiddenPrim.includes(String(p.id))) : [];
+  function orfsOf(doc, st) {
+    if (!st.showORFs) return [];
+    try { return DNA.findORFs(doc.seq, doc.circular, st.orfMin || 100) || []; } catch (e) { return []; }
+  }
+
+  /* Keeps the named enzymes on the map whatever the set is: they are unhidden, and if
+   * the current set leaves one out the set becomes the chosen one, carrying the rest. */
+  function includeEnz(st, sites, names) {
+    const want = (names || []).filter(Boolean);
+    if (!want.length) return st;
+    st.hiddenEnz = st.hiddenEnz.filter(x => !want.includes(x));
+    const inSet = enzSetOf(sites, st);
+    if (want.some(nm => !inSet.includes(nm))) {
+      st.chosen = [...new Set([...inSet, ...st.chosen, ...want])];
+      st.enzMode = 'chosen';
+    }
+    return st;
+  }
+
+  function sideGroups(doc, st, sites) {
+    const feats = doc.features || [], prims = doc.primers || [];
+    const inSet = enzSetOf(sites, st);
+    const shown = shownSites(sites, st);
+    const cutting = Object.keys(sites).filter(nm => sites[nm].length);
+    const list = (items, kind) => items.length
+      ? `<div class="mslist">${items.map(it => `<label class="mschk"><input type="checkbox" data-msitem="${kind}" value="${esc(it.key)}" ${it.on ? 'checked' : ''}> ${esc(it.label)}</label>`).join('')}</div>`
+      : '<div class="msnote">Nothing to list.</div>';
+    return [
+      {
+        key: 'enz', icon: 'enz', title: 'Enzyme sites',
+        on: () => Object.keys(shown).length > 0,
+        toggle: () => {
+          if (st.enzMode === 'none') st.enzMode = st.lastEnzMode || (st.chosen.length ? 'chosen' : 'unique6');
+          else { st.lastEnzMode = st.enzMode; st.enzMode = 'none'; }
+        },
+        panel: () => `<h5>Enzyme set</h5>
+          <select data-msv="enzMode">
+            <option value="unique6" ${st.enzMode === 'unique6' ? 'selected' : ''}>Unique 6+ cutters</option>
+            <option value="unique" ${st.enzMode === 'unique' ? 'selected' : ''}>All unique cutters</option>
+            <option value="dual6" ${st.enzMode === 'dual6' ? 'selected' : ''}>Unique &amp; dual 6+ cutters</option>
+            <option value="chosen" ${st.enzMode === 'chosen' ? 'selected' : ''}>Chosen enzymes (${st.chosen.length})</option>
+            <option value="none" ${st.enzMode === 'none' ? 'selected' : ''}>None</option>
+          </select>
+          <h5>Shown on the map</h5>
+          ${list(cutting.map(nm => ({ key: nm, on: !!shown[nm], label: `${nm} (${sites[nm].length})` })), 'enz')}
+          <div class="msbtns"><button class="btn" data-msact="allEnz">Show all that cut</button><button class="btn" data-msact="noEnz">Hide all</button></div>
+          <div class="msnote">${cutting.length} enzymes cut this sequence; ${Object.keys(shown).length} shown. Ticking one that the set leaves out keeps it as a chosen enzyme.</div>`
+      },
+      {
+        key: 'feat', icon: 'feat', title: 'Features',
+        on: () => st.showFeat && shownFeatures(doc, st).length > 0,
+        toggle: () => { st.showFeat = !st.showFeat; },
+        panel: () => `<label class="mschk"><input type="checkbox" data-msb="showFeat" ${st.showFeat ? 'checked' : ''}> Show features</label>
+          <h5>Shown on the map</h5>
+          ${list(feats.map(f => { const k = String(f.id != null ? f.id : f.name); return { key: k, on: !st.hiddenFeat.includes(k), label: `${f.name} (${fmt(f.start + 1)}..${fmt(f.end)})` }; }), 'feat')}
+          <div class="msbtns"><button class="btn" data-msact="allFeat">Show all</button><button class="btn" data-msact="noFeat">Hide all</button></div>
+          <div class="msnote">${feats.length} features</div>`
+      },
+      {
+        key: 'primer', icon: 'primer', title: 'Primers',
+        on: () => st.showPrimers && shownPrimers(doc, st).length > 0,
+        toggle: () => { st.showPrimers = !st.showPrimers; },
+        panel: () => `<label class="mschk"><input type="checkbox" data-msb="showPrimers" ${st.showPrimers ? 'checked' : ''}> Show primers</label>
+          <h5>Shown on the map</h5>
+          ${list(prims.map(p => ({ key: String(p.id), on: !st.hiddenPrim.includes(String(p.id)), label: `${p.name} (${p.seq.length}-mer)` })), 'primer')}
+          <div class="msbtns"><button class="btn" data-msact="allPrim">Show all</button><button class="btn" data-msact="noPrim">Hide all</button></div>
+          <div class="msnote">${prims.length} primers${prims.length ? '' : ' — primers are added in the main window'}</div>`
+      },
+      {
+        key: 'orf', icon: 'orf', title: 'Open reading frames',
+        on: () => st.showORFs,
+        toggle: () => { st.showORFs = !st.showORFs; },
+        panel: () => `<label class="mschk"><input type="checkbox" data-msb="showORFs" ${st.showORFs ? 'checked' : ''}> Show ORFs</label>
+          <div class="msrow2">min <input type="number" data-msn="orfMin" min="20" max="2000" step="10" value="${st.orfMin}"> aa</div>
+          <div class="msnote">${st.showORFs ? fmt(orfsOf(doc, st).length) + ' ORFs of ' + st.orfMin + ' aa or more' : 'Off'}</div>`
+      },
+      {
+        key: 'color', icon: 'paint', title: 'Colours',
+        on: () => st.colors,
+        toggle: () => { st.colors = !st.colors; },
+        panel: () => `<label class="mschk"><input type="checkbox" data-msb="colors" ${st.colors ? 'checked' : ''}> Feature colours</label>
+          <div class="msnote">With this off the features are drawn in plain grey, which can be easier to read on a crowded map.</div>`
+      },
+      {
+        key: 'num', icon: 'num', title: 'Numbering',
+        on: () => st.showRuler,
+        toggle: () => { st.showRuler = !st.showRuler; },
+        panel: () => `<label class="mschk"><input type="checkbox" data-msb="showRuler" ${st.showRuler ? 'checked' : ''}> Show the position ruler</label>
+          <label class="mschk"><input type="checkbox" data-msb="showLocations" ${st.showLocations ? 'checked' : ''}> Show cut positions beside enzyme names</label>`
+      }
+    ];
+  }
+
+  /* The map and its strip. `opts` carries the document, the view state, the region to
+   * mark and the size; everything else is worked out here. */
+  function mapPane(opts) {
+    const doc = opts.doc, st = opts.state;
+    if (!doc || !doc.seq) return '<div class="hint">Choose a sequence.</div>';
+    const sites = opts.sites || DNA.findSites(doc.seq, doc.circular);
+    const feats = shownFeatures(doc, st);
+    const map = interactiveMap({
+      seq: doc.seq, circular: doc.circular, name: opts.name !== undefined ? opts.name : doc.name,
+      features: st.colors ? feats : feats.map(f => ({ ...f, color: '#c9ced6' })),
+      sites: shownSites(sites, st),
+      primers: (opts.primers || doc.primers || []).filter(p => st.showPrimers && !st.hiddenPrim.includes(String(p.id))),
+      orfs: orfsOf(doc, st),
+      sel: opts.sel || null, W: opts.W || 640, H: opts.H || 230,
+      showRuler: st.showRuler, showLocations: st.showLocations
+    });
+    const strip = sideGroups(doc, st, sites).map(g => `
+      <div class="msrow${g.on() ? ' on' : ''}">
+        <button class="msb" data-ms="${g.key}" data-mstip="${esc(g.title)}"><svg viewBox="0 0 24 24">${MS_ICONS[g.icon]}</svg></button>
+        <button class="mschev" data-mschev="${g.key}" data-mstip="${esc(g.title)} — more"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></button>
+      </div>`).join('');
+    return `<div class="imappane"><div class="imapbox">${map}</div><div class="mapside tmapside">${strip}</div></div>`;
+  }
+
+  /* Wires the strip inside `root`. `redraw` is called whenever the state changes, and is
+   * expected to put a fresh mapPane back on the page. */
+  function bindMapPane(rootEl, doc, st, redraw, sites) {
+    const strip = rootEl.querySelector('.tmapside');
+    if (!strip) return;
+    const all = () => sites || DNA.findSites(doc.seq, doc.circular);
+    const pop = () => {
+      let p = document.getElementById('tmspop');
+      if (!p) { p = document.createElement('div'); p.id = 'tmspop'; p.className = 'mspop'; document.body.appendChild(p); }
+      return p;
+    };
+    const closePop = () => { const p = document.getElementById('tmspop'); if (p) { p.hidden = true; p.innerHTML = ''; } };
+    const tip = show => {
+      let t = document.getElementById('tmstip');
+      if (!t) { t = document.createElement('div'); t.id = 'tmstip'; t.className = 'mstip'; document.body.appendChild(t); }
+      if (!show) { t.hidden = true; return t; }
+      return t;
+    };
+    let openKey = null;
+    // a redraw replaces the buttons, so any tooltip left over from a hover is dropped
+    tip(false);
+    function refresh() { tip(false); redraw(); }
+    function openPanel(key, anchor) {
+      const g = sideGroups(doc, st, all()).find(x => x.key === key); if (!g) return;
+      openKey = key;
+      const p = pop();
+      tip(false);
+      p.innerHTML = `<div class="mshead">${esc(g.title)}<button class="ib" data-msclose>✕</button></div><div class="msbody">${g.panel()}</div>`;
+      p.hidden = false;
+      // after a redraw the strip is a new element, so the live one is measured
+      const liveStrip = document.querySelector('.tmapside') || strip;
+      const sr = liveStrip.getBoundingClientRect(), r = anchor.getBoundingClientRect(), pr = p.getBoundingClientRect();
+      p.style.left = Math.max(6, sr.left - pr.width - 8) + 'px';
+      p.style.top = Math.max(6, Math.min(window.innerHeight - pr.height - 8, r.top - 6)) + 'px';
+      p.onclick = e => {
+        if (e.target.closest('[data-msclose]')) { closePop(); openKey = null; return; }
+        const a = e.target.closest('[data-msact]'); if (!a) return;
+        const sites2 = all();
+        const acts = {
+          allEnz: () => { st.chosen = Object.keys(sites2).filter(nm => sites2[nm].length); st.enzMode = 'chosen'; st.hiddenEnz = []; },
+          noEnz: () => { st.enzMode = 'none'; st.chosen = []; },
+          allFeat: () => { st.hiddenFeat = []; st.showFeat = true; },
+          noFeat: () => { st.hiddenFeat = (doc.features || []).map(f => String(f.id != null ? f.id : f.name)); },
+          allPrim: () => { st.hiddenPrim = []; st.showPrimers = true; },
+          noPrim: () => { st.hiddenPrim = (doc.primers || []).map(x => String(x.id)); }
+        };
+        if (acts[a.dataset.msact]) { acts[a.dataset.msact](); refresh(); reopen(key); }
+      };
+      p.onchange = e => {
+        const t = e.target;
+        if (t.dataset.msv) st[t.dataset.msv] = t.value;
+        else if (t.dataset.msb) st[t.dataset.msb] = t.checked;
+        else if (t.dataset.msn) st[t.dataset.msn] = Math.max(1, parseInt(t.value, 10) || 1);
+        else if (t.dataset.msitem) {
+          const kind = t.dataset.msitem, v = t.value;
+          if (kind === 'enz') {
+            const inSet = enzSetOf(all(), st).includes(v);
+            if (t.checked) {
+              st.hiddenEnz = st.hiddenEnz.filter(x => x !== v);
+              if (!inSet) {
+                // keep whatever the set was showing, then add this one by name
+                st.chosen = [...new Set([...enzSetOf(all(), st), ...st.chosen, v])];
+                st.enzMode = 'chosen';
+              }
+            } else if (inSet) st.hiddenEnz = [...new Set([...st.hiddenEnz, v])];
+            else st.chosen = st.chosen.filter(x => x !== v);
+          } else if (kind === 'feat') {
+            st.hiddenFeat = t.checked ? st.hiddenFeat.filter(x => x !== v) : [...new Set([...st.hiddenFeat, v])];
+            if (t.checked) st.showFeat = true;
+          } else if (kind === 'primer') {
+            st.hiddenPrim = t.checked ? st.hiddenPrim.filter(x => x !== v) : [...new Set([...st.hiddenPrim, v])];
+            if (t.checked) st.showPrimers = true;
+          }
+        }
+        refresh(); reopen(key);
+      };
+    }
+    // after a redraw the strip is a new element, so the panel is re-anchored to it
+    function reopen(key) {
+      const fresh = document.querySelector('.tmapside [data-mschev="' + key + '"]');
+      if (fresh) openPanel(key, fresh);
+    }
+    strip.onclick = e => {
+      const chev = e.target.closest('[data-mschev]');
+      const btn = e.target.closest('[data-ms]');
+      if (chev) { openPanel(chev.dataset.mschev, chev); return; }
+      if (!btn) return;
+      const g = sideGroups(doc, st, all()).find(x => x.key === btn.dataset.ms); if (!g) return;
+      closePop(); openKey = null;
+      g.toggle(); refresh();
+    };
+    strip.addEventListener('mouseover', e => {
+      const b = e.target.closest('[data-mstip]'); if (!b) return;
+      const open = document.getElementById('tmspop');
+      if (open && !open.hidden) return;        // the panel says the same thing, in more words
+      const t = tip(true);
+      t.textContent = b.dataset.mstip; t.hidden = false;
+      const live = document.querySelector('.tmapside') || strip;
+      const r = b.getBoundingClientRect(), tr = t.getBoundingClientRect(), sr = live.getBoundingClientRect();
+      t.style.left = Math.max(6, sr.left - tr.width - 10) + 'px';
+      t.style.top = Math.round(r.top + r.height / 2 - tr.height / 2) + 'px';
+    });
+    strip.addEventListener('mouseout', e => { if (e.target.closest('[data-mstip]')) tip(false); });
+    strip.addEventListener('mouseleave', () => tip(false));
+    if (!bindMapPane.closer) {
+      bindMapPane.closer = true;
+      document.addEventListener('mousedown', e => {
+        const p = document.getElementById('tmspop');
+        if (!p || p.hidden) return;
+        if (p.contains(e.target) || e.target.closest('.tmapside')) return;
+        p.hidden = true; p.innerHTML = '';
+      }, { capture: true });
+    }
+  }
+
+  root.TOOLUI = { interactiveMap, mapPane, bindMapPane, mapState, includeEnz, shownSites, shownPrimers, shownFeatures, featureBrowser, enzymeBrowser, SUPPLIERS, bufferActivity, overhangSeq, niceStep };
 })(window);

@@ -124,28 +124,28 @@
 
     /* The Vector and Fragment maps are the shared interactive map, so an enzyme, a
      * feature or a primer can be chosen on the picture instead of in the lists. */
-    function mapSites(doc, sel) {
-      if (!doc) return {};
-      const all = DNA.findSites(doc.seq, doc.circular);
-      const chosen = (sel.cuts || []).map(c => c.enzyme);
-      const out = {};
-      for (const [nm, list] of Object.entries(all)) {
-        const e = DNA.ENZ_BY_NAME[nm];
-        if (chosen.includes(nm) || (sel.prep === 'typeIIs' && nm === sel.enzyme) || (list.length === 1 && e && e.core >= 6)) out[nm] = list;
-      }
-      return out;
+    /* Each tab keeps its own view state for the strip beside the map, so hiding a
+     * primer on the Fragment map does not change what the Vector map shows. */
+    const mapStates = {};
+    function viewState(key) {
+      if (!mapStates[key]) mapStates[key] = TOOLUI().mapState({ showPrimers: true });
+      return mapStates[key];
     }
     function pieceMap(doc, region, w) {
       if (!doc) return '<div class="hint">Choose a sequence.</div>';
       const sel = A.tab === 'vector' ? A.vector : A.fragments[A.activeFrag];
-      const chosen = (sel.cuts || []).map(c => c.enzyme);
-      return TOOLUI().interactiveMap({
-        seq: doc.seq, circular: doc.circular, name: doc.name,
-        features: doc.features || [], sites: mapSites(doc, sel),
-        primers: (doc.primers || []).map(p => {
-          const h = DNA.searchDNA(doc.seq, doc.circular, p.seq)[0];
-          return h ? { ...p, start: h.start, end: h.end, strand: h.strand, color: (A.pick && A.pick.primers || []).includes(p.id) ? '#c0392b' : '#2f6fd0' } : null;
-        }).filter(Boolean),
+      const chosen = (sel.cuts || []).map(c => c.enzyme).filter(Boolean);
+      const key = A.tab === 'vector' ? 'vector' : 'fragment' + A.activeFrag;
+      const st = viewState(key);
+      const sites = DNA.findSites(doc.seq, doc.circular);
+      // whatever this piece is cut with stays on the map, whichever set is chosen
+      TOOLUI().includeEnz(st, sites, chosen.concat(sel.prep === 'typeIIs' ? [sel.enzyme] : []));
+      const primers = (doc.primers || []).map(p => {
+        const h = DNA.searchDNA(doc.seq, doc.circular, p.seq)[0];
+        return h ? { ...p, start: h.start, end: h.end, strand: h.strand, color: (A.pick && A.pick.primers || []).includes(p.id) ? '#c0392b' : '#2f6fd0' } : null;
+      }).filter(Boolean);
+      return TOOLUI().mapPane({
+        doc, state: st, sites, primers,
         sel: region && region.start !== undefined ? region : null,
         W: w, H: 230
       }) + `<div class="asmmaphint">${sel.prep === 'enzymes'
@@ -156,13 +156,25 @@
     function productMap(st, w) {
       if (!st.built) return '<div class="hint">The pieces do not make a product yet.</div>';
       const b = st.built;
-      return TOOLUI().interactiveMap({
-        seq: b.seq, circular: true, name: A.product.name || 'Product',
-        features: b.features || [], sites: {},
+      const doc = { name: A.product.name || 'Product', seq: b.seq, circular: true, features: b.features || [], primers: b.primers || [] };
+      return TOOLUI().mapPane({
+        doc, state: viewState('product'),
         sel: A.pick && A.pick.tab === 'product' ? A.pick : null,
         W: w, H: 230
       }) + `<div class="asmmaphint">Click a feature on the product to select it, then copy it.</div>`;
     }
+    // the document a tab's map is drawn from, for the strip's own lists
+    function mapDocOf() {
+      if (A.tab === 'product') {
+        const b = A.state && A.state.built;
+        return b ? { name: A.product.name || 'Product', seq: b.seq, circular: true, features: b.features || [], primers: b.primers || [] } : null;
+      }
+      return A.tab === 'vector' ? docOf(A.vector.docId) : docOf(A.fragments[A.activeFrag].docId);
+    }
+    function mapStateKey() {
+      return A.tab === 'product' ? 'product' : (A.tab === 'vector' ? 'vector' : 'fragment' + A.activeFrag);
+    }
+
     function selLine(pick, st, bare) {
       if (!pick) return 'Nothing selected on the map.';
       const len = pick.end - pick.start;
@@ -462,6 +474,8 @@
       const hd = box.querySelector('.hd'); if (hd) hd.textContent = meth().title;
       box.querySelector('.asmbody').innerHTML = body;
       bind();
+      const mdoc = mapDocOf();
+      if (mdoc) TOOLUI().bindMapPane(box, mdoc, viewState(mapStateKey()), () => render());
     }
     /* Escape closes the window wherever the focus happens to be, but not while a dialog
      * of its own is on top of it. */
@@ -469,6 +483,9 @@
       if (e.key !== 'Escape' || !$('#asmWin')) return;
       const modal = document.getElementById('modal');
       if (modal && !modal.hidden) return;
+      // the strip's panel closes first, so Escape does not take the window with it
+      const pop = document.getElementById('tmspop');
+      if (pop && !pop.hidden) { e.preventDefault(); pop.hidden = true; pop.innerHTML = ''; return; }
       e.preventDefault(); close();
     };
     document.addEventListener('keydown', onKey);

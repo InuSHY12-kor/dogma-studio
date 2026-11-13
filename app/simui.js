@@ -46,6 +46,14 @@
     };
     for (let i = 0; i < 12; i++) state.lanes.push({ docId: docs[0] ? docs[0].id : null, mode: 'cut', enzymes: [], primers: [] });
     const docOf = lane => docs.find(d => d.id === lane.docId) || null;
+    /* The strip beside the map keeps its settings per sequence, so switching lanes back
+     * and forth does not lose what was hidden. */
+    const viewStates = new Map();
+    const viewState = doc => {
+      const k = doc ? doc.id : 0;
+      if (!viewStates.has(k)) viewStates.set(k, TOOLUI.mapState({ enzMode: 'dual6' }));
+      return viewStates.get(k);
+    };
     const sitesCache = new Map();
     const sitesOf = doc => {
       if (!doc) return {};
@@ -142,14 +150,6 @@
       const chosen = lane.mode === 'cut'
         ? (lane.enzymes.length ? lane.enzymes.join(' + ') : 'nothing chosen')
         : (lane.primers.length ? lane.primers.map(id => (doc.primers || []).find(p => p.id === id)).filter(Boolean).map(p => p.name).join(' + ') : 'no primers chosen');
-      const shown = {};
-      if (doc) {
-        // only the enzymes that cut a few times, plus whatever is chosen, so the map stays readable
-        for (const [nm, list] of Object.entries(sites)) {
-          const e = DNA.ENZ_BY_NAME[nm];
-          if (lane.enzymes.includes(nm) || (list.length <= 2 && e && e.core >= 6)) shown[nm] = list;
-        }
-      }
       return `<div class="simtop">
           <label>Lane ${state.active}:</label>
           <select id="simDoc">${docs.map(d => `<option value="${d.id}" ${doc && d.id === doc.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
@@ -171,17 +171,20 @@
         <div class="simtabs">
           ${['map', 'sequence', 'enzymes', 'primers'].map(t => `<button class="${state.tab === t ? 'on' : ''}" data-simtab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}
         </div>
-        <div class="simbody" id="simBody">${doc ? bodyHTML(doc, lane, sites, shown, r) : '<div class="hint">No sequence in this lane.</div>'}</div>`;
+        <div class="simbody" id="simBody">${doc ? bodyHTML(doc, lane, sites, r) : '<div class="hint">No sequence in this lane.</div>'}</div>`;
     }
-    function bodyHTML(doc, lane, sites, shown, r) {
+    function bodyHTML(doc, lane, sites, r) {
       if (state.tab === 'map') {
-        return TOOLUI.interactiveMap({
-          seq: doc.seq, circular: doc.circular, name: doc.name,
-          features: doc.features || [], sites: shown,
-          primers: lane.mode === 'pcr' ? (doc.primers || []).map(p => {
-            const b = bindOf(doc, p); return b ? { ...p, start: b.start, end: b.end, color: lane.primers.includes(p.id) ? '#c0392b' : '#2f6fd0' } : null;
-          }).filter(Boolean) : [],
-          sel: r.amplicon || null, W: 720, H: 230
+        const st = viewState(doc);
+        // the enzymes this lane is cut with stay on the map whichever set is chosen
+        TOOLUI.includeEnz(st, sites, lane.mode === 'cut' ? lane.enzymes : []);
+        const primers = (doc.primers || []).map(p => {
+          const b = bindOf(doc, p);
+          return b ? { ...p, start: b.start, end: b.end, strand: b.strand, color: lane.primers.includes(p.id) ? '#c0392b' : '#2f6fd0' } : null;
+        }).filter(Boolean);
+        return TOOLUI.mapPane({
+          doc, state: st, sites, primers,
+          sel: r.amplicon || null, W: 700, H: 230
         });
       }
       if (state.tab === 'sequence') {
@@ -227,6 +230,11 @@
       hostEl.querySelector('#simGel').innerHTML = gelSVG();
       bind();
     }
+    function bindSide() {
+      const lane = state.lanes[state.active - 1], doc = docOf(lane);
+      if (!doc || state.tab !== 'map') return;
+      TOOLUI.bindMapPane(hostEl, doc, viewState(doc), () => refresh(), sitesOf(doc));
+    }
     function refresh() {
       hostEl.querySelector('#simGel').innerHTML = gelSVG();
       hostEl.querySelector('#simLanes2').innerHTML = laneListHTML();
@@ -260,6 +268,7 @@
       hostEl.querySelectorAll('[data-simtab]').forEach(b => b.onclick = () => { state.tab = b.dataset.simtab; refresh(); });
       const body = q('#simBody');
       if (!body || !doc) return;
+      bindSide();
       // picking on the map: click chooses, shift-click adds the second one
       body.addEventListener('click', e => {
         const pick = e.target.closest('[data-pick]');
