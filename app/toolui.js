@@ -55,7 +55,12 @@
     // primers under the line
     primers.forEach((p, i) => {
       const x1 = X(p.start), x2 = X(p.end), y = baseY + 26 + (i % 2) * 12;
-      g.push(`<line class="prim" x1="${x1.toFixed(1)}" y1="${y}" x2="${x2.toFixed(1)}" y2="${y}" stroke="${p.color || '#2f6fd0'}" stroke-width="3" data-pick="p:${p.id}" data-a="${p.start}" data-b="${p.end}"><title>${esc(p.name)}</title></line>`);
+      const lo = Math.min(x1, x2), hi = Math.max(x1, x2), rev = p.strand === -1 || x2 < x1;
+      const hd = Math.min(7, Math.max(3, (hi - lo) * 0.5));
+      const pts = rev
+        ? `${hi},${y - 3} ${lo + hd},${y - 3} ${lo},${y} ${lo + hd},${y + 3} ${hi},${y + 3}`
+        : `${lo},${y - 3} ${hi - hd},${y - 3} ${hi},${y} ${hi - hd},${y + 3} ${lo},${y + 3}`;
+      g.push(`<polygon class="prim" points="${pts}" fill="${p.color || '#2f6fd0'}" data-pick="p:${p.id}" data-a="${p.start}" data-b="${p.end}"><title>${esc(p.name)} ${fmt(Math.min(p.start, p.end) + 1)}..${fmt(Math.max(p.start, p.end))}</title></polygon>`);
       g.push(`<text class="lbl p" x="${((x1 + x2) / 2).toFixed(1)}" y="${y + 11}" text-anchor="middle" data-pick="p:${p.id}">${esc(p.name)}</text>`);
     });
     // enzyme sites above everything, with their names stacked
@@ -70,16 +75,22 @@
     }
     const top = 6, rows = rowEnd.length;
     const cutsTop = baseY - 12 - lanes.length * 18 - 8;
+    /* The rows of enzyme names are never squeezed on top of one another: if they do not
+     * fit above the molecule the whole picture moves down and the map grows instead. */
+    const dy = Math.max(0, (top + 14 + (rows - 1) * 13) - cutsTop);
+    const leads = [], names = [];
     for (const c of cuts) {
-      const x = X(c.pos), y = Math.max(top + 8, cutsTop - (rows - 1 - c.row) * 13);
-      g.push(`<line class="ecut" x1="${x.toFixed(1)}" y1="${baseY - 7}" x2="${x.toFixed(1)}" y2="${baseY + 7}"/>`);
-      g.push(`<line class="lead" x1="${x.toFixed(1)}" y1="${y + 3}" x2="${x.toFixed(1)}" y2="${baseY - 7}"/>`);
-      g.push(`<text class="lbl e" x="${(x + 2).toFixed(1)}" y="${y}" data-pick="e:${c.nm}:${c.pos}" data-a="${c.start}" data-b="${(c.start + c.len) % n || n}">${esc(c.nm)} (${fmt(c.pos)})</text>`);
+      const x = X(c.pos), y = cutsTop - (rows - 1 - c.row) * 13;
+      leads.push(`<line class="ecut" x1="${x.toFixed(1)}" y1="${baseY - 7}" x2="${x.toFixed(1)}" y2="${baseY + 7}"/>`);
+      leads.push(`<line class="lead" x1="${x.toFixed(1)}" y1="${(y + 3).toFixed(1)}" x2="${x.toFixed(1)}" y2="${baseY - 7}"/>`);
+      names.push(`<text class="lbl e" x="${(x + 2).toFixed(1)}" y="${y.toFixed(1)}" data-pick="e:${c.nm}:${c.pos}" data-a="${c.start}" data-b="${(c.start + c.len) % n || n}">${esc(c.nm)} (${fmt(c.pos)})</text>`);
     }
-    const hh = Math.max(H, baseY + 50);
+    // leader lines first, so a name is never crossed by one
+    g.push(leads.join(''), names.join(''));
+    const hh = Math.max(H, baseY + 50) + dy;
     return `<svg class="imap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${hh}" width="100%" height="${hh}" font-family="Segoe UI, Arial, sans-serif">
-      <rect width="${W}" height="${hh}" fill="var(--canvas)"/>${g.join('')}
-      ${name ? `<text class="ctr1" x="${m}" y="14" style="font-size:12px">${esc(name)}</text>` : ''}</svg>`;
+      <rect width="${W}" height="${hh}" fill="var(--canvas)"/><g transform="translate(0,${dy})">${g.join('')}</g>
+      ${name ? `<text class="ctr1" x="${m}" y="14" style="font-size:12px;pointer-events:none">${esc(name)}</text>` : ''}</svg>`;
   }
   function niceStep(x) {
     const p = Math.pow(10, Math.floor(Math.log10(Math.max(1, x))));

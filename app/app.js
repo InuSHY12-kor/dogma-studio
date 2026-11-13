@@ -761,6 +761,7 @@ svg .prim { cursor: pointer; }
         { label: 'RNA Secondary Structure…', dis: !has, act: dlgRNA },
         { label: 'Protein Properties…', dis: !has, act: dlgProtein },
         '-',
+        { label: 'Agarose Simulation…', dis: !S.docs.some(isNuc), act: newSimDoc },
         { label: 'Restriction Digest & Gel…', dis: !has, act: dlgDigest },
         { label: 'New Agarose Gel…', dis: !S.docs.some(x => !isGel(x)), act: () => newGelDoc({ doc: has ? d : null }) },
         { label: 'Translate Selection…', dis: !sl, act: dlgTranslate }
@@ -788,7 +789,7 @@ svg .prim { cursor: pointer; }
   function menus() {
     const all = menusDNA();
     const d = D();
-    if (!d || isGel(d) || kindOf(d) === 'dna') return all;
+    if (!d || isGel(d) || isSim(d) || kindOf(d) === 'dna') return all;
     const keep = n => all.find(m => m.label === n);
     const base = [keep('File'), keep('Edit'), keep('View'), keep('Features')];
     if (isRNA(d)) {
@@ -954,7 +955,7 @@ svg .prim { cursor: pointer; }
       b('feat', 'Feature', 'feat', { dis: !has, title: 'Add feature from selection' }),
       b('primer', 'Primer', 'primer', { dis: !has, title: 'Add primer' }),
       b('enz', 'Enzymes', 'enz', { dis: !has, title: 'Choose enzymes' }),
-      b('gel', 'Digest', 'gel', { dis: !has, title: 'Restriction digest and simulated gel' }),
+      b('gel', 'Agarose', 'gel', { dis: !has, title: 'Agarose gel: digest or amplify, with the map beside it' }),
       '<div class="tbsep"></div>',
       b('clone', 'Clone', 'clone', { dis: !has, title: 'Restriction cloning' }),
       b('design', 'Primers', 'design', { dis: !has, title: 'Design PCR primers' }),
@@ -970,17 +971,18 @@ svg .prim { cursor: pointer; }
   const TB_ACT = {
     new: () => dlgNew(), open: () => openFiles(), save: () => saveDoc(false), undo, redo, find: () => openFind(),
     circ: () => setOpt('mapMode', 'circular', true), lin: () => setOpt('mapMode', 'linear', true),
-    feat: () => dlgFeature(null), primer: () => (selLen(D()) ? primerFromSel(1) : dlgPrimer(null)), enz: () => setView('enz'), gel: () => dlgDigest(),
+    feat: () => dlgFeature(null), primer: () => (selLen(D()) ? primerFromSel(1) : dlgPrimer(null)), enz: () => setView('enz'), gel: () => newSimDoc(),
     tr: () => dlgTranslate(), rc: () => revCompSel(), origin: () => setOrigin(), side: () => { S.sideShown = !S.sideShown; renderAll(); },
     ncbi: () => dlgNCBI(), print: () => dlgPrint(), clone: () => dlgRestrictionClone(), design: () => dlgDesignPCR(), align: () => openTraces()
   };
 
   function renderDocTabs() {
-    $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''} k-${kindOf(d)}" data-i="${i}" title="${esc(d.name)} \u2014 ${isGel(d) ? 'agarose gel' : (isProt(d) ? fmt(d.prot.length) + ' aa protein' : fmt(d.seq.length) + ' ' + (isRNA(d) ? 'nt RNA' : 'bp DNA'))}"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
+    $('#doctabs').innerHTML = S.docs.map((d, i) => `<div class="dtab${i === S.active ? ' on' : ''} k-${kindOf(d)}" data-i="${i}" title="${esc(d.name)} \u2014 ${isSim(d) ? 'simulation' : isGel(d) ? 'agarose gel' : (isProt(d) ? fmt(d.prot.length) + ' aa protein' : fmt(d.seq.length) + ' ' + (isRNA(d) ? 'nt RNA' : 'bp DNA'))}"><span class="nm">${d.dirty ? '<span class="dirty">● </span>' : ''}${esc(d.name)}</span><button class="x" data-x="${i}" title="Close">×</button></div>`).join('');
   }
   const PROT_VIEWS = [['seq', 'Sequence', 'seq'], ['feat', 'Features', 'feat'], ['prop', 'Properties', 'design'], ['hist', 'History', 'hist']];
   const RNA_VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['feat', 'Features', 'feat'], ['struct', 'Structure', 'align'], ['hist', 'History', 'hist']];
-  function viewsFor(d) { return isProt(d) ? PROT_VIEWS : (isRNA(d) ? RNA_VIEWS : VIEWS); }
+  const SIM_VIEWS = [['sim', 'Simulation', 'gel']];
+  function viewsFor(d) { return isSim(d) ? SIM_VIEWS : (isProt(d) ? PROT_VIEWS : (isRNA(d) ? RNA_VIEWS : VIEWS)); }
   const VIEWS = [['map', 'Map', 'map'], ['seq', 'Sequence', 'seq'], ['enz', 'Enzymes', 'enz'], ['feat', 'Features', 'feat'], ['primer', 'Primers', 'primer'], ['align', 'Alignment', 'align'], ['compare', 'Compare', 'compare'], ['hist', 'History', 'hist']];
   function renderViewTabs() {
     const vt = $('#viewtabs');
@@ -1027,6 +1029,11 @@ svg .prim { cursor: pointer; }
       let mwTxt = '';
       try { const st = STRUCT.proteinStats(b > a ? d.prot.slice(a, b) : d.prot); mwTxt = `${(st.mw / 1000).toFixed(2)} kDa · pI ${st.pI.toFixed(2)}`; } catch (e) { mwTxt = ''; }
       st.innerHTML = `<span><b>${esc(d.name)}</b> &nbsp; ${fmt(d.prot.length)} aa &nbsp; protein</span><span>${sel}</span><span class="r">${mwTxt}</span>`;
+      return;
+    }
+    if (isSim(d)) {
+      const nl = d.sim && d.sim.lanes ? d.sim.lanes.length : 0;
+      st.innerHTML = `<span><b>${esc(d.name)}</b></span><span>agarose + PCR simulation</span><span class="r">${nl} lane${nl === 1 ? '' : 's'}</span>`;
       return;
     }
     if (isGel(d)) {
@@ -1817,7 +1824,7 @@ svg .prim { cursor: pointer; }
     const pane = $('#infopanel');
     if (!pane) return;
     const d = D();
-    const on = !!S.infoShown && d && !isGel(d);
+    const on = !!S.infoShown && d && !isGel(d) && !isSim(d);
     pane.hidden = !on;
     if (!on) { pane.innerHTML = ''; return; }
     const i = infoOf(d), n = isProt(d) ? d.prot.length : d.seq.length;
@@ -2180,6 +2187,7 @@ svg .prim { cursor: pointer; }
   // ---------------------------------------------------------------- main view dispatcher
   function renderView(keepScroll) {
     const v = $('#view'), d = D();
+    if (isSim(d)) { v.onclick = null; renderSim(); return; }
     if (isGel(d)) { v.onclick = null; renderGel(); return; }
     if (isProt(d)) {
       v.onclick = null;
@@ -2268,7 +2276,7 @@ svg .prim { cursor: pointer; }
     d.focus = null; renderAll(true); toast('Focus cleared');
   }
   function focusOnSelection() {
-    const d = D(); if (!d || isProt(d) || isGel(d)) return;
+    const d = D(); if (!d || isProt(d) || isGel(d) || isSim(d)) return;
     if (focusOf(d) && !selLen(d)) { clearFocus(d); return; }
     const n = d.seq.length;
     if (selLen(d)) {
@@ -6497,7 +6505,18 @@ svg .prim { cursor: pointer; }
       if (doc) { S.active = S.docs.indexOf(doc); setSel(msg.start, msg.end, { anchor: msg.start, scroll: true }); renderAll(true); }
       return;
     }
-    if (msg.kind === 'gel') { newGelDoc(msg.opts || {}); return; }
+    if (msg.kind === 'gel') {
+      const o = msg.opts || {};
+      if (o.lanes) {
+        const g = newGelDoc({});
+        g.gel.percent = o.percent || g.gel.percent;
+        g.gel.run = o.run || g.gel.run;
+        g.gel.laneCount = (o.lanes.length || 0) + 1;
+        g.gel.lanes = [{ src: 'ladder:neb-1kb' }].concat(o.lanes.map(l => ({ src: l.docId ? 'doc:' + l.docId : '', enzymes: l.enzymes || [] })));
+        renderAll();
+      } else newGelDoc(o);
+      return;
+    }
   }
   function dlgAssembly(method) {
     if (!S.docs.some(isNuc)) { toast('Open a sequence first.'); return; }
@@ -7759,12 +7778,35 @@ svg .prim { cursor: pointer; }
   // ================================================================ agarose gel document
   const isGel = x => !!(x && x.gel);
   const kindOf = d => isGel(d) ? 'gel' : ((d && d.kind) || 'dna');
-  const isNuc = d => !!d && !isGel(d) && kindOf(d) !== 'protein';   // DNA or RNA
+  const isSim = d => !!d && d.kind === 'sim';
+  const isNuc = d => !!d && !isGel(d) && kindOf(d) !== 'protein' && kindOf(d) !== 'sim';   // DNA or RNA
   const isProt = d => kindOf(d) === 'protein';
   const isRNA = d => kindOf(d) === 'rna';
   const KIND_LABEL = { dna: 'DNA', rna: 'RNA', protein: 'Protein', gel: 'Gel' };
   // RNA is held as ACGT so every analysis keeps working; U appears only on screen.
   const disp = (d, str) => isRNA(d) ? str.replace(/T/g, 'U') : str;
+  /* A Simulation document: its own tab, holding the gel and the map side by side, where
+   * enzymes and primers are picked off the map itself. */
+  function newSimDoc() {
+    if (!S.docs.some(isNuc)) { toast('Open a sequence first.'); return; }
+    const d = { id: uid(), kind: 'sim', name: 'Simulation', dirty: false, sim: {} };
+    S.docs.push(d);
+    S.active = S.docs.length - 1;
+    S.view = 'sim';
+    renderAll();
+  }
+  function renderSim() {
+    const v = $('#view');
+    const payload = { docs: asmDocSnapshot(), current: null };
+    const doc = payload.docs[0] || null;
+    SIMUI.open(v, {
+      send: msg => handleToolMessage(msg),
+      copy: (t, m) => copyText(t, m), toast,
+      menu: (anchor, items) => { const r = anchor.getBoundingClientRect(); showCtx(r.left, r.bottom, items); },
+      docs: payload.docs, doc,
+      sites: doc ? DNA.findSites(doc.seq, doc.circular) : null
+    });
+  }
   function newGelDoc(opts) {
     const dnaDocs = S.docs.filter(x => !isGel(x));
     const first = (opts && opts.doc) || dnaDocs[0];
@@ -8582,7 +8624,7 @@ svg .prim { cursor: pointer; }
           const use = e.target.closest('[data-use]');
           if (use) {
             const d = D();
-            if (!d || isGel(d)) { toast('Open a sequence first.'); return; }
+            if (!d || isGel(d) || isSim(d)) { toast('Open a sequence first.'); return; }
             const f = SET.myFeatures[+use.dataset.use];
             const found = DNA.detectCommon(d.seq, d.circular, d.features, { extra: [{ ...f, mine: true }], includeShort: true });
             if (!found.length) { toast(`“${f.name}” does not appear in this sequence.`); return; }
@@ -9007,7 +9049,13 @@ svg .prim { cursor: pointer; }
   }
   function closeDoc(i, force) {
     const d = S.docs[i]; if (!d) return;
-    if (isGel(d)) { S.docs.splice(i, 1); if (S.active >= S.docs.length) S.active = S.docs.length - 1; renderAll(); return; }
+    if (isGel(d) || isSim(d)) {
+      S.docs.splice(i, 1);
+      if (S.active >= S.docs.length) S.active = S.docs.length - 1;
+      const dd = D();
+      if (dd && !isGel(dd) && !viewsFor(dd).some(x => x[0] === S.view)) S.view = viewsFor(dd)[0][0];
+      renderAll(); return;
+    }
     if (d.dirty && !force) {
       dialog({
         title: 'Unsaved Changes', body: `<p>Save changes to “${esc(d.name)}” before closing?</p>`,
@@ -9069,7 +9117,7 @@ svg .prim { cursor: pointer; }
   }
   function primerSitesFor(d) { const A = analyze(d); return p => A.psites[p.id] || []; }
   async function saveDoc(asNew) {
-    const d = D(); if (!d || isGel(d)) return false;
+    const d = D(); if (!d || isGel(d) || isSim(d)) return false;
     const content = DNA.toGenBank(d, primerSitesFor(d));
     const fname = d.name.replace(/[\\/:*?"<>|]/g, '_') + '.gb';
     if (host && host.saveFile) {
