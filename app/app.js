@@ -26,6 +26,7 @@ svg .ftxt { fill: #111; font: 600 11px var(--f-ui); pointer-events: none; }
 svg .lbl { font: 11px var(--f-ui); fill: var(--ink); cursor: pointer; }
 svg .lbl.e { fill: #3a3f4b; }
 svg .lbl.e.u { font-weight: 600; }
+svg .lbl.e.hl { fill: #6b4b00; font-weight: 700; paint-order: stroke; stroke: #ffd24d; stroke-width: 7px; stroke-linejoin: round; }
 svg .lbl.f { font-weight: 600; }
 svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
 svg .lead { fill: none; stroke: #9aa2af; stroke-width: .8; }
@@ -149,19 +150,26 @@ svg .prim { cursor: pointer; }
     for (const p of d.primers) t.psites[p.id] = primerBind(d, p);
     d.cache = t; return t;
   }
-  function shownEnz(d, A) {
+  // Which enzymes the chosen set holds, before per-enzyme visibility is applied.
+  function chosenEnz(d, A) {
     const m = d.opts.enzMode, out = [];
-    if (m === 'none') return out;
     for (const e of DNA.ENZYMES) {
       const s = A.sites[e.name]; if (!s) continue;
       let ok = false;
       if (m === 'unique6') ok = s.length === 1 && e.core >= 6;
       else if (m === 'unique') ok = s.length === 1;
       else if (m === 'dual6') ok = s.length <= 2 && e.core >= 6;
-      else if (m === 'chosen') ok = d.chosen.includes(e.name);
+      else if (m === 'chosen' || m === 'none') ok = d.chosen.includes(e.name);
       if (ok) out.push({ name: e.name, sites: s, unique: s.length === 1 });
     }
     return out;
+  }
+  const enzHidden = d => (d.enzHidden = d.enzHidden || []);
+  const enzHi = d => (d.enzHi = d.enzHi || []);
+  function shownEnz(d, A) {
+    if (d.opts.enzMode === 'none') return [];
+    const hid = enzHidden(d);
+    return chosenEnz(d, A).filter(e => !hid.includes(e.name));
   }
   function collectItems(d, A) {
     const items = [], o = d.opts;
@@ -412,6 +420,45 @@ svg .prim { cursor: pointer; }
         '-',
         { label: 'Show Primers Table', dis: !has, act: () => setView('primer') }
       ] },
+      { label: 'Enzymes', items: [
+        { label: 'Use Enzyme Set', items: [
+          { label: 'Unique 6+ Cutters', chk: has && d.opts.enzMode === 'unique6', dis: !has, act: () => useEnzMode('unique6') },
+          { label: 'All Unique Cutters', chk: has && d.opts.enzMode === 'unique', dis: !has, act: () => useEnzMode('unique') },
+          { label: 'Unique & Dual 6+ Cutters', chk: has && d.opts.enzMode === 'dual6', dis: !has, act: () => useEnzMode('dual6') },
+          { label: 'Chosen Enzymes', chk: has && d.opts.enzMode === 'chosen', dis: !has, act: () => useEnzMode('chosen') },
+          ...(Object.keys(SET.enzymeSets || {}).length ? ['-', ...Object.keys(SET.enzymeSets).sort().map(k => ({
+            label: k + ` (${SET.enzymeSets[k].length})`, dis: !has,
+            act: () => { d.chosen = SET.enzymeSets[k].slice(); enzHidden(d).length = 0; d.opts.enzMode = 'chosen'; renderAll(true); toast(`Using the set “${k}”`); }
+          }))] : [])
+        ] },
+        { label: 'Choose Enzymes…', dis: !has, act: () => dlgEnzymeChooser() },
+        { label: 'Show or Hide Enzymes', items: [
+          { label: 'Show All Enzymes', dis: !has, act: () => { enzHidden(d).length = 0; if (d.opts.enzMode === 'none') d.opts.enzMode = 'unique6'; renderAll(true); toast('All enzymes in the set are shown'); } },
+          { label: 'Hide All Enzymes', dis: !has, act: () => { const A = analyze(d); d.enzHidden = chosenEnz(d, A).map(e => e.name); renderAll(true); toast('All enzyme sites hidden'); } },
+          '-',
+          { label: 'Show Selected Enzyme', dis: !has || !S.enzSel, act: () => { d.enzHidden = enzHidden(d).filter(x => x !== S.enzSel.name); renderAll(true); } },
+          { label: 'Hide Selected Enzyme', dis: !has || !S.enzSel, act: () => { if (!enzHidden(d).includes(S.enzSel.name)) enzHidden(d).push(S.enzSel.name); renderAll(true); toast(`${S.enzSel.name} hidden`); } }
+        ] },
+        '-',
+        { label: 'Highlight Selected Enzyme Site', dis: !has || !S.enzSel, act: () => toggleEnzHighlight(S.enzSel.name) },
+        { label: 'Clear Highlighting for All Enzyme Sites', dis: !has || !enzHi(d).length, act: () => { d.enzHi = []; renderAll(true); } },
+        '-',
+        { label: 'Restriction Enzymes…', act: () => dlgEnzymeDB() },
+        { label: 'Noncutters…', dis: !has, act: dlgNoncutters },
+        '-',
+        { label: 'Save Enzyme Set…', dis: !has || !d.chosen.length, act: dlgSaveEnzSet },
+        { label: 'Manage Enzyme Sets…', act: dlgEnzymeSets },
+        { label: 'Export Enzyme Set…', dis: !has || !d.chosen.length, act: exportEnzSet },
+        { label: 'Import Enzyme Sets…', act: importEnzSets },
+        '-',
+        { label: 'Silent Mutations', items: [
+          { label: 'Add New Enzyme Sites in Selected Translation…', dis: !has, act: dlgSilentAdd },
+          { label: 'Remove Selected Enzyme Site…', dis: !has || !S.enzSel, act: dlgSilentRemove }
+        ] },
+        '-',
+        { label: 'Restriction Digest & Gel…', dis: !has, act: dlgDigest },
+        { label: 'Show Enzymes Table', dis: !has, act: () => setView('enz') }
+      ] },
       { label: 'Cloning', items: [
         { label: 'Restriction Cloning…', dis: !S.docs.some(isNuc), act: () => dlgAssembly('restriction') },
         { label: 'Restriction Cloning (simple)…', dis: S.docs.length < 1, act: dlgRestrictionClone },
@@ -538,12 +585,38 @@ svg .prim { cursor: pointer; }
     pop.hidden = false;
     pop.style.left = Math.min(anchor.left, window.innerWidth - 270) + 'px'; pop.style.top = anchor.bottom + 'px';
     pop.onmousedown = e => e.preventDefault();
-    pop.onclick = e => { const it = e.target.closest('.it'); if (!it || it.classList.contains('dis')) return; const a = m.items[+it.dataset.i]; closeMenu(); a.act(); };
+    pop.onmouseover = e => {
+      const it = e.target.closest('#menupop > .it'); if (!it) return;
+      const a = m.items[+it.dataset.i];
+      if (a && a.items) showSubmenu(it, a.items); else closeSubmenu();
+    };
+    pop.onclick = e => {
+      const it = e.target.closest('.it'); if (!it || it.classList.contains('dis')) return;
+      const sub = $('#menusub');
+      if (!sub.hidden && sub.contains(it)) { const list = sub.__items; closeMenu(); list[+it.dataset.i].act(); return; }
+      const a = m.items[+it.dataset.i];
+      if (a.items) { showSubmenu(it, a.items); return; }
+      closeMenu(); a.act();
+    };
   }
+  // A second level of menu, for groups such as Enzymes ▸ Silent Mutations.
+  function showSubmenu(anchorEl, items) {
+    const sub = $('#menusub');
+    if (sub.__anchor === anchorEl && !sub.hidden) return;
+    sub.__anchor = anchorEl; sub.__items = items;
+    sub.innerHTML = popItems(items);
+    sub.hidden = false;
+    const r = anchorEl.getBoundingClientRect();
+    const w = sub.getBoundingClientRect().width || 240;
+    sub.style.left = (r.right + w > window.innerWidth ? Math.max(0, r.left - w) : r.right - 2) + 'px';
+    sub.style.top = Math.min(r.top - 4, window.innerHeight - sub.getBoundingClientRect().height - 8) + 'px';
+    sub.onmousedown = e => e.preventDefault();
+  }
+  function closeSubmenu() { const sub = $('#menusub'); sub.hidden = true; sub.__anchor = null; }
   function popItems(items) {
-    return items.map((a, j) => a === '-' ? '<div class="sep"></div>' : `<div class="it${a.dis ? ' dis' : ''}${a.chk ? ' chk' : ''}" data-i="${j}">${esc(a.label)}${a.key ? `<span class="k">${a.key}</span>` : ''}</div>`).join('');
+    return items.map((a, j) => a === '-' ? '<div class="sep"></div>' : `<div class="it${a.dis ? ' dis' : ''}${a.chk ? ' chk' : ''}${a.items ? ' has-sub' : ''}" data-i="${j}">${esc(a.label)}${a.key ? `<span class="k">${a.key}</span>` : ''}</div>`).join('');
   }
-  function closeMenu() { openMenu = -1; $('#menupop').hidden = true; document.querySelectorAll('.menubar .mi.open').forEach(el => el.classList.remove('open')); }
+  function closeMenu() { openMenu = -1; closeSubmenu(); $('#menupop').hidden = true; document.querySelectorAll('.menubar .mi.open').forEach(el => el.classList.remove('open')); }
 
   // context menu
   function showCtx(x, y, items) {
@@ -573,6 +646,14 @@ svg .prim { cursor: pointer; }
     ];
   }
   function itemCtx(d, key) {
+    if (key.startsWith('e:')) {
+      const name = key.split(':')[1];
+      return [
+        { label: `Hide ${name}`, act: () => { if (!enzHidden(d).includes(name)) enzHidden(d).push(name); renderAll(true); toast(`${name} hidden`); } },
+        { label: enzHi(d).includes(name) ? `Clear Highlighting for ${name}` : `Highlight ${name} Site`, act: () => toggleEnzHighlight(name) },
+        { label: `Remove This ${name} Site Silently…`, act: () => dlgSilentRemove() },
+        { label: `Enzyme Information: ${name}`, act: () => dlgEnzymeDB(name) }, '-'];
+    }
     const it = findItem(d, key); if (!it) return [];
     if (it.kind === 'f') return [
       { label: `Edit Feature “${it.name}”…`, act: () => dlgFeature(it.ref) },
@@ -926,7 +1007,7 @@ svg .prim { cursor: pointer; }
       if (s.cut == null) return;
       const a = ang(s.cut);
       g.push(`<line class="ecut" x1="${fmtP(P(R - 7, a)).replace(',', '" y1="')}" x2="${fmtP(P(R + 7, a)).replace(',', '" y2="')}"/>`);
-      labels.push({ a, text: `${e.name} (${fmt(s.cut)})`, cls: 'e' + (e.unique ? ' u' : ''), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer) });
+      labels.push({ a, text: `${e.name} (${fmt(s.cut)})`, cls: 'e' + (e.unique ? ' u' : '') + (enzHi(d).includes(e.name) ? ' hl' : ''), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer) });
     });
     // label layout
     const sp = 14;
@@ -989,7 +1070,7 @@ svg .prim { cursor: pointer; }
     const enz = shownEnz(d, A);
     // enzyme label rows
     const elabels = [];
-    for (const e of enz) e.sites.forEach((s, i) => { if (s.cut != null) elabels.push({ x: X(s.cut), text: `${e.name} (${fmt(s.cut)})`, k: `e:${e.name}:${i}`, u: e.unique }); });
+    for (const e of enz) e.sites.forEach((s, i) => { if (s.cut != null) elabels.push({ x: X(s.cut), text: `${e.name} (${fmt(s.cut)})`, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) }); });
     elabels.sort((a, b) => a.x - b.x);
     const rowEnd = [];
     for (const l of elabels) {
@@ -1004,7 +1085,7 @@ svg .prim { cursor: pointer; }
     for (const l of elabels) {
       const y = top + (nRows - 1 - l.row) * 14;
       g.push(`<line class="lead" x1="${l.x.toFixed(1)}" y1="${baseY - 7}" x2="${l.x.toFixed(1)}" y2="${y + 4}"/>`);
-      g.push(`<text class="lbl e${l.u ? ' u' : ''}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}">${esc(l.text)}</text>`);
+      g.push(`<text class="lbl e${l.u ? ' u' : ''}${l.hl ? ' hl' : ''}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}">${esc(l.text)}</text>`);
       g.push(`<line class="ecut" x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
     }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
@@ -1139,6 +1220,7 @@ svg .prim { cursor: pointer; }
     if (k.startsWith('e:')) {
       const [, name, idx] = k.split(':'); const s = analyze(d).sites[name][+idx];
       let end = s.pos + s.len; if (end > d.seq.length) end -= d.seq.length;
+      S.enzSel = { name, idx: +idx, pos: s.pos, len: s.len, cut: s.cut };
       selectRange({ start: s.pos, end });
       toast(`${name}: ${DNA.ENZ_BY_NAME[name].site} — cuts after ${fmt(s.cut)}`);
       return;
@@ -1181,7 +1263,7 @@ svg .prim { cursor: pointer; }
     const bpr = Math.max(10, Math.floor((sc.clientWidth - G - 30) / CW / 10) * 10);
     // enzyme cuts
     const cuts = [];
-    for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, u: e.unique }); });
+    for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) }); });
     cuts.sort((a, b) => a.pos - b.pos);
     // feature segments
     const items = collectItems(d, A);
@@ -1218,7 +1300,7 @@ svg .prim { cursor: pointer; }
       const y0 = 4 + enzH;
       for (const c of myCuts) {
         const x = G + (c.pos - rs) * CW, y = 4 + (nL - 1 - c.line) * 14;
-        parts.push(`<div class="enz${c.u ? ' u' : ''}" data-k="${c.k}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
+        parts.push(`<div class="enz${c.u ? ' u' : ''}${c.hl ? ' hl' : ''}" data-k="${c.k}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
       }
       // --- top strand, tick ruler, bottom strand
       parts.push(`<div class="num" style="top:${y0 + 1}px">${fmt(rs + 1)}</div>`);
@@ -1422,44 +1504,143 @@ svg .prim { cursor: pointer; }
   function openFind() { if (!D()) return; if (S.view !== 'seq') setView('seq'); setTimeout(() => { const q = $('#findq'); if (q) { q.focus(); q.select(); } }, 10); }
 
   // ================================================================ ENZYMES TABLE
-  let enzFilter = '', enzSet = 'cutters', enzSort = 'name';
+  let enzFilter = '', enzSet = 'chosen', enzSort = 'name', enzDesc = false, enzStyle = 'numbers';
+  let enzOpen = new Set(), enzPicked = new Set();
   function renderEnzymes() {
     const d = D(), A = analyze(d), n = d.seq.length;
     const v = $('#view');
+    const hid = enzHidden(d), hi = enzHi(d);
+    const chosenNames = new Set(chosenEnz(d, A).map(e => e.name));
     let list = DNA.ENZYMES.map(e => ({ e, s: A.sites[e.name] || [] }));
-    if (enzSet === 'cutters') list = list.filter(x => x.s.length);
+    if (enzSet === 'chosen') list = list.filter(x => chosenNames.has(x.e.name));
+    else if (enzSet === 'cutters') list = list.filter(x => x.s.length);
     else if (enzSet === 'unique') list = list.filter(x => x.s.length === 1);
     else if (enzSet === 'noncutters') list = list.filter(x => !x.s.length);
     if (enzFilter) { const q = enzFilter.toUpperCase(); list = list.filter(x => x.e.name.toUpperCase().includes(q) || x.e.site.includes(q)); }
-    list.sort((a, b) => enzSort === 'count' ? a.s.length - b.s.length || a.e.name.localeCompare(b.e.name) : a.e.name.localeCompare(b.e.name));
-    const siteHtml = e => { const s = e.site; const t = e.top; if (t >= 0 && t <= s.length) return esc(s.slice(0, t)) + '<i>^</i>' + esc(s.slice(t)); return esc(s) + ` (${e.top}/${e.bot})`; };
-    const ends = e => e.overhang > 0 ? `5′ (${e.overhang})` : (e.overhang < 0 ? `3′ (${-e.overhang})` : 'blunt');
+    // sorting, including the two the reference tool offers beyond the column headers
+    const selPos = selLen(d) ? d.sel.start : null;
+    const distOf = x => {
+      if (selPos == null || !x.s.length) return Infinity;
+      return Math.min(...x.s.map(t => { const dd = Math.abs((t.cut == null ? t.pos : t.cut) - selPos); return d.circular ? Math.min(dd, n - dd) : dd; }));
+    };
+    const cmp = {
+      name: (a, b) => a.e.name.localeCompare(b.e.name),
+      count: (a, b) => a.s.length - b.s.length || a.e.name.localeCompare(b.e.name),
+      pos: (a, b) => (a.s.length ? a.s[0].pos : 1e9) - (b.s.length ? b.s[0].pos : 1e9) || a.e.name.localeCompare(b.e.name),
+      dist: (a, b) => distOf(a) - distOf(b) || a.e.name.localeCompare(b.e.name),
+      vis: (a, b) => (hid.includes(a.e.name) ? 1 : 0) - (hid.includes(b.e.name) ? 1 : 0) || a.e.name.localeCompare(b.e.name)
+    }[enzSort] || ((a, b) => a.e.name.localeCompare(b.e.name));
+    list.sort(enzDesc ? (a, b) => -cmp(a, b) : cmp);
+    const siteHtml = e => { const t = e.top; const sq = e.site; if (t >= 0 && t <= sq.length) return esc(sq.slice(0, t)) + '<i>^</i>' + esc(sq.slice(t)); return esc(sq) + ` (${e.top}/${e.bot})`; };
+    const ends2 = e => e.overhang > 0 ? `5′ (${e.overhang})` : (e.overhang < 0 ? `3′ (${-e.overhang})` : 'blunt');
+    const arrow = key => enzSort === key ? (enzDesc ? ' ▾' : ' ▴') : '';
+    // Fragments made by one enzyme on its own, as the expanded row shows them.
+    const fragRow = x => {
+      const W = 460;
+      const fr = DNA.digest(d.seq, d.circular, A.sites, [x.e.name]);
+      const cutsAt = x.s.filter(t => t.cut != null).map(t => t.cut).sort((a, b) => a - b);
+      return `<tr class="sub"><td></td><td colspan="6">
+        <svg viewBox="0 0 ${W} 34" width="100%" height="34" style="max-width:${W}px">
+          <rect x="0" y="12" width="${W}" height="8" fill="#dfe4ea"/>
+          ${cutsAt.map(c => `<rect x="${(c / n * W).toFixed(1)}" y="6" width="1.6" height="20" fill="#c0392b"/>`).join('')}
+        </svg>
+        <div class="note">${fr.length} fragment${fr.length === 1 ? '' : 's'}: ${fr.map(f => fmt(f.size) + ' bp').join(' · ')}</div></td></tr>`;
+    };
+    const lineBar = () => {
+      const W = 980, rows = list.filter(x => x.s.length);
+      return `<div class="tscroll"><table class="grid"><thead><tr><th style="width:26px"></th><th style="width:120px">Enzyme</th><th>Cut positions</th></tr></thead><tbody>
+        ${rows.map(x => `<tr data-e="${esc(x.e.name)}"${hi.includes(x.e.name) ? ' class="on"' : ''}><td><button class="ib eye" data-vis="${esc(x.e.name)}" title="${hid.includes(x.e.name) ? 'Hidden — click to show' : 'Visible — click to hide'}">${hid.includes(x.e.name) ? '○' : '◉'}</button></td>
+          <td><b${hid.includes(x.e.name) ? ' style="color:var(--faint)"' : ''}>${esc(x.e.name)}</b></td>
+          <td><svg viewBox="0 0 ${W} 20" width="100%" height="20" preserveAspectRatio="none">
+            <line x1="0" y1="10" x2="${W}" y2="10" stroke="#cfd5dd"/>
+            ${x.s.filter(t => t.cut != null).map(t => `<line x1="${(t.cut / n * W).toFixed(1)}" y1="2" x2="${(t.cut / n * W).toFixed(1)}" y2="18" stroke="${hi.includes(x.e.name) ? '#b8860b' : '#c0392b'}" stroke-width="${hi.includes(x.e.name) ? 3 : 1.6}"/>`).join('')}
+          </svg></td></tr>`).join('')}
+      </tbody></table></div>`;
+    };
     v.innerHTML = `<div class="panel"><div class="ptools">
       <input type="text" id="enzq" placeholder="Filter by name or site" value="${esc(enzFilter)}">
-      <select id="enzset"><option value="cutters" ${enzSet === 'cutters' ? 'selected' : ''}>Enzymes that cut</option><option value="unique" ${enzSet === 'unique' ? 'selected' : ''}>Unique cutters</option><option value="noncutters" ${enzSet === 'noncutters' ? 'selected' : ''}>Non-cutters</option><option value="all" ${enzSet === 'all' ? 'selected' : ''}>All enzymes</option></select>
-      <button class="btn pri" id="enzpick">Choose Enzymes…</button><button class="btn" id="enzshow">Show chosen on map</button><button class="btn" id="enzclear">Clear chosen</button><button class="btn pri" id="enzdig" ${d.chosen.length ? '' : 'disabled'}>Digest chosen (${d.chosen.length})…</button>
-      <span class="note">${list.length} enzymes</span></div>
-      <div class="tscroll"><table class="grid"><thead><tr><th style="width:30px">✓</th><th class="sort" data-s="name">Enzyme</th><th>Recognition site</th><th class="sort" data-s="count"># Sites</th><th>Cut positions</th><th>Ends</th></tr></thead><tbody>
-      ${list.map(x => `<tr data-e="${x.e.name}"><td><input type="checkbox" data-c="${x.e.name}" ${d.chosen.includes(x.e.name) ? 'checked' : ''}></td><td><b>${x.e.name}</b></td><td class="cut-site">${siteHtml(x.e)}</td><td>${x.s.length}</td><td class="wrap">${x.s.map(s => s.cut == null ? '—' : fmt(s.cut)).join(', ')}</td><td>${ends(x.e)}</td></tr>`).join('')}
-      </tbody></table></div></div>`;
+      <select id="enzset"><option value="chosen" ${enzSet === 'chosen' ? 'selected' : ''}>Chosen enzyme set (${chosenNames.size})</option><option value="cutters" ${enzSet === 'cutters' ? 'selected' : ''}>Enzymes that cut</option><option value="unique" ${enzSet === 'unique' ? 'selected' : ''}>Unique cutters</option><option value="noncutters" ${enzSet === 'noncutters' ? 'selected' : ''}>Non-cutters</option><option value="all" ${enzSet === 'all' ? 'selected' : ''}>All enzymes</option></select>
+      <div class="segbtn"><button class="btn${enzStyle === 'numbers' ? ' on' : ''}" data-style="numbers">Numbers</button><button class="btn${enzStyle === 'lines' ? ' on' : ''}" data-style="lines">Lines</button></div>
+      <select id="enzsort2"><option value="">Sort…</option><option value="dist" ${enzSort === 'dist' ? 'selected' : ''}>By distance from selection</option><option value="vis" ${enzSort === 'vis' ? 'selected' : ''}>By visibility</option><option value="pos" ${enzSort === 'pos' ? 'selected' : ''}>By first site</option><option value="name">By name</option></select>
+      <button class="btn" id="enzadd">Add Enzymes…</button>
+      <button class="btn" id="enzact">Actions ▾</button>
+      <button class="btn" id="enznc">View Noncutters</button>
+      <button class="btn pri" id="enzdig" ${d.chosen.length ? '' : 'disabled'}>Digest chosen (${d.chosen.length})…</button>
+      <span class="note">${list.length} enzymes${hid.length ? ` · ${hid.length} hidden` : ''}</span></div>
+      ${enzStyle === 'lines' ? lineBar() : `<div class="tscroll"><table class="grid"><thead><tr><th style="width:26px"></th><th style="width:26px">✓</th><th class="sort" data-s="name">Enzyme${arrow('name')}</th><th>Recognition site</th><th class="sort" data-s="count"># Sites${arrow('count')}</th><th class="sort" data-s="pos">Cut positions${arrow('pos')}</th><th>Ends</th></tr></thead><tbody>
+      ${list.map(x => {
+        const nm = x.e.name, isHid = hid.includes(nm);
+        return `<tr data-e="${esc(nm)}"${hi.includes(nm) ? ' class="on"' : ''}>
+          <td><button class="ib eye" data-vis="${esc(nm)}" title="${isHid ? 'Hidden — click to show' : 'Visible — click to hide'}">${isHid ? '○' : '◉'}</button></td>
+          <td><input type="checkbox" data-c="${esc(nm)}" ${enzPicked.has(nm) ? 'checked' : ''}></td>
+          <td>${x.s.length ? `<span class="disc" data-exp="${esc(nm)}">${enzOpen.has(nm) ? '▾' : '▸'}</span> ` : ''}<b${isHid ? ' style="color:var(--faint)"' : ''}>${esc(nm)}</b>${d.chosen.includes(nm) ? ' <span class="note">in set</span>' : ''}</td>
+          <td class="cut-site">${siteHtml(x.e)}</td><td>${x.s.length}</td>
+          <td class="wrap">${x.s.map(t => t.cut == null ? '—' : fmt(t.cut)).join(', ')}</td><td>${ends2(x.e)}</td></tr>`
+          + (enzOpen.has(nm) && x.s.length ? fragRow(x) : '');
+      }).join('')}
+      </tbody></table></div>`}
+      <div class="hint">◉ marks an enzyme whose sites are drawn on the map and sequence; click it to hide just that enzyme. Click ▸ to see the fragments that enzyme makes on its own, or hold Alt while clicking to expand every row.</div></div>`;
     const q = $('#enzq');
-    q.oninput = () => { enzFilter = q.value; const p = q.selectionStart; renderEnzymes(); const q2 = $('#enzq'); q2.focus(); q2.setSelectionRange(p, p); };
+    if (q) q.oninput = () => { enzFilter = q.value; const p = q.selectionStart; renderEnzymes(); const q2 = $('#enzq'); q2.focus(); q2.setSelectionRange(p, p); };
     $('#enzset').onchange = e => { enzSet = e.target.value; renderEnzymes(); };
-    v.querySelectorAll('th.sort').forEach(th => th.onclick = () => { enzSort = th.dataset.s; renderEnzymes(); });
-    v.querySelector('tbody').onclick = e => {
-      const c = e.target.closest('[data-c]');
-      if (c) { const nm = c.dataset.c; d.chosen = c.checked ? [...new Set([...d.chosen, nm])] : d.chosen.filter(x => x !== nm); const b = $('#enzdig'); b.disabled = !d.chosen.length; b.textContent = `Digest chosen (${d.chosen.length})…`; return; }
-      const tr = e.target.closest('tr[data-e]'); if (!tr) return;
-      const s = (A.sites[tr.dataset.e] || [])[0]; if (!s) return;
-      let end = s.pos + s.len; if (end > n) end -= n;
-      selectRange({ start: s.pos, end });
-      v.querySelectorAll('tr.on').forEach(r => r.classList.remove('on')); tr.classList.add('on');
-    };
-    v.querySelector('tbody').ondblclick = e => { const tr = e.target.closest('tr[data-e]'); if (tr && A.sites[tr.dataset.e]) { const nm = tr.dataset.e; if (!d.chosen.includes(nm)) d.chosen.push(nm); d.opts.enzMode = 'chosen'; S.view = 'map'; renderAll(); } };
-    $('#enzpick').onclick = () => dlgEnzymeChooser();
-    $('#enzshow').onclick = () => { d.opts.enzMode = 'chosen'; S.view = 'map'; renderAll(); };
-    $('#enzclear').onclick = () => { d.chosen = []; renderEnzymes(); };
+    $('#enzsort2').onchange = e => { if (e.target.value) { enzSort = e.target.value; enzDesc = false; renderEnzymes(); } };
+    v.querySelector('.segbtn').onclick = e => { const b = e.target.closest('[data-style]'); if (b) { enzStyle = b.dataset.style; renderEnzymes(); } };
+    v.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (enzSort === th.dataset.s) enzDesc = !enzDesc; else { enzSort = th.dataset.s; enzDesc = false; } renderEnzymes(); });
+    $('#enzadd').onclick = () => dlgEnzymeChooser();
+    $('#enznc').onclick = dlgNoncutters;
     $('#enzdig').onclick = () => dlgDigest();
+    $('#enzact').onclick = e => {
+      const r = e.target.getBoundingClientRect();
+      const names = [...enzPicked];
+      showCtx(r.left, r.bottom, [
+        { label: `Show Selected Enzymes (${names.length})`, dis: !names.length, act: () => { d.enzHidden = hid.filter(x => !names.includes(x)); renderAll(true); } },
+        { label: `Hide Selected Enzymes (${names.length})`, dis: !names.length, act: () => { for (const nm of names) if (!hid.includes(nm)) hid.push(nm); renderAll(true); } },
+        '-',
+        { label: 'Add Selected to Chosen Enzymes', dis: !names.length, act: () => { d.chosen = [...new Set([...d.chosen, ...names])]; d.opts.enzMode = 'chosen'; renderAll(true); toast(`${names.length} added to the chosen set`); } },
+        { label: 'Remove Selected from Chosen Enzymes', dis: !names.length, act: () => { d.chosen = d.chosen.filter(x => !names.includes(x)); renderAll(true); } },
+        '-',
+        { label: 'Highlight Selected Enzyme Sites', dis: !names.length, act: () => { d.enzHi = [...new Set([...hi, ...names])]; renderAll(true); } },
+        { label: 'Clear All Highlighting', dis: !hi.length, act: () => { d.enzHi = []; renderAll(true); } },
+        '-',
+        { label: 'Clear Check Boxes', dis: !names.length, act: () => { enzPicked.clear(); renderEnzymes(); } }
+      ]);
+    };
+    const tb = v.querySelector('tbody');
+    if (tb) tb.onclick = e => {
+      const vis = e.target.closest('[data-vis]');
+      if (vis) {
+        const nm = vis.dataset.vis, i = hid.indexOf(nm);
+        if (i >= 0) hid.splice(i, 1); else hid.push(nm);
+        renderAll(true); return;
+      }
+      const exp = e.target.closest('[data-exp]');
+      if (exp) {
+        const nm = exp.dataset.exp;
+        if (e.altKey) { if (enzOpen.size) enzOpen.clear(); else for (const x of list) if (x.s.length) enzOpen.add(x.e.name); }
+        else if (enzOpen.has(nm)) enzOpen.delete(nm); else enzOpen.add(nm);
+        renderEnzymes(); return;
+      }
+      const c = e.target.closest('[data-c]');
+      if (c) { if (c.checked) enzPicked.add(c.dataset.c); else enzPicked.delete(c.dataset.c); return; }
+      const tr = e.target.closest('tr[data-e]'); if (!tr) return;
+      const nm = tr.dataset.e;
+      const t = (A.sites[nm] || [])[0]; if (!t) return;
+      let end = t.pos + t.len; if (end > n) end -= n;
+      S.enzSel = { name: nm, idx: 0, pos: t.pos, len: t.len, cut: t.cut };
+      selectRange({ start: t.pos, end });
+      v.querySelectorAll('tr.sel').forEach(r => r.classList.remove('sel')); tr.classList.add('sel');
+    };
+    if (tb) tb.ondblclick = e => { const tr = e.target.closest('tr[data-e]'); if (tr && A.sites[tr.dataset.e]) { const nm = tr.dataset.e; if (!d.chosen.includes(nm)) d.chosen.push(nm); d.opts.enzMode = 'chosen'; S.view = 'map'; renderAll(); } };
+    if (tb) tb.oncontextmenu = e => {
+      const tr = e.target.closest('tr[data-e]'); if (!tr) return;
+      e.preventDefault();
+      const nm = tr.dataset.e;
+      showCtx(e.clientX, e.clientY, [
+        { label: hid.includes(nm) ? `Show ${nm}` : `Hide ${nm}`, act: () => { const i = hid.indexOf(nm); if (i >= 0) hid.splice(i, 1); else hid.push(nm); renderAll(true); } },
+        { label: hi.includes(nm) ? 'Clear Highlighting' : 'Highlight Site', act: () => toggleEnzHighlight(nm) },
+        { label: `Enzyme Information: ${nm}`, act: () => dlgEnzymeDB(nm) }
+      ]);
+    };
   }
 
   // ================================================================ FEATURES TABLE
@@ -2961,6 +3142,329 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // ================================================================ SILENT MUTAGENESIS
+  // The translated features of a file, with their coding sequence pulled out in the
+  // orientation the protein is read in.
+  function translatedFeatures(d) {
+    const n = d.seq.length;
+    return d.features.filter(f => f.translated || f.type === 'CDS').map(f => {
+      const raw = DNA.sub(d.seq, f.start, f.end);
+      const cds = f.strand === -1 ? DNA.rc(raw) : raw;
+      return { f, cds: cds.slice(0, Math.floor(cds.length / 3) * 3), len: DNA.rlen(f, n) };
+    }).filter(x => x.cds.length >= 6);
+  }
+  // Map a coding-sequence offset back to a position in the molecule.
+  function cdsToSeq(d, f, i) {
+    const n = d.seq.length;
+    return f.strand === -1 ? (((f.end - 1 - i) % n) + n) % n : (f.start + i) % n;
+  }
+  // Write a new coding sequence over the feature it came from. Lengths always match,
+  // because only synonymous codons are swapped, so no coordinate shifts are needed.
+  function writeCDS(d, f, newCds) {
+    const n = d.seq.length, body = f.strand === -1 ? DNA.rc(newCds) : newCds;
+    const start = f.start;
+    let out = '';
+    if (f.end > f.start) out = d.seq.slice(0, start) + body + d.seq.slice(start + body.length);
+    else {
+      const head = Math.min(body.length, n - start);
+      out = body.slice(head) + d.seq.slice(body.length - head, start) + body.slice(0, head);
+    }
+    d.seq = out;
+  }
+  function codonChangeHTML(origs, codons) {
+    return origs.map((o, i) => {
+      const nw = codons[i];
+      const marked = nw.split('').map((c, j) => c === o[j] ? esc(c) : `<b style="color:#c0392b">${esc(c)}</b>`).join('');
+      return `${esc(o)}→${marked}`;
+    }).join(' ');
+  }
+
+  function dlgSilentAdd() {
+    const d = D(), n = d.seq.length, A = analyze(d);
+    const feats = translatedFeatures(d);
+    if (!feats.length) { toast('This file has no translated feature. Add a CDS feature first.'); return; }
+    // default to a translated feature overlapping the selection
+    let pick = 0;
+    if (selLen(d)) {
+      const i = feats.findIndex(x => DNA.overlaps(x.f, d.sel, n));
+      if (i >= 0) pick = i;
+    }
+    let setKey = d.chosen.length ? 'chosen' : 'six', existing = 'none', maxChanges = 2, minSite = 4, maxSite = 8;
+    let results = [], checked = new Set(), sortBy = 'enzyme', mode = 'mutate';
+    const enzFor = () => {
+      if (setKey === 'chosen') return DNA.ENZYMES.filter(e => d.chosen.includes(e.name));
+      if (setKey === 'six') return DNA.ENZYMES.filter(e => e.core >= 6);
+      if (setKey === 'all') return DNA.ENZYMES.slice();
+      if (SET.enzymeSets[setKey]) return DNA.ENZYMES.filter(e => SET.enzymeSets[setKey].includes(e.name));
+      return DNA.ENZYMES.filter(e => e.core >= 6);
+    };
+    const run = () => {
+      const t = feats[pick];
+      const list = enzFor();
+      results = SILENT.addSites(t.cds, list, {
+        maxChanges, minSite, maxSite, existing,
+        fullSeq: d.seq, circular: d.circular, limit: 3000
+      });
+      // one entry per enzyme+position, cheapest first, then de-duplicated per site
+      const seen = new Set();
+      results = results.filter(r => { const k = r.enzyme + ':' + r.start; if (seen.has(k)) return false; seen.add(k); return true; });
+      checked = new Set();
+      renderList();
+    };
+    const renderList = () => {
+      const t = feats[pick];
+      const rows = results.slice().sort((a, b) =>
+        sortBy === 'pos' ? a.start - b.start || a.enzyme.localeCompare(b.enzyme)
+          : sortBy === 'changes' ? a.changes - b.changes || a.enzyme.localeCompare(b.enzyme)
+            : a.enzyme.localeCompare(b.enzyme) || a.start - b.start);
+      $('#saT').innerHTML = rows.length ? `<table class="grid"><thead><tr><th style="width:28px"></th><th class="sort" data-s="enzyme">Enzyme</th><th>Site</th><th class="sort" data-s="pos">New site at</th><th class="sort" data-s="changes">Changes</th><th>Codons</th><th>Already present</th></tr></thead><tbody>
+        ${rows.map(r => {
+        const k = r.enzyme + ':' + r.start;
+        const at = cdsToSeq(d, t.f, r.start) + 1;
+        return `<tr data-k="${esc(k)}"><td><input type="checkbox" data-ck="${esc(k)}" ${checked.has(k) ? 'checked' : ''}></td>
+          <td><b>${esc(r.enzyme)}</b></td><td class="cut-site">${esc(r.site)}</td><td>${fmt(at)}</td><td>${r.changes}</td>
+          <td class="mono">${codonChangeHTML(r.origs, r.codons)}</td><td>${r.existingInSequence ? r.existingInSequence + ' in file' : '—'}</td></tr>`;
+      }).join('')}</tbody></table>` : '<div class="hint">No new site can be written into this translation with the current limits. Loosen the number of allowed base changes, or widen the enzyme set.</div>';
+      $('#saN').textContent = `${rows.length} possible new site${rows.length === 1 ? '' : 's'} · ${checked.size} chosen`;
+      const go = $('#saGo'); if (go) { go.disabled = !checked.size; go.textContent = checked.size ? `Add ${checked.size} Enzyme Site${checked.size === 1 ? '' : 's'}` : 'Add Enzyme Sites'; }
+      drawMini();
+    };
+    // a minimap of the chosen translation, with a bar at each site that would be made
+    const drawMini = () => {
+      const box = $('#saMini'); if (!box) return;
+      const t = feats[pick], L = t.cds.length, W = 520, H = 26;
+      const bars = results.filter(r => checked.has(r.enzyme + ':' + r.start)).map(r => r.start);
+      const all = results.map(r => r.start);
+      box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">
+        <rect x="0" y="9" width="${W}" height="8" fill="#dfe4ea"/>
+        ${all.map(p => `<rect x="${(p / L * W).toFixed(1)}" y="6" width="1" height="14" fill="#b6bdc7"/>`).join('')}
+        ${bars.map(p => `<rect x="${(p / L * W).toFixed(1)}" y="2" width="2" height="22" fill="#c0392b"/>`).join('')}
+      </svg><div class="note">${esc(t.f.name)} — ${fmt(L)} bp, ${fmt(L / 3)} codons</div>`;
+    };
+    const apply = () => {
+      const t = feats[pick];
+      const picked = results.filter(r => checked.has(r.enzyme + ':' + r.start));
+      if (!picked.length) return showErr('Check at least one site.');
+      // combine the codon swaps; refuse pairs that touch the same codon differently
+      let cds = t.cds;
+      const touched = new Map();
+      for (const r of picked) {
+        for (let i = 0; i < r.codons.length; i++) {
+          const ci = r.firstCodon + i, want = r.codons[i], had = touched.get(ci);
+          if (had && had !== want) return showErr(`${r.enzyme} and another chosen site need different codons at codon ${ci + 1}. Add them one at a time.`);
+          touched.set(ci, want);
+        }
+      }
+      for (const [ci, codon] of touched) cds = cds.slice(0, ci * 3) + codon + cds.slice(ci * 3 + 3);
+      const names = picked.map(r => r.enzyme).join(', ');
+      if (mode === 'feature' || mode === 'featurePrimers') {
+        for (const r of picked) {
+          const a = cdsToSeq(d, t.f, t.f.strand === -1 ? r.end - 1 : r.start);
+          const b = cdsToSeq(d, t.f, t.f.strand === -1 ? r.start - 1 : r.end);
+          addFeature({
+            name: r.enzyme + ' site', type: 'misc_difference', start: a, end: (b + n) % n || n, strand: 0,
+            notes: `${r.changes} silent base change${r.changes === 1 ? '' : 's'} would create a ${r.enzyme} site (${r.site}): ${r.origs.join(' ')} → ${r.codons.join(' ')}`
+          });
+        }
+        if (mode === 'featurePrimers') addMutPrimers(d, t, cds, picked);
+        commit(d, `Annotated ${picked.length} potential enzyme site${picked.length === 1 ? '' : 's'} (${names})`);
+        renderAll(true); toast(`Annotated ${picked.length} potential site${picked.length === 1 ? '' : 's'} — the sequence was not changed`);
+        return;
+      }
+      if (mode === 'primers') {
+        // mutate, and record the primers that would do it by PCR
+        const before = d.seq;
+        writeCDS(d, t.f, cds);
+        addMutPrimersFromDiff(d, before, d.seq);
+        commit(d, `Silent mutagenesis: added ${names}`, {});
+        renderAll(true); toast(`Added ${names} and designed mutagenic primers`);
+        return;
+      }
+      writeCDS(d, t.f, cds);
+      commit(d, `Silent mutagenesis: added ${names}`);
+      renderAll(true); toast(`Added ${names} with ${touched.size} synonymous codon change${touched.size === 1 ? '' : 's'}`);
+    };
+    const exportList = () => {
+      const t = feats[pick];
+      const rows = [['Enzyme', 'Site', 'PositionInFile', 'BaseChanges', 'OriginalCodons', 'NewCodons']];
+      for (const r of results) rows.push([r.enzyme, r.site, cdsToSeq(d, t.f, r.start) + 1, r.changes, r.origs.join(' '), r.codons.join(' ')]);
+      const csv = rows.map(r => r.join(',')).join('\n');
+      if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'new-enzyme-sites.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+      else downloadText('new-enzyme-sites.csv', csv);
+    };
+    dialog({
+      title: 'Add New Enzyme Sites in Selected Translation', wide: true,
+      body: `<div style="display:flex;gap:14px;align-items:flex-start">
+        <div style="width:290px;flex:0 0 290px">
+          <div class="form">
+            <label>Translation</label><select id="saFeat">${feats.map((x, i) => `<option value="${i}" ${i === pick ? 'selected' : ''}>${esc(x.f.name)} (${fmt(x.cds.length / 3)} aa${x.f.strand === -1 ? ', reverse' : ''})</option>`).join('')}</select>
+            <label>Enzyme set</label><select id="saSet">
+              <option value="chosen" ${setKey === 'chosen' ? 'selected' : ''}>Chosen enzymes (${d.chosen.length})</option>
+              <option value="six" ${setKey === 'six' ? 'selected' : ''}>6+ base recognition</option>
+              <option value="all" ${setKey === 'all' ? 'selected' : ''}>All ${DNA.ENZYMES.length} enzymes</option>
+              ${Object.keys(SET.enzymeSets || {}).sort().map(k => `<option value="${esc(k)}">${esc(k)} (${SET.enzymeSets[k].length})</option>`).join('')}
+            </select>
+            <label>Existing sites</label><select id="saEx">
+              <option value="none" ${existing === 'none' ? 'selected' : ''}>Only enzymes absent from the whole file</option>
+              <option value="noneInCDS" ${existing === 'noneInCDS' ? 'selected' : ''}>Only enzymes absent from this translation</option>
+              <option value="any" ${existing === 'any' ? 'selected' : ''}>Allow enzymes already present</option>
+            </select>
+            <label>Base changes</label><select id="saCh"><option value="1">1 at most</option><option value="2" selected>2 at most</option><option value="3">3 at most</option><option value="4">4 at most</option></select>
+            <label>Site length</label><div class="row2"><input type="number" id="saMin" value="${minSite}" min="3" max="12" style="width:64px"> to <input type="number" id="saMax" value="${maxSite}" min="3" max="12" style="width:64px"> bases</div>
+            <div class="full"><button class="btn pri" id="saRun" type="button">Find Sites</button></div>
+            <div class="full hint">Only synonymous codons are used, so the protein never changes. Positions are where the new recognition site would start in the file.</div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div id="saMini"></div>
+          <div class="ecbar"><span class="note" id="saN"></span><span class="sp" style="flex:1"></span>
+            <label class="inl">Then <select id="saMode">
+              <option value="mutate">mutate the sequence</option>
+              <option value="primers">mutate with mutagenic primers</option>
+              <option value="feature">annotate with a feature only</option>
+              <option value="featurePrimers">annotate with a feature and primers</option>
+            </select></label></div>
+          <div class="tscroll" style="max-height:44vh" id="saT"></div>
+          <div class="err" style="margin-top:6px"></div>
+        </div></div>`,
+      buttons: [
+        { label: 'Export List', act: () => { exportList(); return false; } },
+        { label: 'Cancel' },
+        { label: 'Add Enzyme Sites', primary: true, id: 'saGo', act: apply }
+      ],
+      onOpen: box => {
+        const $$ = id => box.querySelector(id);
+        $$('#saFeat').onchange = e => { pick = +e.target.value; run(); };
+        $$('#saSet').onchange = e => { setKey = e.target.value; };
+        $$('#saEx').onchange = e => { existing = e.target.value; };
+        $$('#saCh').onchange = e => { maxChanges = +e.target.value; };
+        $$('#saMin').onchange = e => { minSite = +e.target.value || 3; };
+        $$('#saMax').onchange = e => { maxSite = +e.target.value || 12; };
+        $$('#saMode').onchange = e => { mode = e.target.value; };
+        $$('#saRun').onclick = run;
+        $$('#saT').addEventListener('click', e => {
+          const ck = e.target.closest('[data-ck]');
+          if (ck) { const k = ck.dataset.ck; if (ck.checked) checked.add(k); else checked.delete(k); $('#saN').textContent = `${results.length} possible new sites · ${checked.size} chosen`; const go = $('#saGo'); go.disabled = !checked.size; go.textContent = checked.size ? `Add ${checked.size} Enzyme Site${checked.size === 1 ? '' : 's'}` : 'Add Enzyme Sites'; drawMini(); return; }
+          const th = e.target.closest('th.sort');
+          if (th) { sortBy = th.dataset.s; renderList(); return; }
+          const tr = e.target.closest('tr[data-k]');
+          if (tr) {
+            const r = results.find(x => x.enzyme + ':' + x.start === tr.dataset.k); if (!r) return;
+            const t = feats[pick], a = cdsToSeq(d, t.f, t.f.strand === -1 ? r.end - 1 : r.start);
+            selectRange({ start: a, end: (a + r.site.length) % n || n });
+          }
+        });
+        run();
+      }
+    });
+  }
+
+  // Designs a pair of primers spanning the bases that differ between two versions
+  // of the same sequence, which is what a PCR-based silent mutagenesis needs.
+  function addMutPrimersFromDiff(d, before, after) {
+    let a = 0; while (a < before.length && before[a] === after[a]) a++;
+    let b = before.length; while (b > a && before[b - 1] === after[b - 1]) b--;
+    if (b <= a) return;
+    try {
+      const r = PRIMER.designMutagenesis({ seq: after, circular: d.circular }, a, b, after.slice(a, b));
+      d.primers.push({ id: uid(), name: 'SilentMut-F', seq: r.fwd.seq, notes: 'Mutagenic primer for the silent change at ' + (a + 1) });
+      d.primers.push({ id: uid(), name: 'SilentMut-R', seq: r.rev.seq, notes: 'Mutagenic primer for the silent change at ' + (a + 1) });
+    } catch (e) { /* a primer could not be placed; the sequence change still stands */ }
+  }
+  // Primers for a change that is only annotated, so they carry the mismatch.
+  function addMutPrimers(d, t, newCds, picked) {
+    const before = d.seq, probe = Object.assign({}, d);
+    probe.seq = before; probe.features = d.features;
+    const copy = { seq: before, circular: d.circular, features: [], primers: [] };
+    writeCDS(copy, t.f, newCds);
+    let a = 0; while (a < before.length && before[a] === copy.seq[a]) a++;
+    let b = before.length; while (b > a && before[b - 1] === copy.seq[b - 1]) b--;
+    if (b <= a) return;
+    try {
+      const r = PRIMER.designMutagenesis({ seq: copy.seq, circular: d.circular }, a, b, copy.seq.slice(a, b));
+      const tag = picked.map(x => x.enzyme).join('/');
+      d.primers.push({ id: uid(), name: tag + '-F', seq: r.fwd.seq, notes: `Mutagenic primer that would add ${tag}; mismatched against this sequence` });
+      d.primers.push({ id: uid(), name: tag + '-R', seq: r.rev.seq, notes: `Mutagenic primer that would add ${tag}; mismatched against this sequence` });
+    } catch (e) { /* ignore */ }
+  }
+
+  function dlgSilentRemove() {
+    const d = D(), n = d.seq.length;
+    const sel = S.enzSel;
+    if (!sel) { toast('Click an enzyme site first.'); return; }
+    const feats = translatedFeatures(d);
+    const hit = feats.find(x => DNA.overlaps(x.f, { start: sel.pos, end: (sel.pos + sel.len) % n || n }, n));
+    if (!hit) { toast(`The ${sel.name} site does not lie inside a translated feature, so it cannot be removed silently.`); return; }
+    const f = hit.f, cds = hit.cds;
+    // the site, in coding coordinates
+    const siteLen = sel.len;
+    let cs;
+    if (f.strand === -1) { const endInCds = ((f.end - sel.pos) % n + n) % n; cs = endInCds - siteLen; }
+    else cs = ((sel.pos - f.start) % n + n) % n;
+    if (cs < 0 || cs + siteLen > cds.length) { toast('That site runs past the end of the translated region.'); return; }
+    const site = f.strand === -1 ? DNA.rc(DNA.ENZ_BY_NAME[sel.name].site) : DNA.ENZ_BY_NAME[sel.name].site;
+    const groups = SILENT.removeSite(cds, cs, cs + siteLen, DNA.ENZ_BY_NAME[sel.name].site);
+    const orgKeys = CODON.tables();
+    let table = (SET.lastCodonTable && orgKeys.some(t => t.key === SET.lastCodonTable)) ? SET.lastCodonTable : (orgKeys[0] && orgKeys[0].key);
+    let chosenCodon = null, mode = 'mutate';
+    const render = () => {
+      let u = null;
+      try { u = CODON.usage(table); } catch (e) { u = null; }
+      const freq = c => u && u.frac ? (u.frac[c] * 100).toFixed(0) + '%' : '—';
+      $('#srT').innerHTML = `<table class="grid"><thead><tr><th>Codon</th><th>Amino acid</th><th>Alternatives — pick one</th></tr></thead><tbody>
+        ${groups.map(g => `<tr><td><b class="mono">${esc(g.codon)}</b> <span class="note">#${g.codonIndex + 1}</span></td>
+          <td>${esc(g.aa3)} (${esc(g.aa)})</td>
+          <td>${g.alts.length ? g.alts.map(a => `<label class="inl${a.kills ? '' : ' dis'}" title="${a.kills ? 'Removes the site' : 'This codon leaves the site intact'}">
+              <input type="radio" name="srAlt" value="${g.codonIndex}:${a.codon}" ${a.kills ? '' : 'disabled'} ${chosenCodon === g.codonIndex + ':' + a.codon ? 'checked' : ''}>
+              <span class="mono" style="${a.kills ? '' : 'color:var(--faint);text-decoration:line-through'}">${esc(a.codon)}</span> <span class="note">${freq(a.codon)}</span></label>`).join(' ')
+          : '<span class="note">no synonymous codon</span>'}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="hint">${groups.some(g => g.canKill) ? 'Codons shown struck through keep the site, so they cannot be chosen — this is why a site spanning a Trp or Met codon sometimes cannot be removed.' : 'No synonymous codon can destroy this site without changing the protein.'}</div>`;
+    };
+    const apply = () => {
+      if (!chosenCodon) return showErr('Choose a replacement codon.');
+      const [ciStr, codon] = chosenCodon.split(':');
+      const ci = +ciStr;
+      const newCds = cds.slice(0, ci * 3) + codon + cds.slice(ci * 3 + 3);
+      if (mode === 'feature' || mode === 'featurePrimers') {
+        const a = cdsToSeq(d, f, f.strand === -1 ? ci * 3 + 2 : ci * 3);
+        addFeature({
+          name: 'remove ' + sel.name, type: 'misc_difference', start: a, end: (a + 3) % n || n, strand: 0,
+          notes: `Changing codon ${ci + 1} from ${cds.substr(ci * 3, 3)} to ${codon} would remove the ${sel.name} site (${DNA.ENZ_BY_NAME[sel.name].site}) without changing the protein.`
+        });
+        if (mode === 'featurePrimers') addMutPrimers(d, hit, newCds, [{ enzyme: sel.name }]);
+        commit(d, `Annotated a silent change that would remove ${sel.name}`);
+        renderAll(true); toast('Annotated — the sequence was not changed');
+        return;
+      }
+      const before = d.seq;
+      writeCDS(d, f, newCds);
+      if (mode === 'primers') addMutPrimersFromDiff(d, before, d.seq);
+      commit(d, `Silent mutagenesis: removed ${sel.name} site`);
+      renderAll(true); toast(`${sel.name} site removed — the protein is unchanged`);
+    };
+    dialog({
+      title: `Remove the ${sel.name} Site`, wide: true,
+      body: `<div class="form">
+        <div class="full note">${esc(sel.name)} (${esc(DNA.ENZ_BY_NAME[sel.name].site)}) at ${fmt(sel.pos + 1)}, inside <b>${esc(f.name)}</b>${f.strand === -1 ? ' (reverse strand)' : ''}. The site spans ${groups.length} codon${groups.length === 1 ? '' : 's'}.</div>
+        <label>Codon usage</label><select id="srOrg">${orgKeys.map(t => `<option value="${esc(t.key)}" ${t.key === table ? 'selected' : ''}>${esc(t.name || t.key)}</option>`).join('')}</select>
+        <label>Then</label><select id="srMode">
+          <option value="mutate">mutate the sequence</option>
+          <option value="primers">mutate with mutagenic primers</option>
+          <option value="feature">annotate a feature only</option>
+          <option value="featurePrimers">annotate a feature plus mutagenic primers</option>
+        </select>
+        <div class="full" id="srT"></div><div class="err full"></div></div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: apply }],
+      onOpen: box => {
+        render();
+        box.querySelector('#srOrg').onchange = e => { table = e.target.value; SET.lastCodonTable = table; render(); };
+        box.querySelector('#srMode').onchange = e => { mode = e.target.value; };
+        box.addEventListener('change', e => { if (e.target.name === 'srAlt') chosenCodon = e.target.value; });
+      }
+    });
+  }
+
   // ---------------------------------------------------------------- shared reports
   // Used by both the dialog and the dedicated Protein document view.
   function proteinReport(st, width, win) {
@@ -3632,6 +4136,100 @@ svg .prim { cursor: pointer; }
     });
   }
 
+  // ---------------------------------------------------------------- enzyme set / visibility helpers
+  function useEnzMode(m) {
+    const d = D(); d.opts.enzMode = m; enzHidden(d).length = 0;
+    if (m === 'chosen' && !d.chosen.length) { dlgEnzymeChooser(); return; }
+    renderAll(true);
+  }
+  function toggleEnzHighlight(name) {
+    const d = D(), hi = enzHi(d), i = hi.indexOf(name);
+    if (i >= 0) hi.splice(i, 1); else hi.push(name);
+    renderAll(true);
+    toast(i >= 0 ? `Highlighting cleared for ${name}` : `${name} highlighted`);
+  }
+  function dlgSaveEnzSet() {
+    const d = D();
+    dialog({
+      title: 'Save Enzyme Set',
+      body: `<div class="form">
+        <label>Name</label><input type="text" id="seName" value="" placeholder="e.g. My cloning enzymes">
+        <label>Available for</label><select id="seScope"><option value="all">All DNA files</option><option value="file">Only this file</option></select>
+        <div class="full note">${d.chosen.length} enzyme${d.chosen.length === 1 ? '' : 's'} will be saved: ${esc(d.chosen.slice(0, 14).join(', '))}${d.chosen.length > 14 ? ' …' : ''}</div>
+      </div>`,
+      buttons: [{ label: 'Cancel' }, { label: 'Save', primary: true, act: async () => {
+        const name = $('#seName').value.trim();
+        if (!name) return showErr('Give the set a name.');
+        if ($('#seScope').value === 'file') {
+          d.fileSets = d.fileSets || {}; d.fileSets[name] = d.chosen.slice();
+          toast(`Saved “${name}” with this file`);
+        } else {
+          SET.enzymeSets[name] = d.chosen.slice(); await saveSettings();
+          toast(`Saved “${name}” for all DNA files`);
+        }
+        renderMenuState();
+      } }]
+    });
+  }
+  // the reference tool writes enzyme sets as plain text, one name per line; we do the same so
+  // a set can be carried to another machine.
+  function exportEnzSet() {
+    const d = D();
+    const text = `# GeneCanvas enzyme set\n# ${d.chosen.length} enzymes\n` + d.chosen.join('\n') + '\n';
+    const name = 'enzyme-set.txt';
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: name, content: text, filters: [{ name: 'Text', extensions: ['txt'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+    else downloadText(name, text);
+  }
+  async function importEnzSets() {
+    let text = null, label = 'Imported set';
+    if (host && host.openFiles) {
+      const files = await host.openFiles();
+      if (!files || !files.length) return;
+      text = files[0].content; label = (files[0].name || label).replace(/\.[^.]+$/, '');
+    } else {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.txt';
+      text = await new Promise(res => { inp.onchange = () => { const f = inp.files[0]; if (!f) return res(null); label = f.name.replace(/\.[^.]+$/, ''); const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(f); }; inp.click(); });
+    }
+    if (!text) return;
+    const names = text.split(/[\r\n,;\t]+/).map(x => x.trim()).filter(x => x && !x.startsWith('#') && DNA.ENZ_BY_NAME[x]);
+    if (!names.length) return toast('No enzyme names recognised in that file.');
+    promptName('Import Enzyme Set', 'Set name', label, async nm => {
+      SET.enzymeSets[nm] = [...new Set(names)];
+      await saveSettings(); renderMenuState();
+      toast(`Imported “${nm}” with ${SET.enzymeSets[nm].length} enzymes`);
+    });
+  }
+  // ---------------------------------------------------------------- noncutters
+  function dlgNoncutters() {
+    const d = D(), A = analyze(d);
+    let q = '', minCore = 0, hiSet = false;
+    const render = () => {
+      let list = DNA.ENZYMES.filter(e => !(A.sites[e.name] || []).length);
+      if (minCore) list = list.filter(e => e.core >= minCore);
+      if (q) { const u = q.toUpperCase(); list = list.filter(e => e.name.toUpperCase().includes(u) || e.site.includes(u)); }
+      const inSet = new Set(chosenEnz(d, A).map(e => e.name).concat(d.chosen));
+      $('#ncT').innerHTML = list.length ? `<table class="grid"><thead><tr><th>Enzyme</th><th>Recognition site</th><th>Length</th><th>Ends</th>${hiSet ? '<th>In the chosen set</th>' : ''}</tr></thead><tbody>
+        ${list.map(e => `<tr${hiSet && inSet.has(e.name) ? ' class="on"' : ''}><td><b>${esc(e.name)}</b></td><td class="cut-site">${cutSiteHtml(e)}</td><td>${e.core}</td><td>${ends(e)}</td>${hiSet ? `<td>${inSet.has(e.name) ? 'yes' : '—'}</td>` : ''}</tr>`).join('')}
+      </tbody></table>` : '<div class="hint">Every enzyme in the list cuts this sequence.</div>';
+      $('#ncN').textContent = `${list.length} of ${DNA.ENZYMES.length} enzymes do not cut ${d.name}`;
+    };
+    dialog({
+      title: 'Noncutters', wide: true,
+      body: `<div class="ecbar"><input type="text" id="ncQ" placeholder="Filter by name or site" style="width:170px">
+        <select id="ncL"><option value="0">Any recognition length</option><option value="6">6 bases or more</option><option value="7">7 bases or more</option><option value="8">8 bases</option></select>
+        <label class="inl"><input type="checkbox" id="ncHi"> Highlight noncutters in the chosen set</label>
+        <span class="sp" style="flex:1"></span><span class="note" id="ncN"></span></div>
+        <div class="tscroll" style="max-height:52vh" id="ncT"></div>
+        <div class="hint">An enzyme listed here has no recognition site anywhere in this ${d.circular ? 'circular' : 'linear'} sequence, so it can be used to open a construct made from it, or to check a clone by the absence of a cut.</div>`,
+      buttons: [{ label: 'Close', primary: true }],
+      onOpen: box => {
+        render();
+        box.querySelector('#ncQ').addEventListener('input', e => { q = e.target.value; render(); });
+        box.querySelector('#ncL').addEventListener('change', e => { minCore = +e.target.value; render(); });
+        box.querySelector('#ncHi').addEventListener('change', e => { hiSet = e.target.checked; render(); });
+      }
+    });
+  }
   // ---------------------------------------------------------------- enzyme set manager
   function dlgEnzymeSets() {
     const d = D();
@@ -3822,10 +4420,10 @@ svg .prim { cursor: pointer; }
     const off = e.top - s.length;
     return esc(s) + `<span class="note">(${off}/${e.bot - s.length})</span>`;
   }
-  function dlgEnzymeDB() {
+  function dlgEnzymeDB(preset) {
     const d = D();
     const A = d ? analyze(d) : { sites: {} };
-    let q = '', only = 'all';
+    let q = typeof preset === 'string' ? preset : '', only = 'all';
     const render = () => {
       let list = DNA.ENZYMES.slice();
       if (only === 'blunt') list = list.filter(e => e.overhang === 0);
@@ -3850,6 +4448,7 @@ svg .prim { cursor: pointer; }
       buttons: [{ label: 'Export as CSV', act: () => { exportEnzymeCSV(); return false; } }, { label: 'Close', primary: true }],
       onOpen: box => {
         render();
+        box.querySelector('#edbQ').value = q;
         box.querySelector('#edbQ').addEventListener('input', e => { q = e.target.value; render(); });
         box.querySelector('#edbF').addEventListener('change', e => { only = e.target.value; render(); });
       }
@@ -4465,7 +5064,15 @@ svg .prim { cursor: pointer; }
   function menuAct(menuLabel, itemLabel) {
     const m = menus().find(x => x.label === menuLabel);
     if (!m) throw new Error('No menu ' + menuLabel);
-    const it = m.items.find(x => x !== '-' && x.label === itemLabel);
+    const walk = list => {
+      for (const x of list) {
+        if (x === '-') continue;
+        if (x.label === itemLabel) return x;
+        if (x.items) { const deep = walk(x.items); if (deep) return deep; }
+      }
+      return null;
+    };
+    const it = walk(m.items);
     if (!it) throw new Error('No item ' + itemLabel + ' in ' + menuLabel);
     if (it.dis) throw new Error('Disabled: ' + itemLabel);
     return it.act();
