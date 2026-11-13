@@ -68,12 +68,14 @@
     for (const [nm, list] of Object.entries(sites)) for (const s of list) if (s.cut != null) cuts.push({ nm, pos: s.cut, start: s.pos, len: s.len });
     cuts.sort((a, b) => a.pos - b.pos);
     const rowEnd = [];
+    const labelOf = c => `${c.nm} (${fmt(c.pos)})`;
     for (const c of cuts) {
-      const x = X(c.pos), wd = c.nm.length * 6.2 + 8;
-      let r = 0; while (rowEnd[r] !== undefined && rowEnd[r] > x - 2) r++;
-      rowEnd[r] = x + wd; c.row = r;
+      const x = X(c.pos), wd = labelOf(c).length * 6.2 + 8;
+      const left = x + wd > W - 2 ? x - wd : x;             // hung the other way at the right edge
+      let r = 0; while (rowEnd[r] !== undefined && rowEnd[r] > left - 2) r++;
+      rowEnd[r] = left + wd; c.row = r;
     }
-    const top = 6, rows = rowEnd.length;
+    const top = name ? 20 : 6, rows = rowEnd.length;
     const cutsTop = baseY - 12 - lanes.length * 18 - 8;
     /* The rows of enzyme names are never squeezed on top of one another: if they do not
      * fit above the molecule the whole picture moves down and the map grows instead. */
@@ -83,7 +85,10 @@
       const x = X(c.pos), y = cutsTop - (rows - 1 - c.row) * 13;
       leads.push(`<line class="ecut" x1="${x.toFixed(1)}" y1="${baseY - 7}" x2="${x.toFixed(1)}" y2="${baseY + 7}"/>`);
       leads.push(`<line class="lead" x1="${x.toFixed(1)}" y1="${(y + 3).toFixed(1)}" x2="${x.toFixed(1)}" y2="${baseY - 7}"/>`);
-      names.push(`<text class="lbl e" x="${(x + 2).toFixed(1)}" y="${y.toFixed(1)}" data-pick="e:${c.nm}:${c.pos}" data-a="${c.start}" data-b="${(c.start + c.len) % n || n}">${esc(c.nm)} (${fmt(c.pos)})</text>`);
+      // a name that would run off the right edge is hung from the cut instead
+      const wd = labelOf(c).length * 6.2 + 8;
+      const endAnchor = x + wd > W - 2;
+      names.push(`<text class="lbl e" x="${(endAnchor ? x - 2 : x + 2).toFixed(1)}" y="${y.toFixed(1)}"${endAnchor ? ' text-anchor="end"' : ''} data-pick="e:${c.nm}:${c.pos}" data-a="${c.start}" data-b="${(c.start + c.len) % n || n}">${esc(labelOf(c))}</text>`);
     }
     // leader lines first, so a name is never crossed by one
     g.push(leads.join(''), names.join(''));

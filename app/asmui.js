@@ -185,7 +185,12 @@
         g += `<rect x="${x.toFixed(1)}" y="${barY}" width="${pw.toFixed(1)}" height="${barH}" rx="3" fill="${col}"/>`;
         const label = `${p.name} · ${fmt(p.seq.length)} bp`;
         if (pw > label.length * 5.6) g += `<text x="${(x + pw / 2).toFixed(1)}" y="${barY + 17}" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">${esc(label)}</text>`;
-        else g += `<text x="${(x + pw / 2).toFixed(1)}" y="${barY + barH + 13}" text-anchor="middle" font-size="10" fill="#5e6776">${esc(p.name)}</text>`;
+        else {
+          // a narrow piece at either edge would print its name off the picture
+          const lx = Math.min(Math.max(x + pw / 2, m + 4), m + bw - 4);
+          const anchor = lx <= m + 30 ? 'start' : (lx >= m + bw - 30 ? 'end' : 'middle');
+          g += `<text x="${lx.toFixed(1)}" y="${barY + barH + 13}" text-anchor="${anchor}" font-size="10" fill="#5e6776">${esc(p.name)}</text>`;
+        }
         centres.push({ x: x + pw / 2, w: pw, piece: p, i });
         x += pw;
       });
@@ -224,7 +229,9 @@
         g += rev
           ? `<path d="M${(ax + half).toFixed(1)},${ay} L${(ax - half + 7).toFixed(1)},${ay} M${(ax - half).toFixed(1)},${ay} l7,-4 v8 z" stroke="#5e6776" fill="#5e6776" stroke-width="1.3"/>`
           : `<path d="M${(ax - half).toFixed(1)},${ay} L${(ax + half - 7).toFixed(1)},${ay} M${(ax + half).toFixed(1)},${ay} l-7,-4 v8 z" stroke="#5e6776" fill="#5e6776" stroke-width="1.3"/>`;
-        g += `<text x="${ax.toFixed(1)}" y="${ay + 15}" text-anchor="middle" font-size="9.5" fill="#8d95a3">${rev ? 'reverse' : 'forward'}</text>`;
+        const lx2 = Math.min(Math.max(ax, m + 4), m + bw - 4);
+        const an2 = lx2 <= m + 24 ? 'start' : (lx2 >= m + bw - 24 ? 'end' : 'middle');
+        g += `<text x="${lx2.toFixed(1)}" y="${ay + 15}" text-anchor="${an2}" font-size="9.5" fill="#8d95a3">${rev ? 'reverse' : 'forward'}</text>`;
       }
       return `<svg width="${w}" height="${barY + barH + 54}" viewBox="0 0 ${w} ${barY + barH + 54}" font-family="Segoe UI, Arial, sans-serif">${g}</svg>`;
     }
@@ -422,10 +429,10 @@
         <div class="asmmain">
           <div class="asmleft">
             ${A.tab === 'product'
-          ? `<div class="asmmapbox" id="asmMapBox">${productMap(st, 700)}</div>
+          ? `<div class="asmmapbox" id="asmMapBox">${productMap(st, 640)}</div>
                  <div class="asmsel">${selLine(picked, st)}</div>
-                 <div class="asmprod">${junctionDiagram(st, 700)}</div>`
-          : `<div class="asmmapbox" id="asmMapBox">${pieceMap(mapDoc, region, 700)}</div>
+                 <div class="asmprod">${junctionDiagram(st, 640)}</div>`
+          : `<div class="asmmapbox" id="asmMapBox">${pieceMap(mapDoc, region, 640)}</div>
                  <div class="asmsel">Selected: <b>${esc(selText)}</b>${picked ? ` \u00b7 ${selLine(picked, st, true)}` : ''}</div>`}
           </div>
           <div class="asmright">${A.tab === 'vector' ? vectorPanel() : (A.tab === 'fragment' ? fragmentPanel() : productPanel(st))}</div>
@@ -487,6 +494,10 @@
       if (!seq) { ctx.toast('Nothing to copy.'); return; }
       copyText(seq, `Copied ${fmt(seq.length)} bp`);
     }
+    // a map title reads "name 123..456"; the coordinates are printed separately
+    const titleName = el => String((el.querySelector('title') || {}).textContent || '')
+      .replace(/\s+[\d,]+\.\.[\d,]+\s*$/, '').trim();
+
     /* A click on the map is the same choice as a click in the lists beside it. */
     function mapPick(el, shift) {
       const id = el.dataset.pick || '';
@@ -494,7 +505,7 @@
       const onVector = A.tab === 'vector';
       const sel = onVector ? A.vector : A.fragments[A.activeFrag];
       if (A.tab === 'product') {
-        A.pick = { tab: 'product', start: Math.min(a, b), end: Math.max(a, b), name: (el.querySelector('title') || {}).textContent || '' };
+        A.pick = { tab: 'product', start: Math.min(a, b), end: Math.max(a, b), name: titleName(el) };
         render(); return;
       }
       if (id.startsWith('e:')) {
@@ -523,9 +534,8 @@
         render(); return;
       }
       if (id.startsWith('f:')) {
-        const nm = (el.querySelector('title') || {}).textContent || '';
         if (sel.prep === 'pcr') { sel.from = Math.min(a, b); sel.to = Math.max(a, b); }
-        A.pick = { tab: A.tab, start: Math.min(a, b), end: Math.max(a, b), name: nm.split(' ')[0] };
+        A.pick = { tab: A.tab, start: Math.min(a, b), end: Math.max(a, b), name: titleName(el) };
         render(); return;
       }
     }
