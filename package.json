@@ -1,7 +1,7 @@
 {
   "name": "genecanvas",
   "productName": "GeneCanvas",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop plasmid and DNA sequence editor: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
   "main": "main.js",
   "author": "GeneCanvas",

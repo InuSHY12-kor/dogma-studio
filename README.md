@@ -8,7 +8,7 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 - **설치 없이 실행**: `GeneCanvas-<버전>-portable.exe`
 
 두 파일 모두 GitHub **Actions → Build Windows → 최근 실행 → Artifacts**에서 받을 수 있습니다.
-`v0.1.0`처럼 `v`로 시작하는 태그를 push하면 **Releases** 페이지에도 자동으로 올라갑니다.
+최신 판은 **Releases** 페이지(`v0.2.0`)에서 바로 받을 수 있습니다. `v`로 시작하는 태그를 push하면 자동으로 올라갑니다.
 
 > 코드 서명이 없어서 처음 실행할 때 Windows SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르면 됩니다.
 
@@ -20,9 +20,9 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | **NCBI** | **accession 번호(예: L09137, NM_000546)로 서열 바로 받기 · 단어로 검색해서 목록에서 고르기 · 받은 뒤 흔한 feature 자동 인식** |
 | Map | 원형/선형 지도, Feature 화살표, 제한효소 절단 위치 라벨, 프라이머, ORF, 지도에서 드래그로 영역 선택, 확대/축소 |
 | Sequence | 이중가닥 표시, 10 bp 눈금, Feature 막대, 아미노산 번역, 효소 위치, 직접 타이핑으로 편집, 복사/붙여넣기, DNA·단백질 검색(IUPAC 지원), 위치로 이동 |
-| Enzymes | 효소 77종, 절단 횟수·위치·말단 형태(5′/3′/blunt), 원하는 효소를 골라 지도에 표시 |
-| Features | 추가·편집·삭제, 종류·색·방향 지정, 흔한 서열 자동 인식(T7, lac operator, loxP, His tag 등) |
-| Primers | 선택 영역으로 프라이머 만들기(위/아래 가닥), Tm(nearest-neighbor), GC%, 결합 위치(5′ 꼬리가 있으면 3′ 15 nt로 찾음) |
+| Enzymes | 효소 203종, 절단 횟수·위치·말단 형태(5′/3′/blunt), 효소별 표시 토글, Numbers/Lines, noncutters, **단백질을 바꾸지 않고 효소 사이트 넣기·빼기(silent mutagenesis)** |
+| Features | 추가·편집·삭제, 종류·색·4방향 지정, **세그먼트와 인트론(점선 표시, 번역이 엑손을 건너뜀)**, cleavage arrow, 길이 0인 point feature, **유전암호 14종**, 일괄 편집, 표시/숨김, 데이터 내보내기, 흔한 서열 자동 인식(T7, lac operator, loxP, His tag 등), **나만의 feature 종류(custom type)** |
+| Primers | 선택 영역으로 프라이머 만들기(위/아래 가닥), **효소 사이트·코돈·펩타이드 삽입 도구**, Tm(nearest-neighbor), GC%, MW, **결합 조건 직접 설정(3′ 최소 일치 염기·최소 Tm)**, 표시/숨김, 일괄 편집, 리스트 가져오기, 주문용 내보내기, **프로그램 단위 프라이머 데이터베이스(라벨로 세트 구성)** |
 | **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
 | **Tools** | **코돈 최적화(8개 organism, 알고리즘 4종, 효소 사이트 추가/제거, 보존 영역) · 서열 비교(여러 플라스미드 정렬) · PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
 | **Compare** | **여러 서열을 한 화면에서 비교 · 원형은 회전·역상보까지 맞춰서 정렬 · 치환/삽입/결실을 색으로 표시 · 차이 있는 줄만 보기** |
@@ -34,7 +34,10 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | **Alignment** | **.ab1 시퀀싱 결과를 서열에 정렬 · 양쪽 가닥 자동 판별 · 낮은 품질 끝부분 자동 제거 · 크로마토그램 표시 · 차이(치환/결실/삽입) 목록 · 여러 read 비교** |
 | Actions | 제한효소 절단 + 가상 아가로스 겔, 번역(6 frame), 역상보, 원점 변경, 원형/선형 전환 |
 | **인쇄** | **지도·feature 표·프라이머 표·제한효소 목록·전체 서열·정렬 결과를 골라서 인쇄하거나 PDF로 저장** |
-| History | 모든 변경 기록, 원하는 단계로 되돌리기, Undo/Redo |
+| History | 모든 변경 기록, 원하는 단계로 되돌리기, Undo/Redo, **제작 이력 트리**, 텍스트로 보기·내보내기·복사, **단계별로 바뀐 염기 색칠**, 이력 다듬기(Trim) |
+| **Search** | **`(AG)` `R` `!R` `"R"` 문법 · 정확/유사(미스매치·갭)/단백질/이름 4개 모드 · 일치 항목 색칠 · 미스매치 빨간 박스 · 최근 검색** |
+| **보기** | **Split Window(좌우/상하) · Focus on Region(구간만 보기) · GC content 플롯 · 지도 회전 · 글꼴 크기 · Compact/Plain text · Blocks of 3·10 · 고정 줄너비 · 미니맵 · 색 스킴 6종** |
+| **Info** | **파일 메타데이터(출처·host·strain·methylation·accession·author·comments) · 참고문헌(PubMed PMID로 가져오기) · 파일 첨부(embedded files)** |
 
 ## 기능별 사용법
 
@@ -99,7 +102,7 @@ RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(�
    ΔG -11.92 kcal/mol
 ```
 
-ΔG는 Tm과 같은 SantaLucia 1998 nearest-neighbor 값에서 계산합니다(37 °C 기준). 대략 −6 kcal/mol보다 약하면 문제되는 일이 드물고, −9보다 강하면 대개 문제가 되며 특히 3′ 끝이 물려 있을 때 그렇습니다. 마지막 5염기 중 몇 개가 짝지었는지도 함께 표시합니다.
+ΔG는 Tm과 같은 SantaLucia 1998 nearest-neighbor 값에서 계산합니다. 기본은 37 °C이고, `Calculation parameters…`에서 온도를 바꾸면 그 온도에서 다시 채점합니다(같은 self-dimer가 25 °C에서 −6.5, 60 °C에서 −2.7 kcal/mol). Monomer와 Homodimer를 탭으로 나눠서 봅니다. 대략 −6 kcal/mol보다 약하면 문제되는 일이 드물고, −9보다 강하면 대개 문제가 되며 특히 3′ 끝이 물려 있을 때 그렇습니다. 마지막 5염기 중 몇 개가 짝지었는지도 함께 표시합니다.
 
 **RNA 2차 구조** — Analyze → RNA Secondary Structure. 구간을 정하면 접은 구조를 arc 다이어그램, stem 목록, dot-bracket으로 보여줍니다. T는 U로 읽습니다.
 
@@ -113,6 +116,24 @@ RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(�
 | Frequency sampling, rare codons dropped | 기준치(기본 10%) 아래 희귀 코돈을 뺀 뒤 자연 빈도대로 섞음. 일반적인 발현용 기본값 |
 | Frequency sampling | 자연 빈도 그대로 섞음 |
 | Harmonised to the source organism | 원래 organism에서의 희귀/흔함 정도를 목표 organism에서도 비슷하게 맞춤. 번역 속도 리듬이 folding에 중요할 때 |
+
+## the reference tool 사용자 가이드 기준
+
+v0.2.0에서는 the reference tool 사용자 가이드 15개 챕터(131개 문서)를 전부 읽고 빠진 기능을 채웠습니다.
+챕터별로 무엇이 들어갔는지는 [CHANGELOG.md](CHANGELOG.md)에 적어 두었습니다.
+
+| 챕터 | 다룬 내용 |
+|---|---|
+| 01 Projects, 02·03·04 Display Options | Split Window, Focus on Region, GC 플롯, 지도 회전, 글꼴 크기, Compact/Plain text, Blocks, 고정 줄너비, 미니맵, 단백질 Region/Site/Bond |
+| 05 Info Panel | 파일 메타데이터, 참고문헌(PubMed), 첨부 파일 |
+| 06 Enzymes | Enzymes 메뉴 전체, 효소별 표시, noncutters, silent mutagenesis |
+| 07·08 Features | 세그먼트·인트론, 번역 옵션, point feature, cleavage arrow, custom feature type |
+| 09·10 Primers | 결합 조건, 삽입 도구, 구조 탭, 프라이머 데이터베이스 |
+| 11 Translations | 리딩프레임 행, 유전암호 14종, Letter Codes, Genetic Code Tables |
+| 12 Colors | 염기·단백질 색 스킴, 직접 칠하기, History colours |
+| 13 Searching | 질의 문법, 4개 검색 모드, feature 메타데이터 검색 |
+| 14 Focus on Region | 포커스 창과 모든 뷰 연동 |
+| 15 History | 텍스트 보기·내보내기·복사·인쇄, 단계별 색칠, Trim |
 
 ## 직접 빌드하기
 
@@ -135,6 +156,10 @@ app/trace.js    .ab1 읽기와 서열 정렬
 app/primer.js   프라이머 설계
 app/msa.js      여러 서열 비교 (앵커 기반 정렬)
 app/codon.js    코돈 최적화
+app/silent.js   효소 사이트를 단백질 그대로 넣기·빼기 (silent mutagenesis)
+app/search.js   검색 (the reference tool 질의 문법, 정확·유사·단백질 검색)
+app/assembly.js 클로닝 엔진 (벡터 준비, overlap 설계, 제품 조립)
+app/asmui.js    Vector/Fragment/Product 창 (본 창과 별도 창에서 모두 동작)
 app/struct.js   프라이머 구조, RNA 접기, 단백질 성질
 app/gel.js      아가로스 젤 이동 모델과 ladder 데이터
 app/codon-tables.js  코돈 사용표 (자동 생성 파일)
@@ -161,7 +186,9 @@ tools/build-codon-tables.js  NCBI CDS에서 코돈 사용표를 다시 만드는
 
 | 항목 | 상태 |
 |---|---|
-| Tm, 프라이머 헤어핀·dimer ΔG | **정확**. SantaLucia 1998 nearest-neighbor 값에서 계산하며, 출판된 ΔG°37 값과 0.02 kcal/mol 안에서 일치하는 것을 확인했습니다 |
+| Tm, 프라이머 헤어핀·dimer ΔG | **정확**. SantaLucia 1998 nearest-neighbor 값에서 계산하며, 출판된 ΔG°37 값과 0.02 kcal/mol 안에서 일치하는 것을 확인했습니다. 온도를 바꾸면 그 온도의 ΔH·ΔS에서 다시 계산합니다 |
+| DNA/RNA 분자량·농도 계산 | **정확**. 뉴클레오타이드 평균 질량에서 결합마다 물 하나를 빼는 방식이며, 20-mer가 표준 oligo 공식과 0.2 Da 안에서 일치하고 ng/µL ↔ nM 변환도 수계산과 대조했습니다 |
+| 유전암호 14종 | NCBI translation table 1–6, 9–14, 16, 21을 표준 코드와의 차이로 적어 두었습니다 |
 | 단백질 분자량, 280 nm 흡광계수, GRAVY, aliphatic index | **정확**. 표준 공식 그대로이며 수작업 계산과 대조했습니다 |
 | 단백질 pI | pKa 값 묶음에 따라 달라집니다. EMBOSS 묶음을 쓰며 화면에도 표시합니다. 다른 툴과 0.2~0.5 정도 차이 날 수 있는데 이는 정상입니다 |
 | 코돈 사용표 | **실측 데이터**. NCBI 실제 CDS에서 계산 (아래 표 참고) |

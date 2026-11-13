@@ -5440,7 +5440,9 @@ svg .prim { cursor: pointer; }
   function dlgAbout() {
     dialog({
       title: 'About GeneCanvas',
-      body: `<p><b>GeneCanvas</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>A desktop editor for plasmids and DNA sequences: maps, sequence editing, restriction analysis, features, primers and simulated gels.</p><p class="hint">Opens GenBank (.gb, .gbk), FASTA and .dna files. Saves GenBank and FASTA. The example plasmid is a synthetic sequence made for demonstration.</p>`,
+      body: `<p><b>GeneCanvas</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>A desktop editor for plasmids, RNA and protein sequences: maps, sequence editing, restriction analysis, features with segments and introns, primers, cloning simulation, codon optimisation, sequencing alignments and simulated gels.</p>
+        <p class="hint">Opens GenBank (.gb, .gbk), FASTA, .dna and .ab1 trace files, and downloads from NCBI by accession. Saves GenBank and FASTA. The example plasmid is a synthetic sequence made for demonstration.</p>
+        <p class="hint">Melting temperatures and structure free energies use the SantaLucia 1998 nearest-neighbour parameters; codon usage tables were computed from real NCBI coding sequences. RNA folding free energies are approximate and are marked as such where they are shown.</p>`,
       buttons: [{ label: 'Close', primary: true }]
     });
   }
