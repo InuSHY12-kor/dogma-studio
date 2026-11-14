@@ -5054,10 +5054,6 @@ svg .lbl.p.hov { font-weight: 700; }
     if (d.provenance) walk({ name: d.name, seq: d.seq, circular: d.circular, source: d.provenance }, 0);
     else out.push('(no construction record \u2014 this sequence was opened rather than assembled here)');
     out.push('');
-    out.push('Edits');
-    d.hist.forEach((h, i) => {
-      out.push(`  ${String(i + 1).padStart(3)}. ${new Date(h.t).toLocaleString()}  ${h.label}  (${fmt(h.len)} bp)${i === d.hi ? '   \u2190 current' : ''}`);
-    });
     return out.join('\n');
   }
   function exportHistory() {
@@ -5176,21 +5172,19 @@ svg .lbl.p.hov { font-weight: 700; }
 
   function renderHistory() {
     const d = D();
-    if (S.histTab === undefined) S.histTab = d.provenance ? 'tree' : 'edits';
     const v = $('#view');
     const tabBar = `<div class="ptools">
-      <div class="seg" style="width:260px"><button data-ht="tree" class="${S.histTab === 'tree' ? 'on' : ''}">How it was made</button><button data-ht="edits" class="${S.histTab === 'edits' ? 'on' : ''}">Edits (${d.hist.length})</button></div>
-      <button class="btn${S.histText ? ' pri' : ''}" id="htText">${S.histText ? 'Show as Maps' : 'Show as Text'}</button>
-      <button class="btn" id="htAct">History Actions ▾</button>
-      <span class="note">${d.provenance ? esc(d.provenance.method) : 'No construction record — this sequence was opened rather than assembled here.'}</span></div>`;
+      <button class="btn${S.histText ? ' pri' : ''}" id="htText">${S.histText ? 'Maps' : 'Text'}</button>
+      <button class="btn" id="htAct">Actions ▾</button>
+      <span class="note">${d.provenance ? esc(d.provenance.method) : 'Opened, not built here — nothing to show.'}</span></div>`;
     if (S.histText) {
       v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll"><pre class="histtext">${esc(historyText(d))}</pre></div></div>`;
       bindHistBar(d);
       return;
     }
-    if (S.histTab === 'tree') {
+    {
       if (!d.provenance) {
-        v.innerHTML = `<div class="panel">${tabBar}<div class="empty"><h2>No construction record</h2><p>When a sequence is built here by restriction cloning, Gibson or Golden Gate assembly, Gateway recombination or codon optimization, this view shows what it was made from: the method, the pieces, the primers, and the sequence of each piece.</p></div></div>`;
+        v.innerHTML = `<div class="panel">${tabBar}<div class="empty"><h2>Nothing to show</h2><p>This sequence was opened rather than built here. A sequence made by cloning, assembly, recombination or codon optimization shows here what it was made from: the method, the pieces and the primers, with the sequence of each piece.</p></div></div>`;
       } else {
         const seen = { n: 0, map: {} };
         const root = tagProv(JSON.parse(JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, source: d.provenance })), seen);
@@ -5217,47 +5211,30 @@ svg .lbl.p.hov { font-weight: 700; }
           const st = e.target.closest('.pvstep'); if (!st) return;
           e.preventDefault();
           showCtx(e.clientX, e.clientY, [
-            { label: 'Erase Operation Plus Ancestors', act: () => eraseFromHere(st.dataset.uid, seen) }
+            { label: 'Erase This Step and What Made It', act: () => eraseFromHere(st.dataset.uid, seen) }
           ]);
         };
       }
-    } else {
-      const t = dt => new Date(dt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      v.innerHTML = `<div class="panel">${tabBar}<div class="tscroll">
-        ${d.hist.map((h, i) => ({ h, i })).reverse().map(({ h, i }) => `<div class="hist-item${i === d.hi ? ' on' : ''}${i > d.hi ? ' future' : ''}" data-h="${i}"><span class="t">${t(h.t)}</span><span class="hlbl" data-hc="${i}" title="Colour the bases this step changed">${esc(h.label)}</span><span class="len">${fmt(h.len)} bp</span></div>`).join('')}</div>
-        <div class="hint">Click a step to go back to it, or click its name to colour the bases that step changed.</div></div>`;
-      v.querySelector('.tscroll').onclick = e => {
-        const hc = e.target.closest('[data-hc]');
-        if (hc) { showHistoryColors(d, +hc.dataset.hc); return; }
-        const it = e.target.closest('[data-h]'); if (!it) return;
-        restore(d, +it.dataset.h); renderAll();
-      };
     }
     bindHistBar(d);
   }
   function bindHistBar(d) {
     const v = $('#view');
-    const seg = v.querySelector('.seg');
-    if (seg) seg.onclick = e => { const b = e.target.closest('[data-ht]'); if (!b) return; S.histTab = b.dataset.ht; renderView(); };
     const tx = v.querySelector('#htText');
     if (tx) tx.onclick = () => { S.histText = !S.histText; renderView(); };
     const act = v.querySelector('#htAct');
     if (act) act.onclick = e => {
       const r = e.target.getBoundingClientRect();
       showCtx(r.left, r.bottom, [
-        { label: 'Copy History', act: () => copyText(historyText(d), 'History copied as text') },
-        { label: 'Export History…', act: exportHistory },
+        { label: 'Copy', act: () => copyText(historyText(d), 'History copied as text') },
+        { label: 'Export…', act: exportHistory },
         '-',
-        { label: 'Erase Selected Operation Plus Ancestors', dis: !S.provSel, act: () => {
+        { label: 'Erase This Step and What Made It', dis: !S.provSel, act: () => {
           const seen = { n: 0, map: {} };
           tagProv(JSON.parse(JSON.stringify({ name: d.name, seq: d.seq, circular: d.circular, features: d.features, source: d.provenance })), seen);
           eraseFromHere(S.provSel, seen);
         } },
-        { label: 'Trim History Tree…', dis: !d.provenance, act: dlgTrimHistory },
-        '-',
-        { label: 'Clear the Edit List', dis: d.hist.length < 2, act: () => {
-          d.hist = [d.hist[d.hi]]; d.hi = 0; renderAll(true); toast('Edit list cleared');
-        } }
+        { label: 'Trim…', dis: !d.provenance, act: dlgTrimHistory }
       ]);
     };
   }
