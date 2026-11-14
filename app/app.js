@@ -45,6 +45,7 @@ svg .ecut.hov { stroke: var(--accent); stroke-width: 2.2; }
 svg .lead.hov { stroke: var(--accent); stroke-width: 1.6; }
 svg .ehit { fill: rgba(37, 99, 201, .16); stroke: var(--accent); stroke-width: .8; pointer-events: none; }
 svg .lbl.f { font-weight: 600; }
+svg .lbl.bg { paint-order: stroke; stroke: #fff; stroke-width: 4.5px; stroke-linejoin: round; }
 svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
 svg .lead { fill: none; stroke: #9aa2af; stroke-width: .8; }
 svg .ecut { stroke: #48505e; stroke-width: 1; }
@@ -140,6 +141,10 @@ svg .lbl.p.hov { font-weight: 700; }
       showMinimap: false,
       labelMode: 'auto',      // auto | inside | outside
       featOnLine: false,      // draw every feature on the backbone instead of in its own lane
+      showFeatLabels: true,   // names beside or inside the arrows
+      labelBg: false,         // a pale plate behind an external name
+      showFeatLen: false,     // the length in the name
+      showFeatType: false,    // the feature's type in the name
       showRuler: true,
       baseColors: { enabled: false, A: '#2e9e4f', C: '#2563c9', G: '#1c2230', T: '#c43c3c' }
     };
@@ -324,6 +329,16 @@ svg .lbl.p.hov { font-weight: 700; }
   }
   // Primers are drawn in purple so they are never taken for an enzyme or a feature.
   const PRIMER_COL = '#7b3fb0', PRIMER_SOFT = '#b48ad6';
+  /* What a name on the map reads as: the feature's name, and whatever else the display
+   * options ask to be shown with it. */
+  function mapLabel(it, o, n) {
+    let t = it.name;
+    if (it.kind === 'f') {
+      if (o.showFeatType && it.type) t += ' \u00b7 ' + it.type;
+      if (o.showFeatLen) t += ' (' + fmt(DNA.rlen(it, n)) + ' bp)';
+    }
+    return t;
+  }
   function collectItems(d, A) {
     const items = [], o = d.opts;
     if (o.showFeat) for (const f of d.features) {
@@ -2642,13 +2657,16 @@ svg .lbl.p.hov { font-weight: 700; }
         toggle: () => { o.showFeat = !o.showFeat; },
         sub: () => `${d.features.filter(f => !f.hidden).length}`,
         panel: () => `
-          <h5>Labels</h5>
-          <select data-msv="labelMode">
-            <option value="auto" ${o.labelMode === 'auto' ? 'selected' : ''}>Inside or outside, whichever fits</option>
-            <option value="inside" ${o.labelMode === 'inside' ? 'selected' : ''}>Inside only</option>
-            <option value="outside" ${o.labelMode === 'outside' ? 'selected' : ''}>Outside only</option>
-          </select>
-          <label class="mschk"><input type="checkbox" data-msb="featOnLine" ${o.featOnLine ? 'checked' : ''}> Draw features on the backbone</label>
+          <label class="mschk"><input type="checkbox" data-msb="featOnLine" ${o.featOnLine ? 'checked' : ''}> Show Features on Line</label>
+          <label class="mschk"><input type="checkbox" data-msb="showFeatLabels" ${o.showFeatLabels !== false ? 'checked' : ''}> Show Feature Labels</label>
+          <div class="msradios">
+            <label class="mschk"><input type="radio" name="mslabmode" data-msr="labelMode" value="auto" ${(o.labelMode || 'auto') === 'auto' ? 'checked' : ''}> Internal and External Labels</label>
+            <label class="mschk"><input type="radio" name="mslabmode" data-msr="labelMode" value="inside" ${o.labelMode === 'inside' ? 'checked' : ''}> Internal Labels Only</label>
+            <label class="mschk"><input type="radio" name="mslabmode" data-msr="labelMode" value="outside" ${o.labelMode === 'outside' ? 'checked' : ''}> External Labels Only</label>
+          </div>
+          <label class="mschk"><input type="checkbox" data-msb="labelBg" ${o.labelBg ? 'checked' : ''}> Show Label Background</label>
+          <label class="mschk"><input type="checkbox" data-msb="showFeatLen" ${o.showFeatLen ? 'checked' : ''}> Show Feature Length</label>
+          <label class="mschk"><input type="checkbox" data-msb="showFeatType" ${o.showFeatType ? 'checked' : ''}> Show Feature Type</label>
           <div class="msbtns">
             <button class="btn" data-msact="addFeat">Add Feature…</button>
             <button class="btn" data-msact="detect">Detect Common…</button>
@@ -2850,7 +2868,8 @@ svg .lbl.p.hov { font-weight: 700; }
         o[k] = /^\d+$/.test(t.value) ? +t.value : t.value;
         if (k === 'colorScheme' && t.value === 'nt') o.baseColors.enabled = true;
         if (k === 'transMode') { o.showTrans = true; if (t.value === 'orfs') o.showORFs = true; }
-      } else if (t.dataset.msb) o[t.dataset.msb] = t.checked;
+      } else if (t.dataset.msr) { if (t.checked) o[t.dataset.msr] = t.value; }
+      else if (t.dataset.msb) o[t.dataset.msb] = t.checked;
       else if (t.dataset.msn) o[t.dataset.msn] = Math.max(1, parseInt(t.value, 10) || 1);
       else if (t.dataset.msact) { msAction(t.dataset.msact, p, t.value); return; }
       d.cache = null;
@@ -3031,19 +3050,21 @@ svg .lbl.p.hov { font-weight: 700; }
         const a = ang(cp), p1 = P(r - laneW / 2 - 7, a), p2 = P(r + laneW / 2, a);
         g.push(`<line class="cleave" x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}"/>`);
       }
-      const textW = it.name.length * 6.4 + 10;
+      const txt = mapLabel(it, o, n);
+      const textW = txt.length * 6.4 + 10;
       const avail = (ar.span - ar.h) * r;
       const fits = avail > textW;
-      const inside = o.labelMode === 'inside' ? avail > it.name.length * 4 : (o.labelMode === 'outside' ? false : fits);
-      if (inside) {
+      const inside = o.labelMode === 'inside' ? avail > txt.length * 4 : (o.labelMode === 'outside' ? false : fits);
+      if (o.showFeatLabels === false || (o.labelMode === 'inside' && !inside)) { /* no name here */ }
+      else if (inside) {
         const mid = ar.a1 + ar.span / 2;
         const b1 = it.strand === -1 ? ar.a1 + ar.h : ar.a1, b2 = it.strand === 1 ? ar.a2 - ar.h : ar.a2;
         const id = 'tp' + (tpi++);
         const bottom = Math.sin(mid) > 0.05;
         defs += `<path id="${id}" d="${bottom ? arcPath(cx, cy, r, b2, b1, 0) : arcPath(cx, cy, r, b1, b2, 1)}"/>`;
-        g.push(`<text class="ftxt" dy=".35em"><textPath href="#${id}" startOffset="50%" text-anchor="middle">${esc(it.name)}</textPath></text>`);
+        g.push(`<text class="ftxt" dy=".35em"><textPath href="#${id}" startOffset="50%" text-anchor="middle">${esc(txt)}</textPath></text>`);
       } else {
-        labels.push({ a: ang(it.start) + DNA.rlen(it, n) / n * Math.PI, text: it.name, cls: 'f', k: it.key, r0: r + laneW / 2 });
+        labels.push({ a: ang(it.start) + DNA.rlen(it, n) / n * Math.PI, text: txt, cls: 'f', k: it.key, r0: r + laneW / 2 });
       }
     }
     for (const it of orfs) {
@@ -3087,7 +3108,7 @@ svg .lbl.p.hov { font-weight: 700; }
       const e1 = P(l.r0 + 1, l.a), e2 = P(Rl - 10, l.a);
       const tag = l.enz ? ` data-enz="${esc(l.enz)}"` : (l.prim ? ` data-prim="${l.prim}"` : '');
       leads.push(`<polyline class="lead"${tag} points="${fmtP(e1)} ${fmtP(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
-      texts.push(`<text class="lbl ${l.cls}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
+      texts.push(`<text class="lbl ${l.cls}${o.labelBg ? ' bg' : ''}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
     }
     // every leader line first, then every label, so no line is drawn across a name
     g.push(leads.join(''), texts.join(''));
@@ -3116,7 +3137,7 @@ svg .lbl.p.hov { font-weight: 700; }
         let lo = Infinity, hi = -Infinity;
         for (const [a, b] of DNA.segs(it, n)) {
           let x1 = X(a), x2 = X(b);
-          const tw = it.name.length * 6.3 + 10;
+          const tw = mapLabel(it, d.opts, n).length * 6.3 + 10;
           if (withLabel && x2 - x1 < tw) { const c = (x1 + x2) / 2; x1 = Math.min(x1, c - tw / 2); x2 = Math.max(x2, c + tw / 2); }
           lo = Math.min(lo, x1); hi = Math.max(hi, x2);
         }
@@ -3237,11 +3258,13 @@ svg .lbl.p.hov { font-weight: 700; }
         g.push(`<polygon class="${cls}" points="${pts}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)}</title></polygon>`);
         const widest = pieces.reduce((best, pc) => (X(pc[1]) - X(pc[0])) > (X(best[1]) - X(best[0])) ? pc : best, pieces[0]);
         if (labelBelow !== false && (pieces.length === 1 || (a === widest[0] && b === widest[1]))) {
-          const tw = it.name.length * 6.3 + 8;
+          const txt = mapLabel(it, o, n);
+          const tw = txt.length * 6.3 + 8;
           const fits = x2 - x1 - hd > tw;
-          const inside = o.labelMode === 'inside' ? (x2 - x1 > it.name.length * 4) : (o.labelMode === 'outside' ? false : fits);
-          if (it.kind === 'f' && inside) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${ym}" dy=".35em" text-anchor="middle">${esc(it.name)}</text>`);
-          else g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}" x="${((x1 + x2) / 2).toFixed(1)}" y="${y2 + 11}" text-anchor="middle" data-k="${it.key}">${esc(it.name)}</text>`);
+          const inside = o.labelMode === 'inside' ? (x2 - x1 > txt.length * 4) : (o.labelMode === 'outside' ? false : fits);
+          if (it.kind === 'f' && (o.showFeatLabels === false || (o.labelMode === 'inside' && !inside))) { /* no name here */ }
+          else if (it.kind === 'f' && inside) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${ym}" dy=".35em" text-anchor="middle">${esc(txt)}</text>`);
+          else g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}${o.labelBg ? ' bg' : ''}" x="${((x1 + x2) / 2).toFixed(1)}" y="${y2 + 11}" text-anchor="middle" data-k="${it.key}">${esc(txt)}</text>`);
         }
       }
     };

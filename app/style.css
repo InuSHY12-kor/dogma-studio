@@ -578,6 +578,7 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .mspop h5 { margin: 2px 0 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
 .mspop select, .mspop input[type=number] { width: 100%; padding: 3px 5px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .mspop .mschk { display: flex; align-items: center; gap: 6px; }
+.mspop .msradios { display: flex; flex-direction: column; gap: 3px; padding-left: 20px; border-left: 2px solid var(--border-soft); margin-left: 4px; }
 .mspop .msrow2 { display: flex; align-items: center; gap: 6px; padding-left: 20px; color: var(--muted); }
 .mspop .msrow2 input { width: 70px; }
 .mspop .msbtns { display: flex; gap: 5px; }
@@ -674,6 +675,8 @@ svg.imap text.lbl.e.bl { fill: var(--blunt); }
 svg.imap text.lbl.e.hov { fill: var(--accent); font-weight: 700; text-decoration: underline; }
 svg.imap line.ecut.hov, svg.imap line.lead.hov { stroke: var(--accent); stroke-width: 2; }
 svg.imap polygon.prim { stroke: rgba(80, 30, 120, .5); stroke-width: .6; }
+svg.imap text.lbl.f { font-weight: 600; font-size: 10px; }
+svg.imap text.lbl.bg { paint-order: stroke; stroke: #fff; stroke-width: 4px; stroke-linejoin: round; }
 svg.imap polygon.orfp { stroke: #8d95a3; }
 svg.imap text.ctr1 { fill: #1c2230; font-weight: 600; }
 

@@ -20,6 +20,11 @@
     const { seq, circular, features = [], sites = {}, sel, W = 560, H = 150, name = '', primers = [], orfs = [] } = opts;
     const showRuler = opts.showRuler !== false, showLoc = opts.showLocations !== false;
     const allSites = opts.allSites || sites;      // for "cuts this molecule once"
+    const L = opts.labels || {};                  // what a feature name reads as
+    const showNames = L.show !== false, labelMode = L.mode || 'auto';
+    const featText = f => f.name
+      + (L.type && f.type ? ' \u00b7 ' + f.type : '')
+      + (L.len ? ` (${fmt(Math.abs((f.end - f.start) || 0))} bp)` : '');
     const n = seq.length;
     if (!n) return '<div class="hint">No sequence.</div>';
     const m = 26, w = W - 2 * m, baseY = Math.round(H * 0.56);
@@ -61,14 +66,18 @@
       return k;
     };
     for (const f of features) {
-      const lane = place(f);
+      const lane = L.onLine ? (place(f), 0) : place(f);
       const x1 = X(f.start), x2 = X(f.end), y = baseY - 12 - fwdBand - lane * 18;
       const hd = f.strand ? Math.min(8, (x2 - x1) * 0.4) : 0;
       const pts = f.strand === -1
         ? `${x1},${y + 6} ${x1 + hd},${y} ${x2},${y} ${x2},${y + 12} ${x1 + hd},${y + 12}`
         : `${x1},${y} ${x2 - hd},${y} ${x2},${y + 6} ${x2 - hd},${y + 12} ${x1},${y + 12}`;
       g.push(`<polygon class="feat" points="${pts}" fill="${f.color || '#c9ced6'}" data-pick="f:${f.id != null ? f.id : f.name}" data-a="${f.start}" data-b="${f.end}"><title>${esc(f.name)} ${fmt(f.start + 1)}..${fmt(f.end)}</title></polygon>`);
-      if (x2 - x1 > esc(f.name).length * 6) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${y + 6}" dy=".35em" text-anchor="middle">${esc(f.name)}</text>`);
+      const ftx = featText(f);
+      const fitsIn = x2 - x1 > ftx.length * 6;
+      if (!showNames || (labelMode === 'inside' && !fitsIn)) { /* no name here */ }
+      else if (fitsIn && labelMode !== 'outside') g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${y + 6}" dy=".35em" text-anchor="middle">${esc(ftx)}</text>`);
+      else g.push(`<text class="lbl f${L.bg ? ' bg' : ''}" x="${((x1 + x2) / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" data-pick="f:${f.id != null ? f.id : f.name}" data-a="${f.start}" data-b="${f.end}">${esc(ftx)}</text>`);
     }
     // open reading frames just under the backbone, drawn hollow so features stay clear
     const orfLanes = [];
@@ -433,6 +442,7 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
   const mapState = init => Object.assign({
     enzMode: 'unique6', chosen: [], hiddenEnz: [],
     showFeat: true, hiddenFeat: [],
+    showFeatLabels: true, labelMode: 'auto', labelBg: false, showFeatLen: false, showFeatType: false, featOnLine: false,
     showPrimers: true, hiddenPrim: [],
     showORFs: false, orfMin: 100,
     colors: true, showRuler: true, showLocations: true
@@ -514,6 +524,16 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
         on: () => st.showFeat && shownFeatures(doc, st).length > 0,
         toggle: () => { st.showFeat = !st.showFeat; },
         panel: () => `<label class="mschk"><input type="checkbox" data-msb="showFeat" ${st.showFeat ? 'checked' : ''}> Show features</label>
+          <label class="mschk"><input type="checkbox" data-msb="featOnLine" ${st.featOnLine ? 'checked' : ''}> Show Features on Line</label>
+          <label class="mschk"><input type="checkbox" data-msb="showFeatLabels" ${st.showFeatLabels !== false ? 'checked' : ''}> Show Feature Labels</label>
+          <div class="msradios">
+            <label class="mschk"><input type="radio" name="tmslab" data-msr="labelMode" value="auto" ${(st.labelMode || 'auto') === 'auto' ? 'checked' : ''}> Internal and External Labels</label>
+            <label class="mschk"><input type="radio" name="tmslab" data-msr="labelMode" value="inside" ${st.labelMode === 'inside' ? 'checked' : ''}> Internal Labels Only</label>
+            <label class="mschk"><input type="radio" name="tmslab" data-msr="labelMode" value="outside" ${st.labelMode === 'outside' ? 'checked' : ''}> External Labels Only</label>
+          </div>
+          <label class="mschk"><input type="checkbox" data-msb="labelBg" ${st.labelBg ? 'checked' : ''}> Show Label Background</label>
+          <label class="mschk"><input type="checkbox" data-msb="showFeatLen" ${st.showFeatLen ? 'checked' : ''}> Show Feature Length</label>
+          <label class="mschk"><input type="checkbox" data-msb="showFeatType" ${st.showFeatType ? 'checked' : ''}> Show Feature Type</label>
           <h5>Shown on the map</h5>
           ${list(feats.map(f => { const k = String(f.id != null ? f.id : f.name); return { key: k, on: !st.hiddenFeat.includes(k), label: `${f.name} (${fmt(f.start + 1)}..${fmt(f.end)})` }; }), 'feat')}
           <div class="msbtns"><button class="btn" data-msact="allFeat">Show all</button><button class="btn" data-msact="noFeat">Hide all</button></div>
@@ -631,6 +651,7 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
       p.onchange = e => {
         const t = e.target;
         if (t.dataset.msv) st[t.dataset.msv] = t.value;
+        else if (t.dataset.msr) { if (t.checked) st[t.dataset.msr] = t.value; }
         else if (t.dataset.msb) st[t.dataset.msb] = t.checked;
         else if (t.dataset.msn) st[t.dataset.msn] = Math.max(1, parseInt(t.value, 10) || 1);
         else if (t.dataset.msitem) {
