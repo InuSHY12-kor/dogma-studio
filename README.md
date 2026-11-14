@@ -8,7 +8,7 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 - **설치 없이 실행**: `GeneCanvas-<버전>-portable.exe`
 
 두 파일 모두 GitHub **Actions → Build Windows → 최근 실행 → Artifacts**에서 받을 수 있습니다.
-최신 판은 **Releases** 페이지(`v0.2.0`)에서 바로 받을 수 있습니다. `v`로 시작하는 태그를 push하면 자동으로 올라갑니다.
+최신 판은 **Releases** 페이지(`v0.3.0`)에서 바로 받을 수 있습니다. `v`로 시작하는 태그를 push하면 자동으로 올라갑니다.
 
 > 코드 서명이 없어서 처음 실행할 때 Windows SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르면 됩니다.
 
@@ -23,7 +23,7 @@ Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구�
 | Enzymes | 효소 203종, 절단 횟수·위치·말단 형태(5′/3′/blunt), 효소별 표시 토글, Numbers/Lines, noncutters, **단백질을 바꾸지 않고 효소 사이트 넣기·빼기(silent mutagenesis)** |
 | Features | 추가·편집·삭제, 종류·색·4방향 지정, **세그먼트와 인트론(점선 표시, 번역이 엑손을 건너뜀)**, cleavage arrow, 길이 0인 point feature, **유전암호 14종**, 일괄 편집, 표시/숨김, 데이터 내보내기, 흔한 서열 자동 인식(T7, lac operator, loxP, His tag 등), **나만의 feature 종류(custom type)** |
 | Primers | 선택 영역으로 프라이머 만들기(위/아래 가닥), **효소 사이트·코돈·펩타이드 삽입 도구**, Tm(nearest-neighbor), GC%, MW, **결합 조건 직접 설정(3′ 최소 일치 염기·최소 Tm)**, 표시/숨김, 일괄 편집, 리스트 가져오기, 주문용 내보내기, **프로그램 단위 프라이머 데이터베이스(라벨로 세트 구성)** |
-| **Cloning** | **제한효소 클로닝(벡터·insert를 자르고 ligation, 양쪽 방향 모두 확인) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
+| **Cloning** | **한 창에서 방법만 바꿔 쓰는 Vector · Fragment · Product 창(드롭다운으로 알고리즘 선택, 지도에서 효소·feature·프라이머를 직접 클릭) · 제한효소 클로닝(효소 개수 제한 없음) · Golden Gate(Type IIS: BsaI/BsmBI/BbsI/SapI, overhang으로 순서 결정, 내부 사이트 경고) · Gibson/overlap assembly(2~6 조각, 순서·방향 자동 탐색) · Gateway BP/LR(att 자리에서 재조합, attB 생성 여부 확인) · att 자리 표시** |
 | **Tools** | **코돈 최적화(8개 organism, 알고리즘 4종, 효소 사이트 추가/제거, 보존 영역) · 서열 비교(여러 플라스미드 정렬) · PCR 프라이머 자동 설계(Tm·GC·hairpin·dimer·3′ 중복결합 검사, 제한효소 꼬리 붙이기) · 시퀀싱 프라이머 자동 배치 · 돌연변이 유발 프라이머 · .ab1 정렬** |
 | **Compare** | **여러 서열을 한 화면에서 비교 · 원형은 회전·역상보까지 맞춰서 정렬 · 치환/삽입/결실을 색으로 표시 · 차이 있는 줄만 보기** |
 | **파일 종류** | **DNA · RNA · Protein 파일을 각각 만들 수 있고**, 열려 있는 파일의 종류에 따라 상단 메뉴와 탭이 바뀜 |
@@ -60,26 +60,29 @@ RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(�
 
 **효소 세트 저장** — Map/Sequence 탭 왼쪽의 `Choose Enzymes…`, 또는 Analyze → Choose Enzymes. 한 화면에 모든 효소가 보이고 각각 몇 번 자르는지 숫자가 붙습니다. 체크한 뒤 `Save as my set…`으로 이름을 주면 저장되고, **다른 파일을 열어도 그 세트가 그대로 목록에 나옵니다**. 서열에서 자동으로 계산되는 세트(unique cutter, 6+ cutter, Type IIS, blunt 등)도 함께 제공합니다.
 
-**아가로스 젤** — Analyze → New Agarose Gel. 새 탭으로 열립니다. 젤 농도, 버퍼(TAE/TBE), running 정도, lane 개수(1~20)를 고르면 lane 수에 맞춰 젤이 넓어집니다. 각 lane에 ladder나 열려 있는 서열을 넣고, 서열 lane은 `Cut with` 단추로 효소를 골라 digest할 수 있습니다. `Add a ladder…`로 원하는 brand의 band 크기를 직접 입력해 저장하면 그 ladder도 목록에 추가됩니다(`3000*`처럼 별표를 붙이면 진한 기준 band).
+**Agarose 시뮬레이션** — 툴바의 **Agarose** 단추. 파일을 연 것처럼 새 탭으로 열립니다. lane은 최대 12개이고, lane마다 서열 하나와 **digest 또는 PCR**을 고릅니다. 창 안 지도에서 효소를 클릭하면 그 효소로 자르고 Shift-클릭으로 double digest, `amplify with`로 바꾸면 프라이머를 클릭하고 마주보는 것을 Shift-클릭해서 증폭 산물을 올립니다. 젤은 그때그때 다시 그려지고, `Open as an Agarose document`로 지금 구성을 아래의 아가로스 젤 문서로 넘길 수 있습니다.
 
-**Map 보기 패널** — Map 탭 오른쪽 세로 패널에서 Feature/Primer/효소/ORF 표시를 켜고 끄고, Feature 라벨을 화살표 안쪽/바깥쪽으로 바꾸고, Feature를 backbone 선 위에 붙이고, 눈금자를 끄고, 염기 색을 바꿀 수 있습니다. 염기 색도 프로그램에 저장돼 모든 파일에 적용됩니다.
+**아가로스 젤(문서)** — Analyze → New Agarose Gel. 새 탭으로 열립니다. 젤 농도, 버퍼(TAE/TBE), running 정도, lane 개수(1~20)를 고르면 lane 수에 맞춰 젤이 넓어집니다. 각 lane에 ladder나 열려 있는 서열을 넣고, 서열 lane은 `Cut with` 단추로 효소를 골라 digest할 수 있습니다. `Add a ladder…`로 원하는 brand의 band 크기를 직접 입력해 저장하면 그 ladder도 목록에 추가됩니다(`3000*`처럼 별표를 붙이면 진한 기준 band).
+
+**지도 옆 사이드 메뉴** — Map·Sequence 탭 오른쪽의 세로 아이콘 줄입니다. 아이콘을 누르면 그 항목을 켜고 끄고, 옆의 작은 펼침 단추를 누르면 그 그룹의 나머지 설정이 **아이콘을 가리지 않게 왼쪽에** 열립니다. 순서는 **효소 · feature · primer · ORF/번역 · 색 · 줄 번호 · alignment · 화면 분할**이고, 효소 세트와 저장된 세트, feature 라벨 위치, 프라이머 hybridisation, ORF 최소 길이와 번역 옵션, 염기 색과 GC 플롯, 눈금자·줄 너비·blocks까지 여기서 끝납니다.
+
+같은 사이드 메뉴가 **클로닝 창과 Agarose 시뮬레이션의 지도 옆에도** 있습니다. 각 패널에서 지금 지도에 그려지는 효소·feature·primer를 체크 목록으로 직접 고를 수 있고(Show all / Hide all 포함), 설정은 탭별·서열별로 따로 기억됩니다.
 
 **제작 이력(History)** — History 탭의 `How it was made`. 이 벡터가 **어떤 기법으로, 어떤 조각이 합쳐져서** 만들어졌는지 트리로 보여줍니다. 각 조각은 미니맵과 크기가 함께 나오고, `Open`을 누르면 그 조각의 **서열이 그대로 새 탭으로 열립니다**. 제한효소 클로닝, Gibson, Golden Gate, Gateway, 코돈 최적화로 만든 결과에 자동으로 기록되며, **GenBank로 저장해도 서열까지 남습니다**(COMMENT에 보관).
 
 
 **NCBI에서 받기** — `Ctrl+D` 또는 툴바의 NCBI 단추. accession 번호를 넣고 Download, 또는 단어를 넣고 Search 후 목록에서 Open.
 
-**제한효소 클로닝** — Cloning → Restriction Cloning. 벡터와 insert를 고르고 각각 자를 효소를 체크하면 생기는 조각이 양 끝 모양(5′-AATT 같은)과 함께 나옵니다. Simulate Ligation을 누르면 붙을 수 있는 조합만 보여주고, Create로 새 탭에 만듭니다. Feature는 그대로 따라갑니다.
+**클로닝(한 창에서 전부)** — Cloning 메뉴의 어느 항목을 눌러도 같은 **Vector · Fragment · Product** 창이 열리고, 창 오른쪽 위 드롭다운에서 **제한효소 클로닝 · Golden Gate · Gibson · In-Fusion · Gateway BP/LR**을 고르면 적용되는 알고리즘이 바뀝니다. 방법을 바꿔도 고른 조각은 그대로 두고 접합부만 다시 판정합니다.
 
-**Gibson assembly** — Cloning → Gibson. 조각을 2~6개 고르고 최소 겹침 길이를 정하면, 순서와 방향을 모두 시도해서 원형으로 닫히는 조합을 찾습니다.
-
-**Gateway** — Cloning → Gateway. 두 플라스미드를 고르면 att 자리를 찾아 7 bp core에서 교차시킵니다. 결과 연결 부위가 실제 attB1/attB2가 되었는지 확인해서 알려줍니다.
+- Vector/Fragment 탭에서는 **지도에서 직접** 고릅니다. 효소를 클릭하면 그 효소로 자르고 Shift-클릭으로 효소를 더합니다(개수 제한 없음). feature를 클릭하면 그 구간을 PCR로 증폭하고, 프라이머를 클릭하면 한쪽 끝이 정해집니다.
+- Product 탭의 지도도 클릭해서 선택하고 복사할 수 있습니다(선택 구간, 또는 산물 전체).
+- Golden Gate는 part의 사이트 개수와 생기는 overhang을 보고 **overhang이 겹치거나 part 안에 사이트가 남으면** 알려줍니다. Gateway는 att core에서 교차시키고 연결 부위가 attB1/attB2가 되었는지, 부산물이 몇 bp인지 적습니다.
+- 창은 **완전히 별개의 OS 창**이라 띄워 둔 채 본 창에서 다른 작업을 할 수 있습니다.
 
 **프라이머 설계** — Tools → Design PCR Primers. 증폭할 구간, 목표 Tm, 길이 범위를 정하면 후보 5쌍을 Tm·GC·경고와 함께 보여줍니다. 5′ 꼬리(제한효소 자리 등)를 붙일 수 있고, Tm은 꼬리를 뺀 결합 부위로만 계산합니다.
 
 **시퀀싱 결과 정렬** — Tools → Align Sequencing Traces, 또는 .ab1 파일을 창에 끌어다 놓기. 기준 서열에 맞춰 양쪽 가닥을 다 시도하고, 품질 낮은 끝을 자른 뒤 정렬해서 차이를 모두 표시합니다.
-
-**Golden Gate** — Cloning → Golden Gate. 효소(BsaI 등)를 고르면 각 part의 사이트 개수와 생기는 overhang을 보여줍니다. part는 사이트가 **정확히 2개**여야 하고, 더 있으면 "part 안에 사이트가 있다"고 빨간 글씨로 알려줍니다(먼저 코돈 최적화로 없애면 됩니다). 조립이 끝난 산물에는 그 효소 사이트가 남지 않는데, 이것도 결과 표에서 확인할 수 있습니다.
 
 **서열 비교** — Tools → Compare Sequences. 맨 처음 고른 서열이 기준이 되고 나머지가 거기에 맞춰집니다. 원형 플라스미드는 origin이 달라도, 심지어 역상보로 저장돼 있어도 알아서 맞춥니다. 같은 자리는 점으로, 다른 자리는 색으로 표시합니다.
 
@@ -119,7 +122,8 @@ RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(�
 
 ## the reference tool 사용자 가이드 기준
 
-v0.2.0에서는 the reference tool 사용자 가이드 15개 챕터(131개 문서)를 전부 읽고 빠진 기능을 채웠습니다.
+v0.2.0에서는 the reference tool 사용자 가이드 15개 챕터(131개 문서)를 전부 읽고 빠진 기능을 채웠고,
+v0.3.0에서는 그 화면들을 the reference tool 쪽에 더 가깝게 다시 만들었습니다.
 챕터별로 무엇이 들어갔는지는 [CHANGELOG.md](CHANGELOG.md)에 적어 두었습니다.
 
 | 챕터 | 다룬 내용 |
