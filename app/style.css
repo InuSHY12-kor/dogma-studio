@@ -374,6 +374,15 @@ svg.chroma { display: block; }
 .asmrow select { min-width: 72px; }
 .asmlist { border: 1px solid var(--border); border-radius: 3px; background: var(--win); min-height: 64px; max-height: 110px; overflow: auto; }
 .asmlistitem { padding: 3px 8px; font-size: 12.5px; }
+.asmfrags { max-height: 190px; }
+.asmfrags .asmlistitem { border-bottom: 1px solid var(--border-soft); padding: 4px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
+.asmfrags .asmlistitem:last-child { border-bottom: none; }
+.asmfrags .asmlistitem:hover { background: var(--hover); }
+.asmfrags .asmlistitem.on { background: var(--accent-soft); }
+.asmfrags .afends { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+.asmfrags .afuse { display: flex; gap: 6px; }
+.asmfrags .afuse .ib { font-size: 11px; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; }
+.asmfrags .afuse .ib:hover { text-decoration: underline; }
 .asmlistitem.on { background: var(--accent); color: #fff; }
 .asmarrow { width: 34px; height: 22px; border: 1px solid var(--border); background: var(--win); border-radius: 3px; }
 .asmarrow.on { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -592,7 +601,7 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .imappane { position: relative; display: flex; align-items: stretch; }
 .imappane .imapbox { flex: 1; min-width: 0; }
 .imappane .imapbox .imap { width: 100%; }
-.imappane .tmapside { position: static; align-self: flex-start; margin: 4px 0 0 6px; box-shadow: none; }
+.imappane .tmapside { position: sticky; top: 4px; align-self: flex-start; margin: 4px 0 0 6px; box-shadow: none; z-index: 5; }
 /* the strip's popover belongs to a window that may itself sit above the page */
 #tmspop { z-index: 150; }
 #tmstip { z-index: 155; }
@@ -665,7 +674,9 @@ svg.imap [data-pick]:hover { opacity: .78; }
 svg.imap line.bb { stroke: #2f3644; stroke-width: 1.2; }
 svg.imap line.tick { stroke: #8d95a3; stroke-width: 1; }
 svg.imap text.tickl { font-size: 9.5px; fill: #5e6776; }
-svg.imap rect.selarea { fill: rgba(37, 99, 201, .16); stroke: rgba(37, 99, 201, .5); stroke-width: 1; }
+svg.imap rect.selarea, svg.imap path.selarea { fill: rgba(37, 99, 201, .18); stroke: var(--accent); stroke-width: 1.1; }
+svg.imap line.seledge { stroke: var(--accent); stroke-width: 2; }
+svg.imap text.sellbl { fill: var(--accent); font-size: 10.5px; font-weight: 700; }
 svg.imap line.ecut { stroke: #4a5160; stroke-width: 1.1; }
 svg.imap line.lead { stroke: #c3c9d3; stroke-width: .8; }
 svg.imap text.lbl { font-size: 10.5px; fill: #1c2230; }

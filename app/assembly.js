@@ -68,27 +68,17 @@
       const c = cuts[0];
       return { seq: DNA.sub(doc.seq, c.cut, c.cut) || doc.seq, from: c.cut, to: c.cut, doc, label: `${c.enzyme} (${c.cut})`, ends: { left: endOf(doc.seq, c), right: endOf(doc.seq, c) } };
     }
-    /* Any number of enzymes may be chosen. The cuts are taken together, as they would be
-     * in one tube, and the piece kept is the longest stretch between two neighbouring
-     * cuts — or the shortest, when the stretch between the cuts is what is wanted. */
-    const spans = [];
-    for (let i = 0; i < cuts.length; i++) {
-      const a = cuts[i], b = cuts[(i + 1) % cuts.length];
-      if (i === cuts.length - 1 && !doc.circular) break;     // a linear molecule has no wrap-around piece
-      spans.push({ a, b, len: DNA.rlen({ start: a.cut, end: b.cut }, n) || n });
-    }
+    const spans = digestSpans(doc, cuts, spec.keepInner);
     if (!spans.length) throw new Error('These cuts leave no piece with two cut ends.');
-    spans.sort((x, y) => spec.keepInner ? x.len - y.len : y.len - x.len);
-    const pick = spans[0];
-    const startCut = pick.a, endCut = pick.b;
-    const seq = DNA.sub(doc.seq, startCut.cut, endCut.cut) || doc.seq;
+    const pick = spans[Math.min(Math.max(0, spec.fragment | 0), spans.length - 1)];
+    const seq = DNA.sub(doc.seq, pick.from, pick.to) || doc.seq;
     if (!seq.length) throw new Error('These cuts leave nothing.');
     return {
-      seq, from: startCut.cut, to: endCut.cut, doc,
-      label: `${startCut.enzyme} (${startCut.cut}) – ${endCut.enzyme} (${endCut.cut})`,
+      seq, from: pick.from, to: pick.to, doc,
+      label: pick.label,
       removed: n - seq.length,
       pieces: spans.length,
-      ends: { left: endOf(doc.seq, startCut), right: endOf(doc.seq, endCut) }
+      ends: { left: pick.left, right: pick.right }
     };
   }
   // CLONE writes ends as 'b' / '5' / '3' / 'o'; this window writes blunt / 5 / 3.
@@ -96,6 +86,28 @@
     if (!e || e.type === 'o') return { type: 'open', x: '', enzyme };
     return { type: e.type === 'b' ? 'blunt' : e.type, x: e.x || '', enzyme };
   }
+  /* Every piece a digest leaves, as the gel would show them: the stretch between each
+   * pair of neighbouring cuts, longest first — or shortest first when what is wanted is
+   * the stretch between the cuts rather than the backbone around them. The caller picks
+   * one by its place in this list, so the list and the piece never disagree. */
+  function digestSpans(doc, cuts, keepInner) {
+    const n = doc.seq.length;
+    const list = (cuts || []).slice().filter(c => c && c.cut != null).sort((a, b) => a.cut - b.cut);
+    const spans = [];
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i], b = list[(i + 1) % list.length];
+      if (i === list.length - 1 && !doc.circular) break;     // a linear molecule has no wrap-around piece
+      if (list.length === 1 && !doc.circular) break;
+      spans.push({ a, b, len: DNA.rlen({ start: a.cut, end: b.cut }, n) || n });
+    }
+    spans.sort((x, y) => keepInner ? x.len - y.len : y.len - x.len);
+    return spans.map((sp, i) => ({
+      index: i, from: sp.a.cut, to: sp.b.cut, len: sp.len,
+      left: endOf(doc.seq, sp.a), right: endOf(doc.seq, sp.b),
+      label: `${sp.a.enzyme} (${sp.a.cut}) \u2013 ${sp.b.enzyme} (${sp.b.cut})`
+    }));
+  }
+
   function endOf(seq, c) {
     if (c.cut === c.cut2) return { type: 'blunt', x: '', enzyme: c.enzyme };
     const lo = Math.min(c.cut, c.cut2), hi = Math.max(c.cut, c.cut2);
@@ -315,5 +327,5 @@
     return null;
   }
 
-  root.ASSEMBLY = { prepare, flip, planGibson, planRestriction, planAtt, build, frameIssues, suggestFlips, chooseOverlap, annealPart, naturalOverlap, describeEnd, endOf };
+  root.ASSEMBLY = { prepare, flip, digestSpans, planGibson, planRestriction, planAtt, build, frameIssues, suggestFlips, chooseOverlap, annealPart, naturalOverlap, describeEnd, endOf };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -27,6 +27,7 @@
       + (L.len ? ` (${fmt(Math.abs((f.end - f.start) || 0))} bp)` : '');
     const n = seq.length;
     if (!n) return '<div class="hint">No sequence.</div>';
+    if (opts.shape === 'circular') return circularMap(opts, { featText, showNames, labelMode, allSites });
     const m = 26, w = W - 2 * m, baseY = Math.round(H * 0.56);
     const X = bp => m + bp / n * w;
     const g = [];
@@ -38,9 +39,18 @@
       const x = X(t);
       g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${fmt(t || 1)}</text>`);
     }
-    // the selection
-    if (sel && sel.end > sel.start) {
-      g.push(`<rect class="selarea" x="${X(sel.start).toFixed(1)}" y="${baseY - 26}" width="${Math.max(1, X(sel.end) - X(sel.start)).toFixed(1)}" height="52"/>`);
+    // the stretch that is chosen, with both ends marked so it can be seen at a glance
+    if (sel && sel.end !== undefined && sel.end !== sel.start) {
+      const wrap = sel.end < sel.start;
+      const spans = wrap ? [[sel.start, n], [0, sel.end]] : [[sel.start, sel.end]];
+      for (const [a, b] of spans) {
+        g.push(`<rect class="selarea" x="${X(a).toFixed(1)}" y="${baseY - 26}" width="${Math.max(1, X(b) - X(a)).toFixed(1)}" height="52"/>`);
+      }
+      g.push(`<line class="seledge" x1="${X(sel.start).toFixed(1)}" y1="${baseY - 28}" x2="${X(sel.start).toFixed(1)}" y2="${baseY + 28}"/>`);
+      g.push(`<line class="seledge" x1="${X(sel.end).toFixed(1)}" y1="${baseY - 28}" x2="${X(sel.end).toFixed(1)}" y2="${baseY + 28}"/>`);
+      const len = ((sel.end - sel.start) % n + n) % n || n;
+      const mid = X(sel.start) + (wrap ? 0 : (X(sel.end) - X(sel.start)) / 2);
+      g.push(`<text class="sellbl" x="${mid.toFixed(1)}" y="${baseY + 40}" text-anchor="middle">${fmt(len)} bp</text>`);
     }
     /* Primers ride the backbone in purple: forward just outside the two lines, reverse
      * just inside, so they are never read as an enzyme or a feature. */
@@ -142,6 +152,118 @@
       <rect width="${W}" height="${hh}" fill="var(--canvas)"/><g transform="translate(0,${dy})">${g.join('')}</g>
       ${name ? `<text class="ctr1" x="${m}" y="14" style="font-size:12px;pointer-events:none">${esc(name)}</text>` : ''}</svg>`;
   }
+  /* The same map drawn as a circle, for a circular molecule. It carries the same
+   * data-pick and data-enz tags as the linear one, so everything that works on one
+   * works on the other. */
+  function circularMap(opts, shared) {
+    const { seq, features = [], sites = {}, sel, W = 560, name = '', primers = [], orfs = [] } = opts;
+    const { featText, showNames, labelMode, allSites } = shared;
+    const L = opts.labels || {};
+    const showLoc = opts.showLocations !== false;
+    const n = seq.length;
+    const cuts = [];
+    for (const [nm, list] of Object.entries(sites)) for (const st of list) if (st.cut != null) cuts.push({ nm, pos: st.cut, start: st.pos, len: st.len });
+    cuts.sort((a, b) => a.pos - b.pos);
+    // enough height for the names that hang off each side
+    const labelCount = cuts.length + features.length + primers.length;
+    const H = Math.max(opts.H || 230, Math.min(300 + Math.ceil(labelCount / 2) * 13, 1400));
+    const cx = W / 2, cy = H / 2;
+    const TAU = Math.PI * 2;
+    const ang = bp => bp / n * TAU - Math.PI / 2;
+    const P = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    const fp = p => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+    const lanes = [];
+    const place = f => {
+      if (L.onLine) return 0;
+      let k = 0;
+      while (lanes[k] && lanes[k].some(o => f.start < o.end && o.start < f.end)) k++;
+      (lanes[k] = lanes[k] || []).push(f);
+      return k;
+    };
+    features.forEach(f => { f._lane = place(f); });
+    const nF = Math.max(1, lanes.length || 1);
+    const pFwd = primers.filter(p => p.strand !== -1), pRev = primers.filter(p => p.strand === -1);
+    const R = Math.max(60, Math.min(W / 2 - 150, H / 2 - 54) - (pFwd.length ? 14 : 0));
+    const laneW = 11, laneGap = 4;
+    const inBand = pRev.length ? 14 : 0;
+    const fR = k => R - inBand - k * (laneW + laneGap);
+    const Rl = R + 26 + (pFwd.length ? 10 : 0);
+    const g = [], labels = [];
+    g.push(`<circle class="bb" cx="${cx}" cy="${cy}" r="${R - 2}" fill="none"/><circle class="bb" cx="${cx}" cy="${cy}" r="${R + 2}" fill="none"/>`);
+    { const a = ang(0), p1 = P(R + 7, a), p2 = P(R - 7, a);
+      g.push(`<line class="ecut" x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}"/>`); }
+    const arc = (a1, span, r, w2) => {
+      const ro = r + w2 / 2, ri = r - w2 / 2, a2 = a1 + span, lg = span > Math.PI ? 1 : 0;
+      return `M${fp(P(ro, a1))} A${ro},${ro} 0 ${lg} 1 ${fp(P(ro, a2))} L${fp(P(ri, a2))} A${ri},${ri} 0 ${lg} 0 ${fp(P(ri, a1))} Z`;
+    };
+    const spanOf = it => Math.max(0.012, (((it.end - it.start) % n + n) % n || n) / n * TAU);
+    // the chosen stretch, drawn as a wide band so it is seen at a glance
+    if (sel && sel.end !== undefined && sel.end !== sel.start) {
+      const a1 = ang(sel.start), span = spanOf(sel);
+      g.push(`<path class="selarea" d="${arc(a1, span, R, 30)}"/>`);
+      for (const a of [a1, a1 + span]) {
+        const q1 = P(R - 17, a), q2 = P(R + 17, a);
+        g.push(`<line class="seledge" x1="${q1[0].toFixed(1)}" y1="${q1[1].toFixed(1)}" x2="${q2[0].toFixed(1)}" y2="${q2[1].toFixed(1)}"/>`);
+      }
+      const mid = P(R - 30, a1 + span / 2);
+      g.push(`<text class="sellbl" x="${mid[0].toFixed(1)}" y="${mid[1].toFixed(1)}" text-anchor="middle" dy=".35em">${fmt(((sel.end - sel.start) % n + n) % n || n)} bp</text>`);
+    }
+    for (const f of features) {
+      const r = fR(f._lane), a1 = ang(f.start), span = spanOf(f);
+      g.push(`<path class="feat" d="${arc(a1, span, r, laneW)}" fill="${f.color || '#c9ced6'}" data-pick="f:${f.id != null ? f.id : f.name}" data-a="${f.start}" data-b="${f.end}"><title>${esc(f.name)} ${fmt(f.start + 1)}..${fmt(f.end)}</title></path>`);
+      if (showNames && labelMode !== 'inside') labels.push({ a: a1 + span / 2, text: featText(f), cls: 'f' + (L.bg ? ' bg' : ''), r0: r + laneW / 2, pick: `f:${f.id != null ? f.id : f.name}`, a0: f.start, b0: f.end });
+    }
+    orfs.forEach((o, i) => {
+      const r = fR(nF - 1) - 8 - (i % 2) * 6;
+      g.push(`<path class="orfp" d="${arc(ang(o.start), spanOf(o), r, 3)}" fill="none" stroke="#8d95a3" stroke-width="1"><title>ORF ${fmt(o.start + 1)}..${fmt(o.end)}</title></path>`);
+    });
+    const drawPrim = (p, r) => {
+      g.push(`<path class="prim" d="${arc(ang(p.start), spanOf({ start: Math.min(p.start, p.end), end: Math.max(p.start, p.end) }), r, 4)}" fill="${p.color || PRIMER_COL}" data-pick="p:${p.id}" data-a="${p.start}" data-b="${p.end}"><title>${esc(p.name)} ${fmt(Math.min(p.start, p.end) + 1)}..${fmt(Math.max(p.start, p.end))} (${p.strand === -1 ? 'reverse' : 'forward'})</title></path>`);
+      labels.push({ a: ang(p.start) + spanOf({ start: Math.min(p.start, p.end), end: Math.max(p.start, p.end) }) / 2, text: p.name, cls: 'p', r0: Math.max(r, R) + 3, pick: `p:${p.id}`, a0: p.start, b0: p.end });
+    };
+    pFwd.forEach(p => drawPrim(p, R + 9));
+    pRev.forEach(p => drawPrim(p, R - 9));
+    for (const c of cuts) {
+      const a = ang(c.pos), p1 = P(R - 7, a), p2 = P(R + 7, a);
+      g.push(`<line class="ecut" data-enz="${esc(c.nm)}" x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}"/>`);
+      const rec = DNA.ENZ_BY_NAME[c.nm] || {};
+      labels.push({
+        a, text: showLoc ? `${c.nm} (${fmt(c.pos)})` : c.nm,
+        cls: 'e' + ((allSites[c.nm] || []).length === 1 ? ' u' : '') + (rec.overhang === 0 ? ' bl' : ''),
+        r0: R + 7, enz: c.nm, pick: `e:${c.nm}:${c.pos}`, a0: c.start, b0: (c.start + c.len) % n || n
+      });
+    }
+    // names stacked down each side, with a leader line back to the circle
+    const sides = [[], []];
+    for (const l of labels) { l.side = Math.cos(l.a) >= -1e-6 ? 0 : 1; l.ty = cy + Rl * Math.sin(l.a); sides[l.side].push(l); }
+    const sp = 13;
+    for (const arr of sides) {
+      arr.sort((a, b) => a.ty - b.ty);
+      for (let i = 1; i < arr.length; i++) if (arr[i].ty < arr[i - 1].ty + sp) arr[i].ty = arr[i - 1].ty + sp;
+      if (arr.length && arr[arr.length - 1].ty > H - 8) {
+        arr[arr.length - 1].ty = H - 8;
+        for (let i = arr.length - 2; i >= 0; i--) if (arr[i].ty > arr[i + 1].ty - sp) arr[i].ty = arr[i + 1].ty - sp;
+      }
+      if (arr.length && arr[0].ty < 10) { arr[0].ty = 10; for (let i = 1; i < arr.length; i++) if (arr[i].ty < arr[i - 1].ty + sp) arr[i].ty = arr[i - 1].ty + sp; }
+    }
+    const leads = [], texts = [];
+    for (const l of labels) {
+      const dy = l.ty - cy;
+      let dx = Math.abs(dy) < Rl ? Math.sqrt(Rl * Rl - dy * dy) : 0;
+      dx = Math.max(dx, 24) + 5;
+      const tx = l.side === 0 ? cx + dx : cx - dx;
+      const e1 = P(l.r0 + 1, l.a), e2 = P(Rl - 8, l.a);
+      const tag = l.enz ? ` data-enz="${esc(l.enz)}"` : '';
+      leads.push(`<polyline class="lead"${tag} fill="none" points="${fp(e1)} ${fp(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
+      texts.push(`<text class="lbl ${l.cls}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}"${tag} data-pick="${esc(l.pick)}" data-a="${l.a0}" data-b="${l.b0}">${esc(l.text)}</text>`);
+    }
+    g.push(leads.join(''), texts.join(''));
+    g.push(`<text class="ctr1" x="${cx}" y="${cy - 2}" text-anchor="middle" style="font-size:13px;font-weight:600">${esc(name || '')}</text>`);
+    g.push(`<text class="tickl" x="${cx}" y="${cy + 15}" text-anchor="middle">${fmt(n)} bp</text>`);
+    return `<svg class="imap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" font-family="Segoe UI, Arial, sans-serif">
+      <rect width="${W}" height="${H}" fill="var(--canvas)"/>${g.join('')}</svg>`;
+  }
+
   function niceStep(x) {
     const p = Math.pow(10, Math.floor(Math.log10(Math.max(1, x))));
     const r = x / p;
@@ -437,14 +559,15 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
     primer: '<path d="M3 9h11" stroke-width="1.6"/><path d="m11 6 4 3-4 3" stroke-width="1.6" fill="none"/><path d="M21 16H10" stroke-width="1.6"/><path d="m13 13-4 3 4 3" stroke-width="1.6" fill="none"/>',
     orf: '<path d="M3 7h10l3 2.5-3 2.5H3z" stroke-width="1.3"/><path d="M21 17H11l-3-2.5L11 12h10z" stroke-width="1.3"/>',
     paint: '<rect x="3" y="5" width="4.5" height="14" rx="1"/><rect x="9.75" y="5" width="4.5" height="14" rx="1"/><rect x="16.5" y="5" width="4.5" height="14" rx="1"/>',
-    num: '<text x="2" y="17" font-size="11" stroke="none" fill="currentColor" font-family="Segoe UI, Arial">(123)</text>'
+    num: '<text x="2" y="17" font-size="11" stroke="none" fill="currentColor" font-family="Segoe UI, Arial">(123)</text>',
+    shape: '<circle cx="12" cy="12" r="8"/><path d="M12 4v3"/>'
   };
   const mapState = init => Object.assign({
     enzMode: 'unique6', chosen: [], hiddenEnz: [],
     showFeat: true, hiddenFeat: [],
     showFeatLabels: true, labelMode: 'auto', labelBg: false, showFeatLen: false, showFeatType: false, featOnLine: false,
     showPrimers: true, hiddenPrim: [],
-    showORFs: false, orfMin: 100,
+    showORFs: false, orfMin: 100, shape: 'auto',
     colors: true, showRuler: true, showLocations: true
   }, init || {});
 
@@ -565,6 +688,18 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
           <div class="msnote">With this off the features are drawn in plain grey, which can be easier to read on a crowded map.</div>`
       },
       {
+        key: 'shape', icon: 'shape', title: 'Map shape',
+        on: () => (st.shape === 'auto' ? !!doc.circular : st.shape === 'circular'),
+        toggle: () => { st.shape = (st.shape === 'auto' ? (doc.circular ? 'linear' : 'circular') : (st.shape === 'circular' ? 'linear' : 'circular')); },
+        panel: () => `<h5>Shape</h5>
+          <div class="msradios">
+            <label class="mschk"><input type="radio" name="tmsshape" data-msr="shape" value="auto" ${(st.shape || 'auto') === 'auto' ? 'checked' : ''}> Follow the molecule (${doc.circular ? 'circular' : 'linear'})</label>
+            <label class="mschk"><input type="radio" name="tmsshape" data-msr="shape" value="circular" ${st.shape === 'circular' ? 'checked' : ''}> Circular</label>
+            <label class="mschk"><input type="radio" name="tmsshape" data-msr="shape" value="linear" ${st.shape === 'linear' ? 'checked' : ''}> Linear</label>
+          </div>
+          <div class="msnote">${doc.circular ? 'This molecule is circular.' : 'This molecule is linear; drawn as a circle it is closed at the origin.'}</div>`
+      },
+      {
         key: 'num', icon: 'num', title: 'Numbering',
         on: () => st.showRuler,
         toggle: () => { st.showRuler = !st.showRuler; },
@@ -587,8 +722,10 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
       sites: shownSites(sites, st),
       primers: (opts.primers || doc.primers || []).filter(p => st.showPrimers && !st.hiddenPrim.includes(String(p.id))),
       orfs: orfsOf(doc, st),
-      sel: opts.sel || null, W: opts.W || 640, H: opts.H || 230,
-      showRuler: st.showRuler, showLocations: st.showLocations
+      sel: opts.sel || null, W: opts.W || 640, H: opts.H || 230, allSites: sites,
+      shape: (st.shape === 'auto' || !st.shape) ? (doc.circular ? 'circular' : 'linear') : st.shape,
+      showRuler: st.showRuler, showLocations: st.showLocations,
+      labels: { show: st.showFeatLabels !== false, mode: st.labelMode || 'auto', bg: !!st.labelBg, len: !!st.showFeatLen, type: !!st.showFeatType, onLine: !!st.featOnLine }
     });
     const strip = sideGroups(doc, st, sites).map(g => `
       <div class="msrow${g.on() ? ' on' : ''}">

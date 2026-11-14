@@ -114,7 +114,7 @@
           const s = list[Math.min(c.site || 0, list.length - 1)];
           return s ? { enzyme: c.enzyme, cut: s.cut, cut2: s.cut2 } : null;
         }).filter(Boolean);
-        return { prep: 'enzymes', cuts, keepInner: !!sel.keepInner };
+        return { prep: 'enzymes', cuts, keepInner: !!sel.keepInner, fragment: sel.fragment | 0 };
       }
       if (sel.prep === 'pcr') return { prep: 'pcr', from: sel.from | 0, to: sel.to | 0 };
       if (sel.prep === 'typeIIs') return { prep: 'typeIIs', enzyme: sel.enzyme, fragment: sel.fragment | 0 };
@@ -369,17 +369,58 @@
       return '';
     }
 
+    /* What the chosen enzymes actually leave: every piece of the digest, the way a gel
+     * would show them. One of them is the piece this slot uses; either slot can take
+     * any of them. */
+    const endTxt = e => !e ? '?' : (e.type === 'blunt' ? 'blunt' : (e.type === 'open' ? 'uncut' : `${e.type}′-${e.x}`));
+    function fragRow(r, who) {
+      return `<div class="asmlistitem${r.on ? ' on' : ''}" data-frag="${who}:${r.i}">
+        <div class="aflead"><b>${fmt(r.size)} bp</b> <span class="note">${r.label}</span></div>
+        <div class="afends">${esc(r.ends)}</div>
+        <div class="afuse">
+          <button class="ib" data-useas="v:${who}:${r.i}" title="Use this piece as the Vector">as Vector</button>
+          <button class="ib" data-useas="f:${who}:${r.i}" title="Use this piece as the Fragment">as Fragment</button>
+        </div></div>`;
+    }
+    function fragmentList(sel, who) {
+      const doc = docOf(sel.docId);
+      if (!doc) return '<div class="hint" style="padding:6px">Choose a sequence.</div>';
+      if (sel.prep === 'typeIIs') {
+        let parts = [];
+        try { parts = CLONE.ggFragments(doc, sel.enzyme) || []; } catch (e) { parts = []; }
+        const sorted = parts.slice().sort((a, b) => b.size - a.size);
+        if (!sorted.length) return `<div class="hint" style="padding:6px">${esc(sel.enzyme || 'This enzyme')} leaves no part with two cut ends.</div>`;
+        return sorted.map((f, i) => fragRow({
+          i, on: (sel.fragment | 0) === i, size: f.size,
+          label: esc(sel.enzyme) + ' part', ends: `${endTxt(fromCloneEnd(f.left))} … ${endTxt(fromCloneEnd(f.right))}`
+        }, who)).join('');
+      }
+      if (sel.prep !== 'enzymes') {
+        const st = A.state, p = st && st.pieces && (who === 'v' ? st.pieces[0] : st.pieces[A.activeFrag + 1]);
+        return p ? `<div class="asmlistitem on"><div class="aflead"><b>${fmt(p.seq.length)} bp</b> <span class="note">${esc(p.label)}</span></div></div>`
+          : '<div class="hint" style="padding:6px">Choose how to prepare this piece.</div>';
+      }
+      const cuts = specOf(sel, doc, who === 'v' ? 'vector' : 'fragment').cuts;
+      if (!cuts.length) return '<div class="hint" style="padding:6px">Choose an enzyme to see the pieces it leaves.</div>';
+      const spans = ASSEMBLY.digestSpans(doc, cuts, !!sel.keepInner);
+      if (!spans.length) return '<div class="hint" style="padding:6px">These cuts leave no piece with two cut ends.</div>';
+      return spans.map(sp => fragRow({
+        i: sp.index, on: (sel.fragment | 0) === sp.index, size: sp.len,
+        label: esc(sp.label), ends: `${endTxt(sp.left)} … ${endTxt(sp.right)}`
+      }, who)).join('');
+    }
+    // CLONE writes ends as 'b' / '5' / '3' / 'o'
+    const fromCloneEnd = e => !e ? null : ({ type: e.type === 'b' ? 'blunt' : (e.type === 'o' ? 'open' : e.type), x: e.x || '' });
+
     function vectorPanel() {
       const v = A.vector, doc = docOf(v.docId);
-      const st = A.state;
-      const sites = st && st.pieces && st.pieces[0] ? [st.pieces[0].label] : [];
       return `<div class="asmside">
         <label class="asmlbl">${meth().joins === 'att' ? 'Destination vector:' : 'Vector:'}</label>
         <select id="asmVdoc">${docs().map(x => `<option value="${x.id}" ${String(x.id) === String(v.docId) ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
         ${prepRadios(v, 'v')}
         ${prepBody(v, 'v')}
-        <label class="asmlbl">Site of insertion:</label>
-        <div class="asmlist">${sites.length ? sites.map(sx => `<div class="asmlistitem on">${esc(sx)}</div>`).join('') : '<div class="hint" style="padding:6px">Choose how to linearize the vector.</div>'}</div>
+        <label class="asmlbl">Pieces of this digest:</label>
+        <div class="asmlist asmfrags">${fragmentList(v, 'v')}</div>
         <div class="asmrow"><span>Orientation of Vector:</span>
           <button class="asmarrow${v.orient === 1 ? ' on' : ''}" data-vori="1">\u2192</button>
           <button class="asmarrow${v.orient === -1 ? ' on' : ''}" data-vori="-1">\u2190</button></div>
@@ -399,6 +440,8 @@
         ${prepRadios(f, 'f')}
         ${prepBody(f, 'f')}
         ${f.prep === 'pcr' && feats.length ? `<select id="asmFfeat"><option value="">use a feature\u2026</option>${feats.map((x, k) => `<option value="${k}">${esc(x.name)} (${fmt(x.start + 1)}..${fmt(x.end)})</option>`).join('')}</select>` : ''}
+        <label class="asmlbl">Pieces of this digest:</label>
+        <div class="asmlist asmfrags">${fragmentList(f, 'f')}</div>
         <div class="asmrow"><span>Orientation of Fragment:</span>
           <button class="asmarrow${f.orient === 1 ? ' on' : ''}" data-fori="1">\u2192</button>
           <button class="asmarrow${f.orient === -1 ? ' on' : ''}" data-fori="-1">\u2190</button></div>
@@ -423,15 +466,20 @@
       const fsel = A.fragments[A.activeFrag];
       const fdoc = docOf(fsel.docId);
       let mapDoc = vdoc, region = null, selText = '';
+      /* Whatever the piece is — cut out with enzymes, amplified, or recombined — the
+       * stretch it covers is marked on the map, so the choice can be seen rather than
+       * read off a label. */
+      const pieceOf = i => (st.pieces && st.pieces[i]) || null;
       if (A.tab === 'vector') {
-        const c0 = (A.vector.cuts[0] || {});
-        if (A.vector.prep === 'enzymes' && st.pieces && st.pieces[0]) { region = { mark: st.pieces[0].to, label: c0.enzyme || '' }; selText = st.pieces[0].label + ' — ' + fmt(st.pieces[0].seq.length) + ' bp'; }
-        else if (A.vector.prep === 'pcr') { region = { start: A.vector.from, end: A.vector.to }; selText = `${fmt(A.vector.from + 1)} .. ${fmt(A.vector.to)}`; }
+        const p0 = pieceOf(0);
+        if (A.vector.prep === 'pcr') { region = { start: A.vector.from, end: A.vector.to }; selText = `${fmt(A.vector.from + 1)} .. ${fmt(A.vector.to)}`; }
+        else if (p0) { region = { start: p0.from, end: p0.to }; selText = p0.label + ' — ' + fmt(p0.seq.length) + ' bp'; }
         else selText = vdoc ? `${fmt(vdoc.seq.length)} bp, ${vdoc.circular ? 'circular' : 'linear'}` : '';
       } else if (A.tab === 'fragment') {
         mapDoc = fdoc;
+        const pf = pieceOf(A.activeFrag + 1);
         if (fsel.prep === 'pcr') { region = { start: fsel.from, end: fsel.to }; selText = `${fmt(fsel.from + 1)} .. ${fmt(fsel.to)} = ${fmt(DNA.rlen({ start: fsel.from, end: fsel.to }, fdoc ? fdoc.seq.length : 1))} bp`; }
-        else if (st.pieces && st.pieces[A.activeFrag + 1]) selText = st.pieces[A.activeFrag + 1].label;
+        else if (pf) { region = { start: pf.from, end: pf.to }; selText = pf.label + ' — ' + fmt(pf.seq.length) + ' bp'; }
       }
       const tabBtn = (k, l) => `<button class="asmtab${A.tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`;
       const methodSel = `<select id="asmMethod" class="asmmethod" title="Which cloning method this window runs">${Object.keys(ASM_METHODS).map(k => `<option value="${k}" ${k === A.method ? 'selected' : ''}>${esc(ASM_METHODS[k].label)}</option>`).join('')}</select>`;
@@ -533,7 +581,7 @@
         const chosen = (sel.cuts || []).filter(c => c && c.enzyme);
         if (shift) { if (!chosen.some(c => c.enzyme === nm)) chosen.push({ enzyme: nm, site: 0 }); }
         else { chosen.length = 0; chosen.push({ enzyme: nm, site: 0 }); }
-        sel.cuts = chosen;
+        sel.cuts = chosen; sel.fragment = 0;
         if (chosen.length < 2) sel.keepInner = false;
         render(); return;
       }
@@ -566,6 +614,25 @@
         if (t.id === 'asmFadd') { const last = A.fragments[A.fragments.length - 1]; A.fragments.push({ ...last, cuts: [{}, {}] }); A.activeFrag = A.fragments.length - 1; render(); return; }
         if (t.id === 'asmFdel') { if (A.fragments.length > 1) { A.fragments.splice(A.activeFrag, 1); A.activeFrag = Math.max(0, A.activeFrag - 1); render(); } return; }
         if (t.id === 'asmChoose') { chooseOverlapDialog(); return; }
+        /* A piece of the digest: clicking it uses it here, and the two small buttons
+         * send it to the other slot, so the same digest can supply both sides. */
+        const ua = t.closest('[data-useas]');
+        if (ua) {
+          const [role, who, idx] = ua.dataset.useas.split(':');
+          const from = who === 'v' ? A.vector : A.fragments[A.activeFrag];
+          const copy = { docId: from.docId, prep: from.prep, cuts: (from.cuts || []).map(c => ({ ...c })), keepInner: !!from.keepInner, enzyme: from.enzyme, from: from.from, to: from.to, orient: 1, fragment: +idx };
+          if (role === 'v') { A.vector = { ...A.vector, ...copy }; A.tab = 'vector'; }
+          else { A.fragments[A.activeFrag] = { ...A.fragments[A.activeFrag], ...copy }; A.tab = 'fragment'; }
+          A.pick = null;
+          render(); return;
+        }
+        const fr = t.closest('[data-frag]');
+        if (fr) {
+          const [who, idx] = fr.dataset.frag.split(':');
+          const sel = who === 'v' ? A.vector : A.fragments[A.activeFrag];
+          sel.fragment = +idx;
+          render(); return;
+        }
         const vd = t.closest('[data-vdel]'); if (vd) { A.vector.cuts = A.vector.cuts.filter((c, k) => k !== +vd.dataset.vdel); if (A.vector.cuts.length < 2) A.vector.keepInner = false; render(); return; }
         const fd2 = t.closest('[data-fdel]'); if (fd2) { const f = A.fragments[A.activeFrag]; f.cuts = f.cuts.filter((c, k) => k !== +fd2.dataset.fdel); if (f.cuts.length < 2) f.keepInner = false; render(); return; }
         const fs = t.closest('[data-fsel]'); if (fs) { A.activeFrag = +fs.dataset.fsel; render(); return; }
@@ -591,7 +658,7 @@
           if (!enzyme) chosen.splice(k, 1);
           else if (k < chosen.length) chosen[k] = { enzyme, site: 0 };
           else chosen.push({ enzyme, site: 0 });
-          sel.cuts = chosen;
+          sel.cuts = chosen; sel.fragment = 0;
           if (chosen.length < 2) sel.keepInner = false;
         };
         const ve = t.closest('[data-venz]'); if (ve) { setCut(A.vector, +ve.dataset.venz, t.value); render(); return; }
