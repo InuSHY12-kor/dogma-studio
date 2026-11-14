@@ -3334,7 +3334,7 @@ svg .lbl.p.hov { font-weight: 700; }
       <div class="etcnt">${cuts ? `cuts <b>${fmt(cuts)}</b> site${cuts === 1 ? '' : 's'} in ${esc(d.name)}${where}` : 'does not cut this sequence'}</div>
       <div class="etfoot">Double-click the name for the full entry</div>`;
   }
-  function showEnzHover(name, ev) {
+  function showEnzHover(name, ev, el) {
     const d = D();
     if (enzHoverName !== name) {
       clearEnzHover();
@@ -3345,15 +3345,18 @@ svg .lbl.p.hov { font-weight: 700; }
       t.innerHTML = enzTipHTML(name, d);
       t.hidden = false;
     }
-    placeEnzTip(ev);
+    placeEnzTip(ev, el);
   }
-  function placeEnzTip(ev) {
-    const t = $('#enztip'); if (!t || t.hidden || !ev) return;
+  /* The card hangs beside the name it describes, not under the pointer, so neither the
+   * cursor nor the card itself covers the cut it is explaining. */
+  function placeEnzTip(ev, el) {
+    const t = $('#enztip'); if (!t || t.hidden) return;
     const r = t.getBoundingClientRect();
-    // kept clear of the pointer, and inside the window
-    let x = ev.clientX + 18, y = ev.clientY + 20;
-    if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - 18;
-    if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 16;
+    const a = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    let x = a ? a.right + 14 : (ev ? ev.clientX + 18 : 20);
+    let y = a ? a.top - 6 : (ev ? ev.clientY + 20 : 20);
+    if (x + r.width > window.innerWidth - 8) x = (a ? a.left : (ev ? ev.clientX : 0)) - r.width - 14;
+    if (y + r.height > window.innerHeight - 8) y = window.innerHeight - r.height - 8;
     t.style.left = Math.max(6, x) + 'px';
     t.style.top = Math.max(6, y) + 'px';
   }
@@ -3400,7 +3403,7 @@ svg .lbl.p.hov { font-weight: 700; }
     if (!root) return;
     root.addEventListener('mousemove', e => {
       const el = e.target.closest && e.target.closest('[data-enz]');
-      if (el) showEnzHover(el.dataset.enz, e);
+      if (el) showEnzHover(el.dataset.enz, e, el);
       else if (enzHoverName) clearEnzHover();
     });
     root.addEventListener('mouseleave', clearEnzHover);

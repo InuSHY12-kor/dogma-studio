@@ -512,11 +512,14 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
   }
   function bindEnzHover(rootEl, doc, sites, onOpen) {
     if (!rootEl) return;
-    const place = (t, ev) => {
+    // beside the name, never under the pointer and never over the cut it describes
+    const place = (t, ev, el) => {
       const r = t.getBoundingClientRect();
-      let x = ev.clientX + 18, y = ev.clientY + 20;
-      if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - 18;
-      if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 16;
+      const a = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      let x = a ? a.right + 14 : ev.clientX + 18;
+      let y = a ? a.top - 6 : ev.clientY + 20;
+      if (x + r.width > window.innerWidth - 8) x = (a ? a.left : ev.clientX) - r.width - 14;
+      if (y + r.height > window.innerHeight - 8) y = window.innerHeight - r.height - 8;
       t.style.left = Math.max(6, x) + 'px'; t.style.top = Math.max(6, y) + 'px';
     };
     rootEl.addEventListener('mousemove', ev => {
@@ -537,7 +540,7 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
           <div class="etfoot">Double-click the name for the full entry</div>` : esc(nm);
         t.hidden = false;
       }
-      place(t, ev);
+      place(t, ev, el);
     });
     rootEl.addEventListener('mouseleave', clearEnzHover);
     rootEl.addEventListener('dblclick', ev => {
