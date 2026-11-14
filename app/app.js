@@ -4232,8 +4232,7 @@ svg .prim { cursor: pointer; }
         const frac = use ? (use.frac[c] || 0) : null;
         const three = aa === '*' ? 'Stop' : (DNA.AA3[aa] || 'Xaa');
         return `<td class="${changed.has(c) ? 'chg' : ''}${aa === '*' ? ' stopc' : ''}"${w != null ? ` title="${esc(c)} · ${esc(three)} (${esc(aa)}) · ${(frac * 100).toFixed(1)} % of this amino acid's codons"` : ` title="${esc(c)}"`}>
-          <div class="cdn"><span class="mono">${esc(c)}</span> <span class="aa3">${esc(three)}</span> <span class="aa1">(${esc(aa === '*' ? '*' : aa)})</span></div>
-          ${w != null ? `<div class="wbar"><i style="width:${(w * 100).toFixed(0)}%"></i><b>${w.toFixed(2)}</b></div>` : ''}
+          <div class="cdn"><span class="mono">${esc(c)}</span> <span class="aa3">${esc(three)}</span> <span class="aa1">(${esc(aa === '*' ? '*' : aa)})</span>${w != null ? `<span class="wnum">${w.toFixed(2)}</span>` : ''}</div>
         </td>`;
       };
       let html = `<table class="grid codetbl"><thead><tr>

@@ -432,9 +432,7 @@ body.asmwindow { background: var(--chrome); overflow: hidden; }
 .codetbl .cdn .mono { font-weight: 600; letter-spacing: .5px; }
 .codetbl .cdn .aa3 { width: 30px; display: inline-block; }
 .codetbl .cdn .aa1 { color: var(--faint); }
-.codetbl .wbar { position: relative; height: 10px; margin-top: 1px; background: #eef1f4; border-radius: 2px; overflow: hidden; }
-.codetbl .wbar i { position: absolute; left: 0; top: 0; bottom: 0; background: #b7d0f0; }
-.codetbl .wbar b { position: absolute; right: 3px; top: -1px; font-size: 9.5px; font-weight: 500; color: var(--muted); }
+.codetbl .cdn .wnum { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .hist-item .hlbl { cursor: pointer; }
 .hist-item .hlbl:hover { color: var(--accent); text-decoration: underline; }
