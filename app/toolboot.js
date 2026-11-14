@@ -45,6 +45,7 @@
       sites: doc ? DNA.findSites(doc.seq, doc.circular) : null,
       myFeatures: p.myFeatures || [],
       favourites: p.favourites || [],
+      payload: p,
       saveFavourites: list => send({ kind: 'favourites', list })
     };
     document.title = ({ featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' })[state.kind] || 'GeneCanvas';

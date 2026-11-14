@@ -180,7 +180,7 @@
         TOOLUI.includeEnz(st, sites, lane.mode === 'cut' ? lane.enzymes : []);
         const primers = (doc.primers || []).map(p => {
           const b = bindOf(doc, p);
-          return b ? { ...p, start: b.start, end: b.end, strand: b.strand, color: lane.primers.includes(p.id) ? '#c0392b' : '#2f6fd0' } : null;
+          return b ? { ...p, start: b.start, end: b.end, strand: b.strand, color: lane.primers.includes(p.id) ? '#c0392b' : '#7b3fb0' } : null;
         }).filter(Boolean);
         return TOOLUI.mapPane({
           doc, state: st, sites, primers,
@@ -233,7 +233,7 @@
     function bindSide() {
       const lane = state.lanes[state.active - 1], doc = docOf(lane);
       if (!doc || state.tab !== 'map') return;
-      TOOLUI.bindMapPane(hostEl, doc, viewState(doc), () => refresh(), sitesOf(doc));
+      TOOLUI.bindMapPane(hostEl, doc, viewState(doc), () => refresh(), sitesOf(doc), nm => ctx.send({ kind: 'openEnzyme', name: nm }));
     }
     function refresh() {
       hostEl.querySelector('#simGel').innerHTML = gelSVG();

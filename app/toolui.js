@@ -8,6 +8,7 @@
 (function (root) {
   'use strict';
   const DNA = root.DNA;
+  const PRIMER_COL = '#7b3fb0';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const fmt = n => Number(n).toLocaleString('en-US');
 
@@ -18,6 +19,7 @@
   function interactiveMap(opts) {
     const { seq, circular, features = [], sites = {}, sel, W = 560, H = 150, name = '', primers = [], orfs = [] } = opts;
     const showRuler = opts.showRuler !== false, showLoc = opts.showLocations !== false;
+    const allSites = opts.allSites || sites;      // for "cuts this molecule once"
     const n = seq.length;
     if (!n) return '<div class="hint">No sequence.</div>';
     const m = 26, w = W - 2 * m, baseY = Math.round(H * 0.56);
@@ -35,6 +37,21 @@
     if (sel && sel.end > sel.start) {
       g.push(`<rect class="selarea" x="${X(sel.start).toFixed(1)}" y="${baseY - 26}" width="${Math.max(1, X(sel.end) - X(sel.start)).toFixed(1)}" height="52"/>`);
     }
+    /* Primers ride the backbone in purple: forward just outside the two lines, reverse
+     * just inside, so they are never read as an enzyme or a feature. */
+    const pLane = list => {
+      const rows = [];
+      for (const p of list) {
+        const lo = Math.min(X(p.start), X(p.end)) - p.name.length * 3.2;
+        const hi = Math.max(X(p.start), X(p.end)) + p.name.length * 3.2;
+        let k = 0; while (rows[k] !== undefined && rows[k] > lo - 4) k++;
+        rows[k] = hi; p._row = k;
+      }
+      return rows.length;
+    };
+    const pFwd = primers.filter(p => p.strand !== -1), pRev = primers.filter(p => p.strand === -1);
+    const nPF = pLane(pFwd), nPR = pLane(pRev);
+    const PH = 20, fwdBand = nPF * PH, revBand = nPR * PH;
     // features, in lanes
     const lanes = [];
     const place = f => {
@@ -45,7 +62,7 @@
     };
     for (const f of features) {
       const lane = place(f);
-      const x1 = X(f.start), x2 = X(f.end), y = baseY - 12 - lane * 18;
+      const x1 = X(f.start), x2 = X(f.end), y = baseY - 12 - fwdBand - lane * 18;
       const hd = f.strand ? Math.min(8, (x2 - x1) * 0.4) : 0;
       const pts = f.strand === -1
         ? `${x1},${y + 6} ${x1 + hd},${y} ${x2},${y} ${x2},${y + 12} ${x1 + hd},${y + 12}`
@@ -59,25 +76,26 @@
       let k = 0;
       while (orfLanes[k] && orfLanes[k].some(q => o.start < q.end && q.start < o.end)) k++;
       (orfLanes[k] = orfLanes[k] || []).push(o);
-      const x1 = X(o.start), x2 = X(o.end), y = baseY + 10 + k * 11;
+      const x1 = X(o.start), x2 = X(o.end), y = baseY + 10 + revBand + k * 11;
       const hd = Math.min(7, (x2 - x1) * 0.4);
       const pts = o.strand === -1
         ? `${x1},${y + 4} ${x1 + hd},${y} ${x2},${y} ${x2},${y + 8} ${x1 + hd},${y + 8}`
         : `${x1},${y} ${x2 - hd},${y} ${x2},${y + 4} ${x2 - hd},${y + 8} ${x1},${y + 8}`;
       g.push(`<polygon class="orfp" points="${pts}" fill="none" stroke="#8d95a3" stroke-width="1"><title>ORF ${fmt(o.start + 1)}..${fmt(o.end)} ${o.strand === -1 ? '\u2190' : '\u2192'}${o.aa ? ', ' + fmt(o.aa) + ' aa' : ''}</title></polygon>`);
     });
-    // primers under the line
     const orfRows = orfLanes.length;
-    primers.forEach((p, i) => {
-      const x1 = X(p.start), x2 = X(p.end), y = baseY + 26 + orfRows * 11 + (i % 2) * 12;
-      const lo = Math.min(x1, x2), hi = Math.max(x1, x2), rev = p.strand === -1 || x2 < x1;
+    const primBar = (p, y, above) => {
+      const lo = Math.min(X(p.start), X(p.end)), hi = Math.max(X(p.start), X(p.end));
+      const rev = p.strand === -1;
       const hd = Math.min(7, Math.max(3, (hi - lo) * 0.5));
       const pts = rev
         ? `${hi},${y - 3} ${lo + hd},${y - 3} ${lo},${y} ${lo + hd},${y + 3} ${hi},${y + 3}`
         : `${lo},${y - 3} ${hi - hd},${y - 3} ${hi},${y} ${hi - hd},${y + 3} ${lo},${y + 3}`;
-      g.push(`<polygon class="prim" points="${pts}" fill="${p.color || '#2f6fd0'}" data-pick="p:${p.id}" data-a="${p.start}" data-b="${p.end}"><title>${esc(p.name)} ${fmt(Math.min(p.start, p.end) + 1)}..${fmt(Math.max(p.start, p.end))}</title></polygon>`);
-      g.push(`<text class="lbl p" x="${((x1 + x2) / 2).toFixed(1)}" y="${y + 11}" text-anchor="middle" data-pick="p:${p.id}">${esc(p.name)}</text>`);
-    });
+      g.push(`<polygon class="prim" points="${pts}" fill="${p.color || PRIMER_COL}" data-pick="p:${p.id}" data-a="${p.start}" data-b="${p.end}"><title>${esc(p.name)} ${fmt(Math.min(p.start, p.end) + 1)}..${fmt(Math.max(p.start, p.end))} (${rev ? 'reverse' : 'forward'})</title></polygon>`);
+      g.push(`<text class="lbl p" x="${((lo + hi) / 2).toFixed(1)}" y="${(above ? y - 6 : y + 12).toFixed(1)}" text-anchor="middle" data-pick="p:${p.id}">${esc(p.name)}</text>`);
+    };
+    for (const p of pFwd) primBar(p, baseY - 9 - (nPF - 1 - p._row) * PH, true);
+    for (const p of pRev) primBar(p, baseY + 9 + p._row * PH, false);
     // enzyme sites above everything, with their names stacked
     const cuts = [];
     for (const [nm, list] of Object.entries(sites)) for (const s of list) if (s.cut != null) cuts.push({ nm, pos: s.cut, start: s.pos, len: s.len });
@@ -98,16 +116,19 @@
     const leads = [], names = [];
     for (const c of cuts) {
       const x = X(c.pos), y = cutsTop - (rows - 1 - c.row) * 13;
-      leads.push(`<line class="ecut" x1="${x.toFixed(1)}" y1="${baseY - 7}" x2="${x.toFixed(1)}" y2="${baseY + 7}"/>`);
-      leads.push(`<line class="lead" x1="${x.toFixed(1)}" y1="${(y + 3).toFixed(1)}" x2="${x.toFixed(1)}" y2="${baseY - 7}"/>`);
+      const tag = ` data-enz="${esc(c.nm)}"`;
+      leads.push(`<line class="ecut"${tag} x1="${x.toFixed(1)}" y1="${baseY - 7}" x2="${x.toFixed(1)}" y2="${baseY + 7}"/>`);
+      leads.push(`<line class="lead"${tag} x1="${x.toFixed(1)}" y1="${(y + 3).toFixed(1)}" x2="${x.toFixed(1)}" y2="${baseY - 7}"/>`);
       // a name that would run off the right edge is hung from the cut instead
       const wd = labelOf(c).length * 6.2 + 8;
       const endAnchor = x + wd > W - 2;
-      names.push(`<text class="lbl e" x="${(endAnchor ? x - 2 : x + 2).toFixed(1)}" y="${y.toFixed(1)}"${endAnchor ? ' text-anchor="end"' : ''} data-pick="e:${c.nm}:${c.pos}" data-a="${c.start}" data-b="${(c.start + c.len) % n || n}">${esc(labelOf(c))}</text>`);
+      const rec = DNA.ENZ_BY_NAME[c.nm] || {};
+      const cls = 'lbl e' + ((allSites[c.nm] || []).length === 1 ? ' u' : '') + (rec.overhang === 0 ? ' bl' : '');
+      names.push(`<text class="${cls}" x="${(endAnchor ? x - 2 : x + 2).toFixed(1)}" y="${y.toFixed(1)}"${endAnchor ? ' text-anchor="end"' : ''} data-pick="e:${c.nm}:${c.pos}" data-a="${c.start}" data-b="${(c.start + c.len) % n || n}"${tag}>${esc(labelOf(c))}</text>`);
     }
     // leader lines first, so a name is never crossed by one
     g.push(leads.join(''), names.join(''));
-    const hh = Math.max(H, baseY + 50 + orfRows * 11 + (primers.length ? 14 : 0)) + dy;
+    const hh = Math.max(H, baseY + 50 + revBand + orfRows * 11) + dy;
     return `<svg class="imap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${hh}" width="100%" height="${hh}" font-family="Segoe UI, Arial, sans-serif">
       <rect width="${W}" height="${hh}" fill="var(--canvas)"/><g transform="translate(0,${dy})">${g.join('')}</g>
       ${name ? `<text class="ctr1" x="${m}" y="14" style="font-size:12px;pointer-events:none">${esc(name)}</text>` : ''}</svg>`;
@@ -117,6 +138,24 @@
     const r = x / p;
     return (r > 5 ? 10 : r > 2 ? 5 : r > 1 ? 2 : 1) * p;
   }
+
+  /* The site with the two cut positions marked. `top` and `bot` are offsets from the
+   * left end of the recognition sequence on the top strand, so both triangles are
+   * placed from the same origin and the overhang can be read straight off. A Type IIS
+   * enzyme cuts outside its site, which the line under the diagram says. */
+  const cutDiagram = e => {
+    const site = e.site, comp = DNA.comp(site);
+    const PRE = 7;                                     // "5'  ..." before the bases
+    const spaced = s2 => s2.split('').join(' ');
+    const tri = (at, ch) => (at < 0 || at > site.length)
+      ? ''
+      : ' '.repeat(Math.max(0, PRE + at * 2 - 1)) + ch;
+    const outside = e.top > site.length || e.bot > site.length;
+    return `<pre class="enzcut">${esc(tri(e.top, '\u25bc'))}
+5'  ...${esc(spaced(site))}...  3'
+3'  ...${esc(spaced(comp))}...  5'
+${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside the recognition sequence: ${e.top} nt along the top strand and ${e.bot} nt along the bottom.</div>` : ''}`;
+  };
 
   // ---------------------------------------------------------------- common features
   /* The feature browser: the list on the left, what the feature is on the top right,
@@ -252,28 +291,11 @@
     }));
   }
   function enzymeBrowser(host, ctx) {
-    let q = '', pick = 'BamHI', sup = 'neb';
+    let q = '', pick = (ctx && ctx.payload && ctx.payload.enzyme) || 'BamHI', sup = 'neb';
     const list = () => {
       let L = DNA.ENZYMES.slice();
       if (q) { const u = q.toUpperCase(); L = L.filter(e => e.name.toUpperCase().includes(u) || e.site.includes(u)); }
       return L.sort((a, b) => a.name.localeCompare(b.name));
-    };
-    /* The site with the two cut positions marked. `top` and `bot` are offsets from the
-     * left end of the recognition sequence on the top strand, so both triangles are
-     * placed from the same origin and the overhang can be read straight off. A Type IIS
-     * enzyme cuts outside its site, which the line under the diagram says. */
-    const cutDiagram = e => {
-      const site = e.site, comp = DNA.comp(site);
-      const PRE = 7;                                     // "5'  ..." before the bases
-      const spaced = s2 => s2.split('').join(' ');
-      const tri = (at, ch) => (at < 0 || at > site.length)
-        ? ''
-        : ' '.repeat(Math.max(0, PRE + at * 2 - 1)) + ch;
-      const outside = e.top > site.length || e.bot > site.length;
-      return `<pre class="enzcut">${esc(tri(e.top, '\u25bc'))}
-5'  ...${esc(spaced(site))}...  3'
-3'  ...${esc(spaced(comp))}...  5'
-${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside the recognition sequence: ${e.top} nt along the top strand and ${e.bot} nt along the bottom.</div>` : ''}`;
     };
     const render = () => {
       const L = list();
@@ -339,6 +361,61 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
     if (!e.overhang) return '';
     const a = Math.min(e.top, e.bot), b = Math.max(e.top, e.bot);
     return e.site.slice(Math.max(0, a), Math.min(e.site.length, b));
+  }
+
+  /* ---------------------------------------------------------------- enzyme hover
+   * The same behaviour the main window's map has: hovering an enzyme lights up every
+   * copy of it, a card says what it recognises and how often it cuts, and a double
+   * click asks the host to open the enzyme's entry. */
+  let hoverName = null;
+  function enzTip() {
+    let t = document.getElementById('enztip');
+    if (!t) { t = document.createElement('div'); t.id = 'enztip'; t.className = 'enztip'; document.body.appendChild(t); }
+    return t;
+  }
+  function clearEnzHover() {
+    if (hoverName === null) return;
+    hoverName = null;
+    document.querySelectorAll('[data-enz].hov').forEach(el => el.classList.remove('hov'));
+    const t = document.getElementById('enztip'); if (t) { t.hidden = true; t.innerHTML = ''; }
+  }
+  function bindEnzHover(rootEl, doc, sites, onOpen) {
+    if (!rootEl) return;
+    const place = (t, ev) => {
+      const r = t.getBoundingClientRect();
+      let x = ev.clientX + 18, y = ev.clientY + 20;
+      if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - 18;
+      if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 16;
+      t.style.left = Math.max(6, x) + 'px'; t.style.top = Math.max(6, y) + 'px';
+    };
+    rootEl.addEventListener('mousemove', ev => {
+      const el = ev.target.closest && ev.target.closest('[data-enz]');
+      if (!el) { clearEnzHover(); return; }
+      const nm = el.dataset.enz;
+      const t = enzTip();
+      if (hoverName !== nm) {
+        clearEnzHover();
+        hoverName = nm;
+        rootEl.querySelectorAll(`[data-enz="${CSS.escape(nm)}"]`).forEach(x => x.classList.add('hov'));
+        const e = DNA.ENZ_BY_NAME[nm];
+        const list = (sites && sites[nm]) || [];
+        const oh = e ? (e.overhang > 0 ? `${e.overhang} nt 5′ overhang` : (e.overhang < 0 ? `${-e.overhang} nt 3′ overhang` : 'blunt')) : '';
+        t.innerHTML = e ? `<div class="ethd"><b>${esc(nm)}</b><span class="${e.overhang === 0 ? 'bl' : ''}">${esc(e.site)} · ${esc(oh)}</span></div>
+          ${cutDiagram(e)}
+          <div class="etcnt">${list.length ? `cuts <b>${fmt(list.length)}</b> site${list.length === 1 ? '' : 's'}${doc && doc.name ? ' in ' + esc(doc.name) : ''}${list.length <= 6 ? ' · ' + list.map(x => fmt(x.cut)).join(', ') : ''}` : 'does not cut this sequence'}</div>
+          <div class="etfoot">Double-click the name for the full entry</div>` : esc(nm);
+        t.hidden = false;
+      }
+      place(t, ev);
+    });
+    rootEl.addEventListener('mouseleave', clearEnzHover);
+    rootEl.addEventListener('dblclick', ev => {
+      const el = ev.target.closest && ev.target.closest('[data-enz]');
+      if (!el || !onOpen) return;
+      ev.preventDefault(); ev.stopPropagation();
+      clearEnzHover();
+      onOpen(el.dataset.enz);
+    });
   }
 
   // ---------------------------------------------------------------- the side strip
@@ -503,7 +580,9 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
 
   /* Wires the strip inside `root`. `redraw` is called whenever the state changes, and is
    * expected to put a fresh mapPane back on the page. */
-  function bindMapPane(rootEl, doc, st, redraw, sites) {
+  function bindMapPane(rootEl, doc, st, redraw, sites, onOpenEnz) {
+    const box = rootEl.querySelector('.imapbox');
+    if (box) bindEnzHover(box, doc, sites || (doc && doc.seq ? DNA.findSites(doc.seq, doc.circular) : {}), onOpenEnz);
     const strip = rootEl.querySelector('.tmapside');
     if (!strip) return;
     const all = () => sites || DNA.findSites(doc.seq, doc.circular);
@@ -616,5 +695,5 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
     }
   }
 
-  root.TOOLUI = { interactiveMap, mapPane, bindMapPane, mapState, includeEnz, shownSites, shownPrimers, shownFeatures, featureBrowser, enzymeBrowser, SUPPLIERS, bufferActivity, overhangSeq, niceStep };
+  root.TOOLUI = { interactiveMap, cutDiagram, bindEnzHover, clearEnzHover, mapPane, bindMapPane, mapState, includeEnz, shownSites, shownPrimers, shownFeatures, featureBrowser, enzymeBrowser, SUPPLIERS, bufferActivity, overhangSeq, niceStep };
 })(window);

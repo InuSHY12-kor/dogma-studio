@@ -142,7 +142,7 @@
       TOOLUI().includeEnz(st, sites, chosen.concat(sel.prep === 'typeIIs' ? [sel.enzyme] : []));
       const primers = (doc.primers || []).map(p => {
         const h = DNA.searchDNA(doc.seq, doc.circular, p.seq)[0];
-        return h ? { ...p, start: h.start, end: h.end, strand: h.strand, color: (A.pick && A.pick.primers || []).includes(p.id) ? '#c0392b' : '#2f6fd0' } : null;
+        return h ? { ...p, start: h.start, end: h.end, strand: h.strand, color: (A.pick && A.pick.primers || []).includes(p.id) ? '#c0392b' : '#7b3fb0' } : null;
       }).filter(Boolean);
       return TOOLUI().mapPane({
         doc, state: st, sites, primers,
@@ -475,7 +475,7 @@
       box.querySelector('.asmbody').innerHTML = body;
       bind();
       const mdoc = mapDocOf();
-      if (mdoc) TOOLUI().bindMapPane(box, mdoc, viewState(mapStateKey()), () => render());
+      if (mdoc) TOOLUI().bindMapPane(box, mdoc, viewState(mapStateKey()), () => render(), null, nm => ctx.send({ kind: 'openEnzyme', name: nm }));
     }
     /* Escape closes the window wherever the focus happens to be, but not while a dialog
      * of its own is on top of it. */

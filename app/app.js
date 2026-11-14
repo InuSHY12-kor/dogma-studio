@@ -37,6 +37,13 @@ svg .gcmid { stroke: #9aa2ae; stroke-width: 1px; stroke-dasharray: 4 3; }
 svg .gcax { font-size: 9px; fill: #8d95a3; }
 svg .cleave { stroke: #11306e; stroke-width: 1.6px; }
 svg .lbl.e.hl { fill: #6b4b00; font-weight: 700; paint-order: stroke; stroke: #ffd24d; stroke-width: 7px; stroke-linejoin: round; }
+svg .lbl.e.bl { fill: #157a3c; }
+svg .lbl.e.u { font-weight: 700; }
+svg .lbl.e.hov { fill: var(--accent); font-weight: 700; }
+svg .lbl.e.bl.hov { fill: #0f6b33; }
+svg .ecut.hov { stroke: var(--accent); stroke-width: 2.2; }
+svg .lead.hov { stroke: var(--accent); stroke-width: 1.6; }
+svg .ehit { fill: rgba(37, 99, 201, .16); stroke: var(--accent); stroke-width: .8; pointer-events: none; }
 svg .lbl.f { font-weight: 600; }
 svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
 svg .lead { fill: none; stroke: #9aa2af; stroke-width: .8; }
@@ -46,7 +53,9 @@ svg .ctr2 { font: 13px var(--f-ui); fill: var(--muted); }
 svg .selarea { fill: var(--sel); stroke: var(--selline); stroke-width: .8; pointer-events: none; }
 svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
 svg .orf { stroke: none; cursor: pointer; }
-svg .prim { cursor: pointer; }
+svg .prim { cursor: pointer; stroke: rgba(80, 30, 120, .5); stroke-width: .6; }
+svg .lbl.p { fill: var(--primer); font-size: 10.5px; }
+svg .lbl.p.hov { font-weight: 700; }
 `;
   /* The standard feature types, as the INSDC defines them for the nucleotide
    * databases, plus the ones GenBank's protein records use. `scope` says where a type
@@ -299,6 +308,13 @@ svg .prim { cursor: pointer; }
     }
     return out;
   }
+  /* How an enzyme name is drawn: bold when it cuts the molecule just once, green when
+   * it leaves blunt ends, highlighted when the user has picked it out. */
+  function enzCls(e, d) {
+    const rec = DNA.ENZ_BY_NAME[e.name] || {};
+    return 'e' + (e.unique ? ' u' : '') + (rec.overhang === 0 ? ' bl' : '')
+      + ((d ? enzHi(d) : []).includes(e.name) ? ' hl' : '');
+  }
   const enzHidden = d => (d.enzHidden = d.enzHidden || []);
   const enzHi = d => (d.enzHi = d.enzHi || []);
   function shownEnz(d, A) {
@@ -306,6 +322,8 @@ svg .prim { cursor: pointer; }
     const hid = enzHidden(d);
     return chosenEnz(d, A).filter(e => !hid.includes(e.name));
   }
+  // Primers are drawn in purple so they are never taken for an enzyme or a feature.
+  const PRIMER_COL = '#7b3fb0', PRIMER_SOFT = '#b48ad6';
   function collectItems(d, A) {
     const items = [], o = d.opts;
     if (o.showFeat) for (const f of d.features) {
@@ -314,7 +332,7 @@ svg .prim { cursor: pointer; }
     }
     if (o.showPrimers) for (const p of d.primers) {
       if (p.hidden) continue;
-      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? '#2f6fd0' : '#7d9fd6'), type: 'primer' }));
+      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? PRIMER_COL : PRIMER_SOFT), type: 'primer' }));
     }
     if (o.showORFs && o.transMode === 'orfs') A.orfs.forEach((r, i) => items.push({
       kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand,
@@ -2908,7 +2926,7 @@ svg .prim { cursor: pointer; }
     const n = d.seq.length, o = d.opts;
     const items = collectItems(d, A);
     const feats = items.filter(i => i.kind === 'f'), prims = items.filter(i => i.kind === 'p'), orfs = items.filter(i => i.kind === 'o');
-    let nF = assignLanes(feats, n), nP = assignLanes(prims, n), nO = assignLanes(orfs, n);
+    let nF = assignLanes(feats, n), nO = assignLanes(orfs, n);
     if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
     const enz = shownEnz(d, A);
     // label count estimation decides how much room labels need
@@ -2917,18 +2935,26 @@ svg .prim { cursor: pointer; }
     H = Math.max(H, Math.min(needH, 2400));
     const cx = W / 2, cy = H / 2;
     const laneW = 14, laneGap = 5;
-    const pBand = nP ? nP * 9 + 8 : 0;
+    /* Primers sit on the backbone itself: the forward ones just outside the two lines,
+     * the reverse ones just inside, which is how the reference tool draws them. */
+    const pFwd = prims.filter(p => p.strand !== -1), pRev = prims.filter(p => p.strand === -1);
+    assignLanes(pFwd, n); assignLanes(pRev, n);
+    const nPF = pFwd.reduce((m2, p) => Math.max(m2, p.lane + 1), 0);
+    const nPR = pRev.reduce((m2, p) => Math.max(m2, p.lane + 1), 0);
+    const pBand = nPF ? nPF * 9 + 8 : 0;
+    const inBand = nPR ? nPR * 9 + 6 : 0;
     const R = Math.max(70, Math.min(W / 2 - 175, H / 2 - 60) - pBand);
     const rot = (o.mapRotate || 0) / 360 * TAU;
     const ang = bp => bp / n * TAU - Math.PI / 2 + rot;
     const P = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
     const fmtP = p => p[0].toFixed(1) + ',' + p[1].toFixed(1);
-    const fR = k => R - k * (laneW + laneGap);
+    const fR = k => R - inBand - k * (laneW + laneGap);
     const innerF = fR(Math.max(nF, 1) - 1) - laneW / 2;
     const oR = k => innerF - 7 - k * 8;
     const innerAll = nO ? oR(nO - 1) - 4 : innerF - 2;
-    const pR = k => R + laneW / 2 + 7 + k * 9;
-    const outer = nP ? pR(nP - 1) + 4 : R + laneW / 2 + 2;
+    const pR = k => R + 8 + k * 9;          // forward: outside the backbone
+    const pRin = k => R - 8 - k * 9;        // reverse: inside it
+    const outer = nPF ? pR(nPF - 1) + 4 : R + laneW / 2 + 2;
     const Rl = outer + 30;
     const g = [];
     let defs = '';
@@ -3025,16 +3051,18 @@ svg .prim { cursor: pointer; }
       g.push(`<path class="orf" d="${ar.path}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${it.strand > 0 ? 'forward' : 'reverse'})</title></path>`);
     }
     for (const it of prims) {
-      const ar = arrow(it, pR(it.lane), 5, 7);
-      g.push(`<path class="prim" d="${ar.path}" fill="${it.color}" data-k="${it.key}"><title>Primer ${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)}</title></path>`);
-      labels.push({ a: ar.a1 + ar.span / 2, text: it.name, cls: 'p', k: it.key, r0: pR(it.lane) + 3 });
+      const rev = it.strand === -1;
+      const r = rev ? pRin(it.lane) : pR(it.lane);
+      const ar = arrow(it, r, 5, 7);
+      g.push(`<path class="prim" d="${ar.path}" fill="${it.color}" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${rev ? 'reverse' : 'forward'})</title></path>`);
+      labels.push({ a: ar.a1 + ar.span / 2, text: it.name, cls: 'p', k: it.key, r0: rev ? R + laneW / 2 + 2 : r + 3, prim: it.ref.id });
     }
     // enzyme cut marks
     for (const e of enz) e.sites.forEach((s, i) => {
       if (s.cut == null) return;
       const a = ang(s.cut);
-      g.push(`<line class="ecut" x1="${fmtP(P(R - 7, a)).replace(',', '" y1="')}" x2="${fmtP(P(R + 7, a)).replace(',', '" y2="')}"/>`);
-      labels.push({ a, text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, cls: 'e' + (e.unique ? ' u' : '') + (enzHi(d).includes(e.name) ? ' hl' : ''), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer) });
+      g.push(`<line class="ecut" data-enz="${esc(e.name)}" x1="${fmtP(P(R - 7, a)).replace(',', '" y1="')}" x2="${fmtP(P(R + 7, a)).replace(',', '" y2="')}"/>`);
+      labels.push({ a, text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, cls: enzCls(e, d), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer), enz: e.name });
     });
     // label layout
     const sp = 14;
@@ -3057,8 +3085,9 @@ svg .prim { cursor: pointer; }
       dx = Math.max(dx, 28) + 6;
       const tx = l.side === 0 ? cx + dx : cx - dx;
       const e1 = P(l.r0 + 1, l.a), e2 = P(Rl - 10, l.a);
-      leads.push(`<polyline class="lead" points="${fmtP(e1)} ${fmtP(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
-      texts.push(`<text class="lbl ${l.cls}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}">${esc(l.text)}</text>`);
+      const tag = l.enz ? ` data-enz="${esc(l.enz)}"` : (l.prim ? ` data-prim="${l.prim}"` : '');
+      leads.push(`<polyline class="lead"${tag} points="${fmtP(e1)} ${fmtP(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
+      texts.push(`<text class="lbl ${l.cls}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
     }
     // every leader line first, then every label, so no line is drawn across a name
     g.push(leads.join(''), texts.join(''));
@@ -3102,7 +3131,11 @@ svg .prim { cursor: pointer; }
       return lanes.length;
     };
     const o = d.opts;
-    let nF = pxLanes(feats, true), nP = pxLanes(prims, true), nO = pxLanes(orfs, false);
+    const pFwd = prims.filter(p => p.strand !== -1), pRev = prims.filter(p => p.strand === -1);
+    let nF = pxLanes(feats, true), nO = pxLanes(orfs, false);
+    const nPF = pxLanes(pFwd, true), nPR = pxLanes(pRev, true);
+    const PH = 16;                       // one primer row: the bar and its name
+    const fwdBand = nPF * PH, revBand = nPR * PH;
     if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
     const enz = shownEnz(d, A);
     // enzyme label rows
@@ -3110,7 +3143,7 @@ svg .prim { cursor: pointer; }
     for (const e of enz) e.sites.forEach((s, i) => {
       if (s.cut == null) return;
       if (fo && !DNA.overlaps({ start: s.pos, end: (s.pos + s.len) % n || n }, fo, n)) return;
-      elabels.push({ x: X(s.cut), text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) });
+      elabels.push({ x: X(s.cut), text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, k: `e:${e.name}:${i}`, cls: enzCls(e, d), enz: e.name });
     });
     elabels.sort((a, b) => a.x - b.x);
     const rowEnd = [];
@@ -3121,14 +3154,15 @@ svg .prim { cursor: pointer; }
     }
     const nRows = rowEnd.length;
     const top = 26;
-    const baseY = top + nRows * 14 + 22;
+    const baseY = top + nRows * 14 + 22 + fwdBand;
     const g = [];
     const elabelTexts = [];
     for (const l of elabels) {
       const y = top + (nRows - 1 - l.row) * 14;
-      g.push(`<line class="lead" x1="${l.x.toFixed(1)}" y1="${baseY - 7}" x2="${l.x.toFixed(1)}" y2="${y + 4}"/>`);
-      elabelTexts.push(`<text class="lbl e${l.u ? ' u' : ''}${l.hl ? ' hl' : ''}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}">${esc(l.text)}</text>`);
-      g.push(`<line class="ecut" x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
+      const tag = ` data-enz="${esc(l.enz)}"`;
+      g.push(`<line class="lead"${tag} x1="${l.x.toFixed(1)}" y1="${baseY - 7}" x2="${l.x.toFixed(1)}" y2="${y + 4}"/>`);
+      elabelTexts.push(`<text class="lbl ${l.cls}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
+      g.push(`<line class="ecut"${tag} x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
     }
     // the names go on top of every tick and leader line
     g.push(elabelTexts.join(''));
@@ -3159,13 +3193,29 @@ svg .prim { cursor: pointer; }
         <title>GC content, ${gd.win} base window · midpoint ${mid.toFixed(1)}%</title></g>`);
     }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
+    /* Primers ride the backbone: forward above the two lines, reverse below, in purple
+     * so they are never read as an enzyme or a feature. */
+    const primBar = (it, yy, above) => {
+      for (const [a, b] of DNA.segs(it, n)) {
+        const x1 = X(a), x2 = X(b), hd = Math.min(8, (x2 - x1) * 0.5);
+        const y1 = yy, y2 = yy + 5, ym = yy + 2.5;
+        const pts = it.strand === -1
+          ? `${x1},${ym} ${x1 + hd},${y1} ${x2},${y1} ${x2},${y2} ${x1 + hd},${y2}`
+          : `${x1},${y1} ${x2 - hd},${y1} ${x2},${ym} ${x2 - hd},${y2} ${x1},${y2}`;
+        g.push(`<polygon class="prim" points="${pts}" fill="${it.color}" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${it.strand === -1 ? 'reverse' : 'forward'})</title></polygon>`);
+        g.push(`<text class="lbl p" x="${((x1 + x2) / 2).toFixed(1)}" y="${(above ? y1 - 3 : y2 + 9).toFixed(1)}" text-anchor="middle" data-k="${it.key}" data-prim="${it.ref.id}">${esc(it.name)}</text>`);
+      }
+    };
+    for (const it of pFwd) primBar(it, baseY - 9 - (nPF - 1 - it.lane) * PH, true);
+    for (const it of pRev) primBar(it, baseY + 5 + it.lane * PH, false);
+    const rulerY = baseY + 4 + revBand;
     const step = niceStep(vLen / Math.max(4, Math.floor(w / 90)));
     for (let k = 0; o.showRuler && k <= vLen; k += step) {
       const t = fo ? ((v0 + k) % n) + 1 : k;
       const x = X(fo ? v0 + k : k);
-      g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${baseY + 4}" x2="${x.toFixed(1)}" y2="${baseY + 9}"/><text class="tickl" x="${x.toFixed(1)}" y="${baseY + 20}" text-anchor="middle">${d.numFrom ? fmt((t || 1) - 1 + d.numFrom) : fmt(t || 1)}</text>`);
+      g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${rulerY}" x2="${x.toFixed(1)}" y2="${rulerY + 5}"/><text class="tickl" x="${x.toFixed(1)}" y="${rulerY + 16}" text-anchor="middle">${d.numFrom ? fmt((t || 1) - 1 + d.numFrom) : fmt(t || 1)}</text>`);
     }
-    let y = baseY + 32;
+    let y = rulerY + 28;
     const laneH = 30;
     const bar = (it, yy, h, labelBelow) => {
       const ex = exonsOf(it, n);
@@ -3197,8 +3247,6 @@ svg .prim { cursor: pointer; }
     };
     for (const it of feats) bar(it, y + it.lane * laneH, 15);
     y += Math.max(nF, 0) * laneH;
-    for (const it of prims) bar(it, y + it.lane * 24, 7);
-    y += nP * 24;
     for (const it of orfs) bar(it, y + it.lane * 10, 5, false);
     y += nO * 10;
     const H = Math.max(y + 20, 200);
@@ -3239,8 +3287,112 @@ svg .prim { cursor: pointer; }
     layer.innerHTML = h;
   }
 
+  /* ---------------------------------------------------------------- enzyme hover
+   * Hovering an enzyme anywhere on a map or in the sequence lights up every copy of
+   * that enzyme — its name, its leader line and all of its cut marks — and shows a
+   * small card with the site it recognises, how it cuts and how many times it cuts
+   * this molecule. Double-clicking the name opens the enzyme database at it. */
+  let enzHoverName = null;
+  function enzTipEl() {
+    let t = $('#enztip');
+    if (!t) { t = document.createElement('div'); t.id = 'enztip'; t.className = 'enztip'; document.body.appendChild(t); }
+    return t;
+  }
+  function enzTipHTML(name, d) {
+    const e = DNA.ENZ_BY_NAME[name];
+    if (!e) return '';
+    const sites = d && !isProt(d) ? (analyze(d).sites[name] || []) : [];
+    const hand = e.overhang > 0 ? '5′ overhang' : (e.overhang < 0 ? '3′ overhang' : 'blunt');
+    const oh = e.overhang ? ` · ${Math.abs(e.overhang)} nt ${hand}` : ' · blunt';
+    const cuts = sites.length;
+    const where = cuts <= 6 && cuts ? ` · ${sites.map(x => fmt(x.cut)).join(', ')}` : '';
+    return `<div class="ethd"><b>${esc(name)}</b><span class="${e.overhang === 0 ? 'bl' : ''}">${esc(e.site)}${esc(oh)}</span></div>
+      ${TOOLUI.cutDiagram(e)}
+      <div class="etcnt">${cuts ? `cuts <b>${fmt(cuts)}</b> site${cuts === 1 ? '' : 's'} in ${esc(d.name)}${where}` : 'does not cut this sequence'}</div>
+      <div class="etfoot">Double-click the name for the full entry</div>`;
+  }
+  function showEnzHover(name, ev) {
+    const d = D();
+    if (enzHoverName !== name) {
+      clearEnzHover();
+      enzHoverName = name;
+      document.querySelectorAll(`[data-enz="${CSS.escape(name)}"]`).forEach(el => el.classList.add('hov'));
+      seqCutOverlay(name);
+      const t = enzTipEl();
+      t.innerHTML = enzTipHTML(name, d);
+      t.hidden = false;
+    }
+    placeEnzTip(ev);
+  }
+  function placeEnzTip(ev) {
+    const t = $('#enztip'); if (!t || t.hidden || !ev) return;
+    const r = t.getBoundingClientRect();
+    // kept clear of the pointer, and inside the window
+    let x = ev.clientX + 18, y = ev.clientY + 20;
+    if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - 18;
+    if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 16;
+    t.style.left = Math.max(6, x) + 'px';
+    t.style.top = Math.max(6, y) + 'px';
+  }
+  function clearEnzHover() {
+    if (enzHoverName === null) return;
+    enzHoverName = null;
+    document.querySelectorAll('.hov').forEach(el => el.classList.remove('hov'));
+    document.querySelectorAll('.cutov').forEach(el => el.remove());
+    const t = $('#enztip'); if (t) { t.hidden = true; t.innerHTML = ''; }
+  }
+  /* In the sequence view the hovered enzyme is also drawn as the cut it makes: the
+   * recognition site is boxed and the two strands are cut where the enzyme cuts them. */
+  function seqCutOverlay(name) {
+    const d = D(), G = S.seq && S.seq.G;
+    if (!S.seq || !S.seq.els || S.view !== 'seq' || !d || isProt(d)) return;
+    const sites = analyze(d).sites[name] || [];
+    const n = d.seq.length, bpr = S.seq.bpr, row0 = S.seq.row0 || 0;
+    for (const st of sites) {
+      if (st.cut == null) continue;
+      const ends = [st.pos, (st.pos + st.len) % n || n];
+      const ri = Math.floor(st.pos / bpr) - row0;
+      const el = S.seq.els[ri], geo = S.seq.rows[ri];
+      if (!el || !geo) continue;
+      const x = p => G + (p - geo.rs) * CW;
+      const box = document.createElement('div');
+      box.className = 'cutov';
+      const hasComp = geo.y1 - geo.y0 > 30;
+      const topY = geo.y0, topH = 17, botY = geo.y1 - 17;
+      const w = Math.max(CW, (ends[1] - ends[0]) * CW);
+      const parts = [`<div class="cutsite" style="left:${x(ends[0])}px;top:${topY}px;width:${w}px;height:${geo.y1 - geo.y0}px"></div>`];
+      parts.push(`<div class="cutline" style="left:${x(st.cut)}px;top:${topY}px;height:${topH}px"></div>`);
+      if (hasComp && st.cut2 != null) {
+        parts.push(`<div class="cutline" style="left:${x(st.cut2)}px;top:${botY}px;height:${topH}px"></div>`);
+        const a = Math.min(x(st.cut), x(st.cut2)), b = Math.max(x(st.cut), x(st.cut2));
+        parts.push(`<div class="cutjoin" style="left:${a}px;top:${topY + topH}px;width:${Math.max(1, b - a)}px"></div>`);
+      }
+      parts.push(`<div class="cutname" style="left:${x(ends[0])}px;top:${geo.y1 + 1}px">${esc(name)} ↓${fmt(st.cut)}</div>`);
+      box.innerHTML = parts.join('');
+      el.appendChild(box);
+    }
+  }
+  // Every map and the sequence view share these handlers.
+  function bindEnzHover(root) {
+    if (!root) return;
+    root.addEventListener('mousemove', e => {
+      const el = e.target.closest && e.target.closest('[data-enz]');
+      if (el) showEnzHover(el.dataset.enz, e);
+      else if (enzHoverName) clearEnzHover();
+    });
+    root.addEventListener('mouseleave', clearEnzHover);
+    root.addEventListener('dblclick', e => {
+      const el = e.target.closest && e.target.closest('[data-enz]');
+      if (!el) return;
+      e.preventDefault(); e.stopPropagation();
+      clearEnzHover();
+      openTool('enzymedb', { enzyme: el.dataset.enz });
+    });
+  }
+
   function bindMap(svg) {
     if (!svg) return;
+    bindEnzHover(svg);
     const d = D();
     const toBp = e => {
       const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
@@ -3367,7 +3519,7 @@ svg .prim { cursor: pointer; }
       : Math.max(10, Math.floor((sc.clientWidth - G - 30) / CW / 10) * 10);
     // enzyme cuts
     const cuts = [];
-    for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, u: e.unique, hl: enzHi(d).includes(e.name) }); });
+    for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, cls: enzCls(e, d) }); });
     cuts.sort((a, b) => a.pos - b.pos);
     // feature segments
     const items = collectItems(d, A);
@@ -3442,7 +3594,7 @@ svg .prim { cursor: pointer; }
       const y0 = 4 + enzH;
       for (const c of myCuts) {
         const x = G + (c.pos - rs) * CW, y = 4 + (nL - 1 - c.line) * 14;
-        parts.push(`<div class="enz${c.u ? ' u' : ''}${c.hl ? ' hl' : ''}" data-k="${c.k}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
+        parts.push(`<div class="enz ${c.cls}" data-k="${c.k}" data-enz="${esc(c.name)}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" data-enz="${esc(c.name)}" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
       }
       // --- top strand, tick ruler, bottom strand
       parts.push(`<div class="num" style="top:${y0 + 1}px">${fmtc(d, rs)}</div>`);
@@ -3657,6 +3809,7 @@ svg .prim { cursor: pointer; }
 
   function bindSeq(sc) {
     const d = D();
+    bindEnzHover(sc);
     const posFrom = (e, rowEl) => {
       const r = S.seq.rows[+rowEl.dataset.i - (S.seq.row0 || 0)], rect = rowEl.getBoundingClientRect();
       const col = Math.round((e.clientX - rect.left - S.seq.G) / CW);
@@ -6184,7 +6337,7 @@ svg .prim { cursor: pointer; }
           },
           docs: payload.docs, doc,
           sites: doc ? DNA.findSites(doc.seq, doc.circular) : null,
-          myFeatures: payload.myFeatures, favourites: payload.favourites,
+          myFeatures: payload.myFeatures, favourites: payload.favourites, payload,
           saveFavourites: list => { SET.favFeatures = list; saveSettings(); }
         };
         if (kind === 'featuredb') TOOLUI.featureBrowser(el, ctx);
@@ -6218,6 +6371,7 @@ svg .prim { cursor: pointer; }
       if (doc) { S.active = S.docs.indexOf(doc); setSel(msg.start, msg.end, { anchor: msg.start, scroll: true }); renderAll(true); }
       return;
     }
+    if (msg.kind === 'openEnzyme') { openTool('enzymedb', { enzyme: msg.name }); return; }
     if (msg.kind === 'gel') {
       const o = msg.opts || {};
       if (o.lanes) {
@@ -8847,7 +9001,7 @@ svg .prim { cursor: pointer; }
   }
   // The map's SVG is styled by class, so any copy of it has to carry those rules with it.
   function mapCSS() {
-    return `:root{--canvas:#fff;--bb:#2f3644;--faint:#8d95a3;--ink:#1c2230;--muted:#5e6776;--accent:#2563c9;--sel:rgba(0,0,0,0);--selline:transparent}\n${SVG_CSS}`;
+    return `:root{--canvas:#fff;--bb:#2f3644;--faint:#8d95a3;--ink:#1c2230;--muted:#5e6776;--accent:#2563c9;--primer:#7b3fb0;--sel:rgba(0,0,0,0);--selline:transparent}\n${SVG_CSS}`;
   }
   async function exportSVG() {
     const d = D();
