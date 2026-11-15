@@ -2,3 +2,13 @@ node_modules/
 dist/
 out/
 *.log
+
+# Android (Capacitor): the project is committed, but not the copy of app/ it builds
+# from, nor anything Gradle produces.
+android/app/src/main/assets/public/
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+*.keystore

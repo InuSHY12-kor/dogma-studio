@@ -3,8 +3,13 @@
 <head>
 <meta charset="utf-8">
 <title>GeneCanvas</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
+<!-- the window is the device's own width on a phone; on the desktop this changes nothing -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- connect-src is for the Android build, which talks to NCBI from the page itself;
+     the desktop build asks its main process instead and never uses it -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src 'self' https://eutils.ncbi.nlm.nih.gov">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="mobile.css">
 </head>
 <body>
 <div class="win" id="win">
@@ -42,6 +47,7 @@
 <script src="asmui.js"></script>
 <script src="toolui.js"></script>
 <script src="simui.js"></script>
+<script src="mobileboot.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

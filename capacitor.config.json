@@ -1,0 +1,18 @@
+{
+  "appId": "app.genecanvas.mobile",
+  "appName": "GeneCanvas",
+  "webDir": "app",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#e9ebef"
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#f4f5f7"
+    }
+  }
+}
