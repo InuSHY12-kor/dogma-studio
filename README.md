@@ -65,6 +65,28 @@
 | **보기** | **Split Window(좌우/상하) · Focus on Region(구간만 보기) · GC content 플롯 · 지도 회전 · 글꼴 크기 · Compact/Plain text · Blocks of 3·10 · 고정 줄너비 · 미니맵 · 색 스킴 6종** |
 | **Info** | **파일 메타데이터(출처·host·strain·methylation·accession·author·comments) · 참고문헌(PubMed PMID로 가져오기) · 파일 첨부(embedded files)** |
 
+## 계정 (선택 사항)
+
+**로그인은 하지 않아도 됩니다.** 안 하면 지금까지처럼 모든 것이 그 컴퓨터 안에만 남습니다.
+로그인하면 **효소 세트 · 프라이머 데이터베이스 · 내가 추가한 common feature** 세 가지가
+계정을 따라다녀서, 다른 PC에서 열든 폰에서 열든 같은 라이브러리가 나옵니다.
+**서열 파일은 올라가지 않습니다.**
+
+- **File → Sign In…** 이메일과 비밀번호로 가입·로그인 (계정이 없으면 "I do not have an account yet" 체크)
+- **File → Sync Now** 또는 로그인 직후 자동으로 한 번 동기화
+- **File → Account…** 지금 로그인된 계정, 마지막 동기화 시각, 올라가 있는 개수 확인과 로그아웃
+
+동기화는 **두 시계를 비교하지 않습니다**(폰과 PC의 시각은 보통 어긋나 있습니다). 항목마다
+"마지막 동기화 때의 내용"과 "그때 서버가 찍어 준 도장"을 기억해 두고, 이쪽이 바뀌었는지
+저쪽이 바뀌었는지를 각각 따집니다. 그래서
+
+- 한쪽에서 지우면 다음 동기화에서 **되살아나지 않고** 반대쪽에서도 사라집니다
+- 양쪽에서 같은 것을 고쳤으면 **둘 다 남깁니다** — 계정 쪽이 원래 이름을 갖고, 이 기기에 있던 것은 `이름 (this device)`로 옆에 남습니다
+
+데이터는 사장님의 Supabase 프로젝트 안 `genecanvas_items` 테이블 하나에 들어가고, 어떤 행을
+누가 볼 수 있는지는 클라이언트가 아니라 **데이터베이스의 row-level security**가 정합니다.
+`app/cloud-config.js`의 두 줄을 비우면 계정 기능이 꺼지고 프로그램은 완전히 로컬로 돕니다.
+
 ## 기능별 사용법
 
 **DNA / RNA / Protein 파일** — File → New DNA / New RNA / New Protein File. 같은 창에 탭으로 열리고, 보고 있는 파일의 종류에 따라 상단 메뉴가 바뀝니다.
@@ -169,6 +191,7 @@ v0.3.0에서는 그 화면들을 the reference tool 쪽에 더 가깝게 다시 
 
 ```bash
 npm install
+npm test                # PC · 폰 · 계정 세 가지 점검을 한 번에
 npm start               # 데스크톱을 개발 모드로 실행
 npm run dist:win        # Windows 설치 파일과 portable exe 만들기
 ```
@@ -189,6 +212,9 @@ npm run android:open    # Android Studio에서 열기
 ```
 main.js         Electron 메인 프로세스 (창, 파일 대화상자, NCBI 요청, 인쇄/PDF)
 preload.js      데스크톱이 화면에 넘겨주는 window.gcHost API
+app/cloud.js    선택 로그인과 세 라이브러리 동기화 (Supabase REST, 빌드 단계 없음)
+app/cloud-config.js  계정 서버 주소와 공개 키 (비우면 계정 기능 꺼짐)
+test/desktop.js · test/mobile.js · test/cloud.js   npm test 가 돌리는 세 가지 점검
 app/mobileboot.js  같은 window.gcHost를 안드로이드에서 채워 넣는 쪽
                    (시스템 파일 선택기, Documents 폴더와 공유 시트, 설정 저장, NCBI 직접 호출)
 app/mobile.css  폰 화면 레이아웃 (전부 미디어 쿼리 안이라 데스크톱에는 영향 없음)
