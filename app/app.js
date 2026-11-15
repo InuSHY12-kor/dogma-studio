@@ -527,6 +527,11 @@ svg .lbl.p.hov { font-weight: 700; }
     clone: '<circle cx="7" cy="8" r="3.4"/><circle cx="17" cy="16" r="3.4"/><path d="M9.6 10.4 14.4 14"/>',
     design: '<path d="M4 16h8"/><path d="m9 13 3 3-3 3"/><path d="M4 7h16"/><circle cx="17" cy="7" r="2"/>',
     print: '<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="7" rx="1"/><path d="M7 14h10v6H7z"/>',
+    edit: '<path d="M4 20h4l10-10-4-4L4 16z"/><path d="M14 6l4 4"/>',
+    tools: '<path d="M14.7 6.3a4 4 0 0 0 5 5L21 10l-7 7-3-3 7-7z"/><path d="M11 14 4 21"/>',
+    actions: '<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4V14"/><circle cx="12" cy="17.5" r=".6" fill="currentColor"/>',
+    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     zoomin: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 6 6M8 10.5h5M10.5 8v5"/>',
     zoomout: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 6 6M8 10.5h5"/>'
   };
@@ -870,10 +875,17 @@ svg .lbl.p.hov { font-weight: 700; }
     return base;
   }
   let openMenu = -1;
+  /* Each menu carries a glyph as well as its name. A desktop shows the name; a phone,
+   * where eleven names would fill the window, shows the glyph. */
+  const MENU_ICONS = {
+    File: 'open', Edit: 'edit', View: 'map', Features: 'feat', Primers: 'primer',
+    Enzymes: 'enz', Cloning: 'clone', Tools: 'tools', Analyze: 'chart',
+    Actions: 'actions', Help: 'help', Protein: 'tbl', RNA: 'align'
+  };
   function renderMenuBar() {
     const mb = $('#menubar');
     menuBarSig = menus().map(m => m.label).join(',');
-    mb.innerHTML = menus().map((m, i) => `<div class="mi" data-i="${i}">${m.label}</div>`).join('') + `<div class="brand"><span class="brand-dot"></span>GeneCanvas</div>`;
+    mb.innerHTML = menus().map((m, i) => `<div class="mi" data-i="${i}" title="${esc(m.label)}">${icon(MENU_ICONS[m.label] || 'tbl')}<span>${esc(m.label)}</span></div>`).join('') + `<div class="brand"><span class="brand-dot"></span>GeneCanvas</div>`;
     mb.onmousedown = e => { const it = e.target.closest('.mi'); if (!it) return; e.preventDefault(); const i = +it.dataset.i; if (openMenu === i) closeMenu(); else showMenu(i); };
     mb.onmouseover = e => { const it = e.target.closest('.mi'); if (it && openMenu >= 0 && +it.dataset.i !== openMenu) showMenu(+it.dataset.i); };
   }

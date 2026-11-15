@@ -13,7 +13,10 @@
     "dist:dir": "electron-builder --win --x64 --dir",
     "android:sync": "node tools/stamp-android-version.js && cap sync android",
     "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "test": "node test/run.js",
+    "test:desktop": "node test/desktop.js",
+    "test:mobile": "node test/mobile.js"
   },
   "devDependencies": {
     "@capacitor/android": "^7.6.10",
