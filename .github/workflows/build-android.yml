@@ -25,7 +25,12 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # The runner already carries an Android SDK; this only puts the command line tools
+      # on the path. The action's default package list still asks for "tools", which no
+      # longer exists, so nothing is installed here and Gradle fetches what it needs.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Install dependencies
         run: npm ci
