@@ -1,0 +1,88 @@
+/* GeneCanvas — the phone layout.
+ *
+ * Everything here is inside a media query or a coarse-pointer query, so a desktop
+ * window is untouched: the same stylesheet ships in both builds and only the Android
+ * one, or a narrow window, ever sees it.
+ */
+
+/* Android draws the app behind the status bar and the gesture bar, so the window keeps
+   clear of both. The class is set by mobileboot.js, so nothing changes elsewhere. */
+.on-android .win { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.on-android { overscroll-behavior: none; }
+
+@media (max-width: 820px) {
+  /* --- the chrome: every bar scrolls sideways rather than cramming or wrapping --- */
+  .menubar { height: 36px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .menubar::-webkit-scrollbar { display: none; }
+  .menubar .mi { padding: 0 13px; white-space: nowrap; font-size: 13.5px; }
+  .menubar .brand { display: none; }
+
+  .toolbar { height: 50px; gap: 0; scrollbar-width: none; }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .tb { min-width: 46px; height: 46px; padding: 0 4px; }
+  .tb svg { width: 21px; height: 21px; }
+  .tbsep { margin: 0 2px; }
+
+  .doctabs { height: 34px; scrollbar-width: none; }
+  .doctabs::-webkit-scrollbar { display: none; }
+  .dtab { font-size: 13px; }
+
+  .viewtabs { height: 40px; overflow-x: auto; scrollbar-width: none; padding-left: 0; }
+  .viewtabs::-webkit-scrollbar { display: none; }
+  .vt { padding: 0 13px; white-space: nowrap; font-size: 13px; }
+
+  .status { height: auto; min-height: 26px; gap: 10px; overflow-x: auto; scrollbar-width: none; font-size: 11.5px; }
+  .status::-webkit-scrollbar { display: none; }
+
+  /* --- dialogs: one column, and room for a thumb --- */
+  .form { grid-template-columns: 1fr; gap: 4px 0; }
+  .form label { margin-top: 6px; }
+  .form .row2 { gap: 8px; }
+  .dlg .ft .btn, .ptools .btn { min-height: 34px; }
+  .dlg .bd { -webkit-overflow-scrolling: touch; }
+
+  /* a table never squeezes its columns: it scrolls inside its own box */
+  .tscroll, .dlg .bd { overflow-x: auto; }
+  .grid { min-width: max-content; }
+
+  .ptools { gap: 6px; padding: 6px 8px; }
+  .ptools input[type=text] { width: 140px; }
+
+  /* --- the map and its strip ---
+     the strip sits in the bottom corner, within reach of a thumb and clear of the find
+     bar and the first rows of the sequence; the zoom buttons move over to make room */
+  .mapside { right: 6px; top: auto; bottom: 8px; }
+  .map-zoom { left: 10px; right: auto; }
+  .mapside .msb { width: 34px; height: 32px; }
+  .mapside .mschev { width: 18px; height: 32px; }
+  .map-zoom button { width: 36px; height: 34px; font-size: 16px; }
+  .mspop { width: min(300px, calc(100vw - 20px)); }
+
+  /* --- the sequence --- */
+  .findbar { padding: 5px 8px; }
+  .findbar input[type=text] { width: 150px; }
+
+  /* the cloning window stacks instead of sitting side by side */
+  .asmmain { flex-direction: column; }
+  .asmright { width: auto; }
+  .asmbottom { flex-direction: column; }
+  .asmtabs { flex-wrap: wrap; }
+
+  /* the simulation puts the gel above the lane it is showing */
+  .simwrap { flex-direction: column; }
+  .simleft { width: auto; }
+
+  /* the feature and enzyme browsers stack their two halves */
+  .fbwrap, .ebwrap { flex-direction: column; }
+  .fbleft, .ebleft { width: auto; max-height: 34vh; }
+}
+
+/* Anything driven by a finger gets a target worth tapping, whatever the window width. */
+@media (pointer: coarse) {
+  .menubar .mi, .vt, .dtab, .tb { touch-action: manipulation; }
+  .ctx .it, .menu-pop .it { padding-top: 7px; padding-bottom: 7px; }
+  .ib { min-width: 26px; min-height: 26px; }
+  /* a finger drag on the map or the sequence is a gesture, not a scroll, once it starts;
+     touch.js decides which, and sets this class while a drag is running */
+  .touch-drag { touch-action: none !important; user-select: none; }
+}

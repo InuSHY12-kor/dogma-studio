@@ -137,7 +137,7 @@ svg .lbl.p.hov { font-weight: 700; }
       seqFormat: 'default',     // default | compact | plain
       blockSize: 0,             // 0 none, 3 codons, 10 decades
       lineWidth: 0,             // 0 = wrap to window, otherwise a fixed number of bases
-      showLocations: true,      // coordinates beside enzyme and primer names
+      showLocations: !(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 820px)').matches),
       showMinimap: false,
       labelMode: 'auto',      // auto | inside | outside
       featOnLine: false,      // draw every feature on the backbone instead of in its own lane
@@ -329,6 +329,10 @@ svg .lbl.p.hov { font-weight: 700; }
   }
   // Primers are drawn in purple so they are never taken for an enzyme or a feature.
   const PRIMER_COL = '#7b3fb0', PRIMER_SOFT = '#b48ad6';
+  /* A phone-sized window. The desktop never matches this, so everything behind it is
+   * extra room-making for a small screen rather than a change to the desktop. */
+  const narrow = () => typeof window !== 'undefined' && window.matchMedia
+    && window.matchMedia('(max-width: 820px)').matches;
   /* What a name on the map reads as: the feature's name, and whatever else the display
    * options ask to be shown with it. */
   function mapLabel(it, o, n) {
@@ -2593,7 +2597,9 @@ svg .lbl.p.hov { font-weight: 700; }
     v.innerHTML = `<div class="mapwrap" id="mapwrap"></div>${mapSideHTML()}<div class="map-zoom"><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Fit">⤢</button><button data-z="in" title="Zoom in">+</button></div>${showFocus ? focusBarHTML(dd) : ''}`;
     wrap = $('#mapwrap');
     const d = D(), A = analyze(d);
-    const W = Math.max(420, wrap.clientWidth), H = Math.max(380, wrap.clientHeight);
+    // On a small screen the drawing is wider than the window and the pane pans over it:
+    // a map squeezed into 412 px is a circle the size of a coin.
+    const W = Math.max(narrow() ? 620 : 420, wrap.clientWidth), H = Math.max(narrow() ? 560 : 380, wrap.clientHeight);
     // A focused view is always linear: it shows one stretch of the sequence.
     const svg = (d.opts.mapMode === 'circular' && !focusOf(d)) ? drawCircular(d, A, W * S.zoom, H * S.zoom) : drawLinear(d, A, W * S.zoom);
     wrap.innerHTML = svg;
@@ -2962,7 +2968,7 @@ svg .lbl.p.hov { font-weight: 700; }
     const nPR = pRev.reduce((m2, p) => Math.max(m2, p.lane + 1), 0);
     const pBand = nPF ? nPF * 9 + 8 : 0;
     const inBand = nPR ? nPR * 9 + 6 : 0;
-    const R = Math.max(70, Math.min(W / 2 - 175, H / 2 - 60) - pBand);
+    const R = Math.max(70, Math.min(W / 2 - (narrow() ? 120 : 175), H / 2 - 60) - pBand);
     const rot = (o.mapRotate || 0) / 360 * TAU;
     const ang = bp => bp / n * TAU - Math.PI / 2 + rot;
     const P = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
