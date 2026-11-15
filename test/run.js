@@ -5,10 +5,10 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 let bad = 0;
-for (const [name, file] of [['desktop', 'desktop.js'], ['phone', 'mobile.js']]) {
+for (const [name, file] of [['desktop', 'desktop.js'], ['phone', 'mobile.js'], ['account', 'cloud.js']]) {
   console.log(`\n──────── ${name} ────────`);
   const r = spawnSync(process.execPath, [path.join(__dirname, file)], { stdio: 'inherit' });
   if (r.status !== 0) bad++;
 }
-console.log(bad ? `\n${bad} pass(es) reported errors.` : '\nBoth passes are clean.');
+console.log(bad ? `\n${bad} pass(es) reported errors.` : '\nEvery pass is clean.');
 process.exit(bad ? 1 : 0);

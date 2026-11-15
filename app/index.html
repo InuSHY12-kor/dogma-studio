@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- connect-src is for the Android build, which talks to NCBI from the page itself;
      the desktop build asks its main process instead and never uses it -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src 'self' https://eutils.ncbi.nlm.nih.gov">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src 'self' https://eutils.ncbi.nlm.nih.gov https://vgayfehlczvqxqlwibde.supabase.co">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
@@ -47,6 +47,8 @@
 <script src="asmui.js"></script>
 <script src="toolui.js"></script>
 <script src="simui.js"></script>
+<script src="cloud-config.js"></script>
+<script src="cloud.js"></script>
 <script src="mobileboot.js"></script>
 <script src="app.js"></script>
 <script src="touch.js"></script>

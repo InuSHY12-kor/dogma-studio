@@ -16,7 +16,8 @@
     "android:open": "cap open android",
     "test": "node test/run.js",
     "test:desktop": "node test/desktop.js",
-    "test:mobile": "node test/mobile.js"
+    "test:mobile": "node test/mobile.js",
+    "test:cloud": "node test/cloud.js"
   },
   "devDependencies": {
     "@capacitor/android": "^7.6.10",

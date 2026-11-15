@@ -560,6 +560,9 @@ svg .lbl.p.hov { font-weight: 700; }
         { label: 'Export PDF…', dis: !has, act: () => dlgPrint(true) },
         '-',
         { label: 'Close File', key: 'Ctrl+W', dis: !has, act: () => closeDoc(S.active) },
+        '-',
+        { label: cloudSignedIn() ? `Account (${cloudEmail()})\u2026` : 'Sign In\u2026', act: dlgAccount },
+        { label: 'Sync Now', dis: !cloudSignedIn(), act: () => cloudSync(true) },
         ...(host ? ['-', { label: 'Exit', act: () => host.quit() }] : [])
       ] },
       { label: 'Edit', items: [
@@ -7929,10 +7932,89 @@ svg .lbl.p.hov { font-weight: 700; }
   }
   async function saveSettings() {
     try {
+      // what the account would carry is dated here, wherever the change came from
+      if (window.CLOUD && CLOUD.configured()) { try { CLOUD.stamp(SET); } catch (e) { } }
       if (host && host.saveSettings) await host.saveSettings(SET);
       else localStorage.setItem(SETTINGS_KEY, JSON.stringify(SET));
       return true;
     } catch (e) { toast('Could not save settings: ' + e.message); return false; }
+  }
+
+  /* ---------------------------------------------------------------- the optional account
+   * Signing in is never required. Without it everything stays on this machine, as it
+   * always has; with it, the enzyme sets, the primer database and the user's own common
+   * features follow the account from machine to phone. Sequences are never uploaded. */
+  const cloudOn = () => !!(window.CLOUD && CLOUD.configured());
+  const cloudSignedIn = () => cloudOn() && !!CLOUD.session();
+  const cloudEmail = () => (cloudSignedIn() && CLOUD.session().email) || '';
+  async function cloudSync(loud) {
+    if (!cloudSignedIn()) { if (loud) dlgAccount(); return; }
+    if (loud) toast('Syncing\u2026');
+    try {
+      const st = await CLOUD.sync(SET);
+      await saveSettings();
+      renderAll(true);
+      const bits = [];
+      if (st.sent) bits.push(`${st.sent} sent`);
+      if (st.taken) bits.push(`${st.taken} taken`);
+      if (st.removedHere) bits.push(`${st.removedHere} removed here`);
+      if (st.removedThere) bits.push(`${st.removedThere} removed there`);
+      if (loud || bits.length) toast(bits.length ? 'Synced \u2014 ' + bits.join(', ') : 'Synced \u2014 nothing had changed');
+    } catch (e) {
+      toast('Sync failed: ' + e.message);
+    }
+  }
+  function dlgAccount() {
+    if (!cloudOn()) {
+      dialog({
+        title: 'Account', body: `<div class="form"><div class="full hint">This build has no account server set up, so everything is kept on this machine. That is all GeneCanvas needs to work.</div></div>`,
+        buttons: [{ label: 'Close', primary: true }]
+      });
+      return;
+    }
+    if (cloudSignedIn()) {
+      const s = CLOUD.session(), c = SET.cloud || {};
+      const when = c.lastSync ? new Date(c.lastSync).toLocaleString() : 'not yet';
+      dialog({
+        title: 'Account',
+        body: `<div class="form">
+          <label>Signed in as</label><div><b>${esc(s.email || '(no address)')}</b></div>
+          <label>Last sync</label><div>${esc(when)}</div>
+          <label>Kept in the account</label><div>${fmt(Object.keys(SET.enzymeSets || {}).length)} enzyme sets \u00b7 ${fmt(((SET.primerDb || {}).primers || []).length)} primers \u00b7 ${fmt((SET.myFeatures || []).length)} of my features</div>
+          <div class="full hint">Sequences are never uploaded \u2014 only these three libraries.</div></div>`,
+        buttons: [
+          { label: 'Sign Out', danger: true, act: () => { CLOUD.signOut(); renderAll(); toast('Signed out. Everything stays on this machine.'); } },
+          { label: 'Close' },
+          { label: 'Sync Now', primary: true, act: () => { cloudSync(true); } }
+        ]
+      });
+      return;
+    }
+    let mode = 'in';
+    dialog({
+      title: 'Sign In',
+      body: `<div class="form">
+        <label for="acEmail">Email</label><input type="text" id="acEmail" autocomplete="username" placeholder="you@example.com">
+        <label for="acPw">Password</label><input type="password" id="acPw" autocomplete="current-password">
+        <label></label><label class="mschk"><input type="checkbox" id="acNew"> I do not have an account yet</label>
+        <div class="full hint">Signing in is optional. It keeps your enzyme sets, primer database and your own features with your account, so the same libraries are there on another computer or on the phone. Sequences are never uploaded.</div>
+        <div class="full err"></div></div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Sign In', primary: true, act: () => {
+          const email = ($('#acEmail') || {}).value || '', pw = ($('#acPw') || {}).value || '';
+          if (!email || !pw) return showErr('Enter an email address and a password.');
+          const isNew = !!($('#acNew') || {}).checked;
+          const run = isNew ? CLOUD.signUp(email, pw) : CLOUD.signIn(email, pw);
+          return run.then(r => {
+            closeDialog();
+            if (r && r.pending) { toast('Check your email to confirm the account, then sign in.'); return; }
+            toast('Signed in as ' + (CLOUD.session().email || email));
+            renderAll();
+            cloudSync(true);
+          }).catch(e => { showErr(e.message); });
+        }
+      }]
+    });
   }
 
   // Sets that are always offered, computed from the sequence rather than stored.
