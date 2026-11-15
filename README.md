@@ -1,16 +1,42 @@
 # GeneCanvas
 
-Windows용 플라스미드·DNA 서열 편집 프로그램입니다. 화면 구성과 작업 흐름은 the reference tool과 비슷하게 만들었습니다.
+플라스미드·DNA 서열 편집 프로그램입니다. 화면 구성과 작업 흐름은 the reference tool과 비슷하게 만들었고,
+**Windows 데스크톱**과 **안드로이드** 두 가지로 나옵니다. 둘은 `app/` 폴더 하나를 같이 쓰기 때문에
+기능을 한 번 만들면 양쪽에 함께 들어갑니다.
 
 ## 다운로드
+
+**Windows**
 
 - **설치 버전**: `GeneCanvas-Setup-<버전>.exe`
 - **설치 없이 실행**: `GeneCanvas-<버전>-portable.exe`
 
-두 파일 모두 GitHub **Actions → Build Windows → 최근 실행 → Artifacts**에서 받을 수 있습니다.
+**안드로이드**
+
+- `GeneCanvas-<버전>.apk` — 받아서 설치하면 됩니다(스토어 배포가 아니므로 "출처를 알 수 없는 앱 설치"를 한 번 허용해야 합니다).
+
+세 파일 모두 GitHub **Actions → Build Windows / Build Android → 최근 실행 → Artifacts**에서 받을 수 있습니다.
 최신 판은 **Releases** 페이지(`v0.3.0`)에서 바로 받을 수 있습니다. `v`로 시작하는 태그를 push하면 자동으로 올라갑니다.
 
-> 코드 서명이 없어서 처음 실행할 때 Windows SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르면 됩니다.
+> 코드 서명이 없어서 Windows에서는 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르면 됩니다.
+> 안드로이드 APK도 디버그 서명이라 설치할 때 경고가 뜹니다.
+
+### 폰에서 쓰는 법
+
+마우스가 없는 대신 손가락 동작이 같은 일을 합니다.
+
+| 동작 | 하는 일 |
+|---|---|
+| 탭 | 그 자리를 고름 — feature, 효소, 커서 위치 |
+| 길게 누르기 (feature·효소 위에서) | 그 항목의 메뉴 |
+| 길게 누르고 끌기 (빈 곳에서) | 구간 선택 |
+| 그냥 끌기 | 스크롤 |
+| 두 손가락 오므리기/벌리기 | 맵 확대·축소 |
+
+맵·시퀀스 옆 사이드 메뉴는 엄지가 닿는 오른쪽 아래에 있고, 폰에서는 효소 이름에서 위치 숫자를 빼서
+좁은 화면에서도 이름이 겹치지 않게 했습니다(사이드 메뉴 → 줄 번호에서 다시 켤 수 있습니다).
+별도 OS 창으로 열리던 Feature·Enzyme 데이터베이스, Cloning, Simulation 창은 폰에서는 같은 화면 안
+대화상자로 열립니다.
 
 ## 기능
 
@@ -143,15 +169,31 @@ v0.3.0에서는 그 화면들을 the reference tool 쪽에 더 가깝게 다시 
 
 ```bash
 npm install
-npm start            # 개발 모드로 실행
-npm run dist:win     # Windows에서 설치 파일과 portable exe 만들기
+npm start               # 데스크톱을 개발 모드로 실행
+npm run dist:win        # Windows 설치 파일과 portable exe 만들기
 ```
+
+안드로이드는 Android SDK와 JDK 21이 있으면 같은 저장소에서 바로 빌드됩니다.
+
+```bash
+npm run android:sync    # app/ 폴더를 안드로이드 프로젝트로 복사
+npm run android:apk     # 디버그 APK 만들기 (android/app/build/outputs/apk/debug/)
+npm run android:open    # Android Studio에서 열기
+```
+
+`app/`을 고치면 두 빌드에 모두 반영됩니다. `npm run android:sync`는 그 복사본을 갱신하는 것뿐이라,
+웹 부분을 따로 컴파일하는 단계는 없습니다.
 
 ## 구조
 
 ```
 main.js         Electron 메인 프로세스 (창, 파일 대화상자, NCBI 요청, 인쇄/PDF)
-preload.js      화면에서 쓰는 window.gcHost API
+preload.js      데스크톱이 화면에 넘겨주는 window.gcHost API
+app/mobileboot.js  같은 window.gcHost를 안드로이드에서 채워 넣는 쪽
+                   (시스템 파일 선택기, Documents 폴더와 공유 시트, 설정 저장, NCBI 직접 호출)
+app/mobile.css  폰 화면 레이아웃 (전부 미디어 쿼리 안이라 데스크톱에는 영향 없음)
+app/touch.js    손가락 동작을 앱이 아는 마우스 이벤트로 바꿔 주는 층
+capacitor.config.json / android/   안드로이드 껍데기 (Capacitor)
 app/index.html  화면 틀
 app/style.css   스타일
 app/dna.js      DNA 로직 (효소, 번역, Tm, ORF, 파일 형식)
