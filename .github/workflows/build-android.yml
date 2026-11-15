@@ -38,7 +38,7 @@ jobs:
       # The web side of the app is app/ itself, so there is nothing to compile:
       # the sync copies it into the Android project and refreshes the plugin list.
       - name: Copy the web app into the Android project
-        run: npx cap sync android
+        run: npm run android:sync
 
       - name: Build the debug APK
         run: ./gradlew --no-daemon assembleDebug
