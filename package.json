@@ -1,7 +1,7 @@
 {
   "name": "genecanvas",
   "productName": "GeneCanvas",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Plasmid and DNA sequence editor for Windows and Android: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
   "main": "main.js",
   "author": "GeneCanvas",
