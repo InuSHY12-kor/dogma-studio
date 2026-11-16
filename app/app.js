@@ -54,7 +54,10 @@ svg .ctr2 { font: 13px var(--f-ui); fill: var(--muted); }
 svg .selarea { fill: var(--sel); stroke: var(--selline); stroke-width: .8; pointer-events: none; }
 svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
 svg .orf { stroke: none; cursor: pointer; }
-svg .prim { cursor: pointer; stroke: rgba(80, 30, 120, .5); stroke-width: .6; }
+svg .prim { cursor: pointer; }
+svg .primline { stroke-width: 1.6; }
+svg .primhook { stroke-width: 1.6; }
+svg .prim:hover .primline, svg .prim:hover .primhook { stroke-width: 2.6; }
 svg .lbl.p { fill: var(--primer); font-size: 10.5px; }
 svg .lbl.p.hov { font-weight: 700; }
 `;
@@ -326,6 +329,16 @@ svg .lbl.p.hov { font-weight: 700; }
     if (d.opts.enzMode === 'none') return [];
     const hid = enzHidden(d);
     return chosenEnz(d, A).filter(e => !hid.includes(e.name));
+  }
+  /* Black or white, whichever can be read on a given fill. The threshold is the usual
+   * relative-luminance one, so a mid-green reads black and a navy reads white. */
+  function inkLight(hex) {
+    const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || ''));
+    if (!m) return false;
+    let h = m[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    const v = n2 => { const c = parseInt(h.substr(n2, 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return (0.2126 * v(0) + 0.7152 * v(2) + 0.0722 * v(4)) < 0.42;
   }
   // Primers are drawn in purple so they are never taken for an enzyme or a feature.
   const PRIMER_COL = '#7b3fb0', PRIMER_SOFT = '#b48ad6';
@@ -3093,12 +3106,22 @@ svg .lbl.p.hov { font-weight: 700; }
       const ar = arrow(it, oR(it.lane), 4, 7);
       g.push(`<path class="orf" d="${ar.path}" fill="${it.color}" data-k="${it.key}"><title>${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${it.strand > 0 ? 'forward' : 'reverse'})</title></path>`);
     }
+    /* The same oligo shape as the linear map: a line along the backbone with a hook at
+     * the 5′ end and an arrow head at the 3′ end. */
     for (const it of prims) {
       const rev = it.strand === -1;
       const r = rev ? pRin(it.lane) : pR(it.lane);
-      const ar = arrow(it, r, 5, 7);
-      g.push(`<path class="prim" d="${ar.path}" fill="${it.color}" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${rev ? 'reverse' : 'forward'})</title></path>`);
-      labels.push({ a: ar.a1 + ar.span / 2, text: it.name, cls: 'p', k: it.key, r0: rev ? R + laneW / 2 + 2 : r + 3, prim: it.ref.id });
+      const a1 = ang(it.start), span = Math.max(0.004, DNA.rlen(it, n) / n * TAU), a2 = a1 + span;
+      const col = it.color || PRIMER_COL;
+      const tailA = rev ? a2 : a1, headA = rev ? a1 : a2;
+      const sweep = rev ? 0 : 1, lg = span > Math.PI ? 1 : 0;
+      const hA = Math.min(span * 0.6, 7 / r);
+      const hBase = rev ? headA + hA : headA - hA;
+      g.push(`<g class="prim" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${rev ? 'reverse' : 'forward'})</title>
+        <path class="primline" fill="none" stroke="${col}" d="M${fmtP(P(r, tailA))} A${r},${r} 0 ${lg} ${sweep} ${fmtP(P(r, hBase))}"/>
+        <line class="primhook" stroke="${col}" x1="${fmtP(P(r - 4, tailA)).replace(',', '" y1="')}" x2="${fmtP(P(r + 4, tailA)).replace(',', '" y2="')}"/>
+        <path class="primhead" fill="${col}" d="M${fmtP(P(r, headA))} L${fmtP(P(r - 3.2, hBase))} L${fmtP(P(r + 3.2, hBase))} Z"/></g>`);
+      labels.push({ a: a1 + span / 2, text: it.name, cls: 'p', k: it.key, r0: rev ? R + laneW / 2 + 2 : r + 3, prim: it.ref.id });
     }
     // enzyme cut marks
     for (const e of enz) e.sites.forEach((s, i) => {
@@ -3238,15 +3261,20 @@ svg .lbl.p.hov { font-weight: 700; }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
     /* Primers ride the backbone: forward above the two lines, reverse below, in purple
      * so they are never read as an enzyme or a feature. */
+    /* A primer is drawn as a line that starts with a hook and ends in an arrow — the
+     * shape an oligo is drawn with — so it is never read as a feature arrow. */
     const primBar = (it, yy, above) => {
       for (const [a, b] of DNA.segs(it, n)) {
-        const x1 = X(a), x2 = X(b), hd = Math.min(8, (x2 - x1) * 0.5);
-        const y1 = yy, y2 = yy + 5, ym = yy + 2.5;
-        const pts = it.strand === -1
-          ? `${x1},${ym} ${x1 + hd},${y1} ${x2},${y1} ${x2},${y2} ${x1 + hd},${y2}`
-          : `${x1},${y1} ${x2 - hd},${y1} ${x2},${ym} ${x2 - hd},${y2} ${x1},${y2}`;
-        g.push(`<polygon class="prim" points="${pts}" fill="${it.color}" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(it.start + 1)}..${fmt(it.end)} (${it.strand === -1 ? 'reverse' : 'forward'})</title></polygon>`);
-        g.push(`<text class="lbl p" x="${((x1 + x2) / 2).toFixed(1)}" y="${(above ? y1 - 3 : y2 + 9).toFixed(1)}" text-anchor="middle" data-k="${it.key}" data-prim="${it.ref.id}">${esc(it.name)}</text>`);
+        const x1 = X(a), x2 = X(b), rev = it.strand === -1;
+        const tail = rev ? x2 : x1, head = rev ? x1 : x2;     // 5′ end to 3′ end
+        const dir = head >= tail ? 1 : -1, hd = Math.min(7, Math.abs(head - tail) * 0.6);
+        const col = it.color || PRIMER_COL;
+        g.push(`<g class="prim" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(Math.min(it.start, it.end) + 1)}..${fmt(Math.max(it.start, it.end))} (${rev ? 'reverse' : 'forward'})</title>
+          <line class="primline" x1="${tail.toFixed(1)}" y1="${yy}" x2="${head.toFixed(1)}" y2="${yy}" stroke="${col}"/>
+          <line class="primhook" x1="${tail.toFixed(1)}" y1="${(yy - 4).toFixed(1)}" x2="${tail.toFixed(1)}" y2="${(yy + 4).toFixed(1)}" stroke="${col}"/>
+          <path class="primhead" d="M${head.toFixed(1)},${yy} L${(head - dir * hd).toFixed(1)},${(yy - 3.2).toFixed(1)} L${(head - dir * hd).toFixed(1)},${(yy + 3.2).toFixed(1)} Z" fill="${col}"/>
+          <rect x="${Math.min(x1, x2).toFixed(1)}" y="${yy - 5}" width="${Math.abs(x2 - x1).toFixed(1)}" height="10" fill="transparent"/></g>`);
+        g.push(`<text class="lbl p" x="${((x1 + x2) / 2).toFixed(1)}" y="${(above ? yy - 7 : yy + 13).toFixed(1)}" text-anchor="middle" fill="${col}" data-k="${it.key}" data-prim="${it.ref.id}">${esc(it.name)}${o.showLocations ? ` (${fmt(Math.min(it.start, it.end) + 1)} .. ${fmt(Math.max(it.start, it.end))})` : ''}</text>`);
       }
     };
     for (const it of pFwd) primBar(it, baseY - 9 - (nPF - 1 - it.lane) * PH, true);
@@ -3515,11 +3543,23 @@ svg .lbl.p.hov { font-weight: 700; }
 
   // ================================================================ SEQUENCE VIEW
   let CW = 7.8;
+  /* The width of one base, measured on a real row rather than on a guess at its font.
+   * Everything in the sequence view is placed by multiplying this: the caret, the
+   * selection, the enzyme ticks, the feature bars. A measurement taken at the wrong
+   * size drifts a little further with every base, which is why it is taken from an
+   * element carrying the very classes the rows use. */
   function measureCW() {
-    const sp = document.createElement('span');
-    sp.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:13px/17px ' + getComputedStyle(document.documentElement).getPropertyValue('--f-mono');
-    sp.textContent = 'ACGT'.repeat(50); document.body.appendChild(sp);
-    CW = sp.getBoundingClientRect().width / 200; sp.remove();
+    const row = document.createElement('div');
+    row.className = 'srow';
+    row.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0';
+    const nt = document.createElement('div');
+    nt.className = 'nt';
+    nt.textContent = 'ACGT'.repeat(50);
+    row.appendChild(nt);
+    document.body.appendChild(row);
+    const w = nt.getBoundingClientRect().width;
+    if (w > 0) CW = w / 200;
+    row.remove();
   }
 
   function renderSeq(keepScroll) {
@@ -3557,22 +3597,36 @@ svg .lbl.p.hov { font-weight: 700; }
     runFind(false);
   }
 
+  /* How much room the floating strip needs on the right. On a phone it lies along the
+   * bottom instead, so it asks for none. */
+  function sideStripReserve() {
+    if (!S.sideShown && !$('#mapside')) return 0;
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 820px)').matches) return 0;
+    const el = $('#mapside');
+    return el ? Math.ceil(el.getBoundingClientRect().width) + 14 : 62;
+  }
   function buildSeqRows() {
     const d = D(), A = analyze(d), n = d.seq.length, o = d.opts;
     const sc = $('#seqscroll'), host = $('#seqrows');
     const G = 78;
-    // Wrap to window, or a fixed number of bases per line when one is set.
+    /* The strip of icons floats over the right-hand edge of the view, so the bases stop
+     * short of it; otherwise the last of them sit under it and cannot be clicked. */
+    const reserve = sideStripReserve();
     const bpr = o.lineWidth
       ? Math.max(10, o.lineWidth)
-      : Math.max(10, Math.floor((sc.clientWidth - G - 30) / CW / 10) * 10);
+      : Math.max(10, Math.floor((sc.clientWidth - G - 30 - reserve) / CW / 10) * 10);
     // enzyme cuts
     const cuts = [];
     for (const e of shownEnz(d, A)) e.sites.forEach((s, i) => { if (s.cut != null) cuts.push({ pos: s.cut, name: e.name, k: `e:${e.name}:${i}`, cls: enzCls(e, d) }); });
     cuts.sort((a, b) => a.pos - b.pos);
     // feature segments
     const items = collectItems(d, A);
+    /* Primers are not features and are no longer drawn like them: they ride beside the
+     * strand they bind, as a box of their own bases. */
+    const primerItems = items.filter(it => it.kind === 'p');
     const segsAll = [], intronsAll = [];
     for (const it of items) {
+      if (it.kind === 'p') continue;
       const ex = exonsOf(it, n);
       const last = ex.exons[ex.exons.length - 1], first = ex.exons[0];
       for (const exr of ex.exons) for (const [a, b] of DNA.segs(exr, n))
@@ -3639,7 +3693,25 @@ svg .lbl.p.hov { font-weight: 700; }
         lineEnd[l] = x + w; c.line = l;
       }
       const nL = lineEnd.length, enzH = nL ? nL * 14 + 6 : 3;
-      const y0 = 4 + enzH;
+      /* Primers binding the top strand sit above it, the ones binding the bottom strand
+       * below, each in as many rows as it takes not to overlap a neighbour. */
+      const PRH = 26;
+      const myPrims = compact ? [] : primerItems.flatMap(it => DNA.segs(it, n)
+        .map(([a, b]) => ({ it, a, b }))
+        .filter(x => x.a < re && x.b > rs)
+        .map(x => ({ it, a: Math.max(x.a, rs), b: Math.min(x.b, re), whole: x })));
+      const lanePrim = (list) => {
+        const ends = [];
+        for (const q of list) {
+          const x1 = G + (q.a - rs) * CW, x2 = x1 + (q.b - q.a) * CW + Math.max(40, q.it.name.length * 6);
+          let l = 0; while (ends[l] !== undefined && ends[l] > x1 - 4) l++;
+          ends[l] = x2; q.lane = l;
+        }
+        return ends.length;
+      };
+      const pFwd = myPrims.filter(q => q.it.strand !== -1), pRev = myPrims.filter(q => q.it.strand === -1);
+      const nPF = lanePrim(pFwd), nPR = lanePrim(pRev);
+      const y0 = 4 + enzH + nPF * PRH;
       for (const c of myCuts) {
         const x = G + (c.pos - rs) * CW, y = 4 + (nL - 1 - c.line) * 14;
         parts.push(`<div class="enz ${c.cls}" data-k="${c.k}" data-enz="${esc(c.name)}" style="left:${x - 1}px;top:${y}px">${esc(c.name)}</div><div class="etick" data-enz="${esc(c.name)}" style="left:${x}px;top:${y + 13}px;height:${y0 - y - 12}px"></div>`);
@@ -3656,7 +3728,25 @@ svg .lbl.p.hov { font-weight: 700; }
       let y = rulerTop + RULER_H;
       if (comp && !isRNA(d)) { parts.push(`<div class="nt b" style="left:${G}px;top:${y}px">${blocked(paintBases(DNA.comp(d.seq.slice(rs, re)), o, d, rs, -1), o, rs)}</div>`); y += NT_H; }
       const strandBottom = y;
-      y += 2;
+      /* A primer box carries the bases it is made of, lined up with the bases it binds,
+       * so it can be read against the strand rather than guessed at from a bar. */
+      const primBox = (q, top, above) => {
+        const x = G + (q.a - rs) * CW, w = (q.b - q.a) * CW;
+        const sub = DNA.sub(d.seq, q.a, q.b);
+        const txt = q.it.strand === -1 ? DNA.comp(sub) : sub;
+        const col = q.it.ref.color || PRIMER_COL;
+        const startsHere = q.a === (q.it.strand === -1 ? q.whole.b : q.whole.a) || q.a === q.whole.a;
+        const endsHere = q.b === q.whole.b;
+        const hook = q.it.strand === -1 ? (startsHere ? ' hookL' : '') : (endsHere ? ' hookR' : '');
+        return `<div class="primbox${hook}" data-k="${q.it.key}" data-prim="${q.it.ref.id}" title="${esc(q.it.name)} \u00b7 ${fmt(Math.min(q.it.start, q.it.end) + 1)}..${fmt(Math.max(q.it.start, q.it.end))} \u00b7 ${q.it.strand === -1 ? 'binds the bottom strand' : 'binds the top strand'}"
+          style="left:${x}px;top:${top}px;width:${w}px;color:${col};border-color:${col}">${esc(txt)}</div>
+          <div class="primname" data-k="${q.it.key}" data-prim="${q.it.ref.id}" style="left:${x}px;top:${above ? top - 11 : top + 16}px;color:${col}">${esc(q.it.name)}</div>`;
+      };
+      for (const q of pFwd) parts.push(primBox(q, 4 + enzH + (nPF - 1 - q.lane) * PRH + 12, true));
+      for (const q of pRev) parts.push(primBox(q, strandBottom + 6 + q.lane * PRH, false));
+      y = strandBottom + (nPR ? nPR * PRH + 6 : 0);
+      // a clear gap between the strands and the features below them
+      y += 8;
       // --- features, each translated one carrying its own residue numbering above it
       const rsegs = compact ? [] : segsAll.filter(s => s.a < re && s.b > rs).map(s => ({ ...s, x1: Math.max(s.a, rs), x2: Math.min(s.b, re) })).sort((p, q) => p.x1 - q.x1 || (q.x2 - q.x1) - (p.x2 - p.x1));
       const laneEnd = [], laneTrans = [];
@@ -3680,7 +3770,7 @@ svg .lbl.p.hov { font-weight: 700; }
         else if (s.tipL && s.x1 === s.a) clip = 'clip-path:polygon(8px 0,100% 0,100% 100%,8px 100%,0 50%);';
         const label = w > s.it.name.length * 6.4 + 16 ? esc(s.it.name) : '';
         const h = s.it.kind === 'o' ? 8 : 14;
-        parts.push(`<div class="fbar${s.it.kind === 'o' ? ' orf' : ''}" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneBar[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:10px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
+        parts.push(`<div class="fbar${s.it.kind === 'o' ? ' orf' : ''}${inkLight(s.it.color) ? ' ink-light' : ''}" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneBar[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:10px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
         keyLane[s.it.key] = s.lane;
       }
       for (const iv of rIntrons) {
@@ -3694,6 +3784,21 @@ svg .lbl.p.hov { font-weight: 700; }
           const l = keyLane[it.key]; if (l === undefined || laneBar[l] === undefined) continue;
           parts.push(`<div class="fcleave" style="left:${G + (cp - rs) * CW - 3}px;top:${laneBar[l] - 9}px" title="cleavage site after ${fmt(cp)}">↑</div>`);
         }
+      }
+      /* The translated stretch gets a bar of its own behind the residues, in the
+       * feature's colour, so a protein sequence is read as part of that feature rather
+       * than as letters floating over the bases. */
+      const aaBand = {};
+      for (const a of (aaRows[ri] || [])) {
+        const l = keyLane[a.key]; if (l === undefined || laneAA[l] === undefined) continue;
+        const x = G + (a.mid - rs) * CW - CW;
+        const band = aaBand[a.key] || (aaBand[a.key] = { l, x1: x, x2: x + CW * 3 });
+        band.x1 = Math.min(band.x1, x); band.x2 = Math.max(band.x2, x + CW * 3);
+      }
+      for (const [key, band] of Object.entries(aaBand)) {
+        const it = items.find(x => x.key === key);
+        const col = (it && it.color) || '#c9ced6';
+        parts.push(`<div class="aaband" style="left:${band.x1}px;top:${laneAA[band.l] - 1}px;width:${band.x2 - band.x1}px;background:${col}2e;border-color:${col}"></div>`);
       }
       for (const a of (aaRows[ri] || [])) {
         const l = keyLane[a.key]; if (l === undefined || laneAA[l] === undefined) continue;
@@ -5778,7 +5883,7 @@ svg .lbl.p.hov { font-weight: 700; }
         </div>
         <label>Properties</label><div class="row2">
           <label class="inl"><input type="checkbox" id="pPhos" ${cur.phos ? 'checked' : ''}> 5′ phosphorylated</label>
-          <label class="inl">Colour <input type="color" id="pColor" value="${cur.color || '#2f6fd0'}"></label>
+          <label class="inl">Colour <input type="color" id="pColor" value="${cur.color || PRIMER_COL}"></label>
         </div>
         <label for="pNotes">Description</label><input type="text" id="pNotes" value="${esc(cur.notes || '')}">
         <div class="full" id="pinfo" class="hint"></div>

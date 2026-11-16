@@ -61,6 +61,70 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     ['Features', 'Add Feature…'],
     ['Primers', 'Add Primer…']
   ];
+  await step('a click lands on the base it was aimed at', async () => {
+    await p.evaluate(() => window.__gc.setView('seq'));
+    await p.waitForTimeout(600);
+    const g = await p.evaluate(() => {
+      const V = window.__gc.S.seq, nt = document.querySelector('#seqrows .nt');
+      const r = nt.closest('.srow').getBoundingClientRect();
+      return { G: V.G, left: r.left, top: r.top, CW: nt.getBoundingClientRect().width / nt.textContent.length, bpr: V.bpr };
+    });
+    const bad = [];
+    for (const k of [0, 1, 40, 90, g.bpr - 1]) {
+      await p.mouse.click(g.left + g.G + (k + 0.5) * g.CW, g.top + 30);
+      await p.waitForTimeout(80);
+      const got = await p.evaluate(() => window.__gc.D().sel.start);
+      if (got !== k) bad.push(`${k}\u2192${got}`);
+    }
+    if (bad.length) throw new Error('off by: ' + bad.join(', '));
+  });
+  await step('the bases keep clear of the floating strip', async () => {
+    const r = await p.evaluate(() => {
+      const strip = document.querySelector('#mapside').getBoundingClientRect();
+      let worst = 0;
+      for (const nt of document.querySelectorAll('#seqrows .nt')) worst = Math.max(worst, nt.getBoundingClientRect().right);
+      return { strip: strip.left, worst };
+    });
+    if (r.worst > r.strip) throw new Error(`the bases reach ${Math.round(r.worst)} and the strip starts at ${Math.round(r.strip)}`);
+  });
+  await step('a primer is drawn as a primer, not as a feature', async () => {
+    const n = await p.$$eval('#seqrows .primbox', es => es.length);
+    if (!n) throw new Error('no primer boxes');
+    const r = await p.evaluate(() => {
+      const box = document.querySelector('#seqrows .primbox');
+      const txt = box.textContent, d = window.__gc.D();
+      const key = box.dataset.k, id = +box.dataset.prim;
+      const pr = d.primers.find(x => x.id === id);
+      const top = document.querySelector('#seqrows .nt').getBoundingClientRect();
+      return { txt, name: pr && pr.name, bases: /^[ACGTN]+$/i.test(txt), above: box.getBoundingClientRect().top < top.top };
+    });
+    if (!r.bases) throw new Error('the box does not carry bases: ' + r.txt);
+    if (!r.name) throw new Error('the box is not tied to a primer');
+    // and it is not in the feature lanes
+    const asFeature = await p.$$eval('#seqrows .fbar', (es, nm) => es.some(e => e.textContent.trim() === nm), r.name);
+    if (asFeature) throw new Error('it is still drawn as a feature bar too');
+  });
+  await step('a translated feature carries a bar behind its residues', async () => {
+    const n = await p.$$eval('#seqrows .aaband', es => es.length);
+    if (!n) throw new Error('no band behind any amino acid row');
+    const clickable = await p.evaluate(() => {
+      const b = document.querySelector('#seqrows .aaband');
+      return getComputedStyle(b).pointerEvents === 'none';
+    });
+    if (!clickable) throw new Error('the band swallows clicks meant for the residues');
+    await p.evaluate(() => window.__gc.setView('map'));
+    await p.waitForTimeout(400);
+  });
+  await step('the map draws primers as oligos, not as arrows', async () => {
+    const n = await p.$$eval('#mapwrap g.prim', es => es.length);
+    if (!n) throw new Error('no primers on the map');
+    const parts = await p.evaluate(() => {
+      const g2 = document.querySelector('#mapwrap g.prim');
+      return { line: !!g2.querySelector('.primline'), hook: !!g2.querySelector('.primhook'), head: !!g2.querySelector('.primhead') };
+    });
+    if (!parts.line || !parts.hook || !parts.head) throw new Error('missing ' + JSON.stringify(parts));
+  });
+
   // hovering an enzyme lights up every copy of it, with a card beside the name
   await step('enzyme hover', async () => {
     await p.evaluate(() => { const g = window.__gc, d = g.D(); d.chosen = ['EcoRI', 'AluI', 'SmaI']; d.opts.enzMode = 'chosen'; g.setView('map'); g.renderAll(); });
@@ -93,8 +157,22 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     await p.waitForTimeout(400);
   });
   await step('primers are purple, forward out and reverse in', async () => {
-    const got = await p.$$eval('#mapwrap path.prim', es => es.map(e => e.getAttribute('fill')));
+    const got = await p.$$eval('#mapwrap g.prim .primline', es => es.map(e => e.getAttribute('stroke')));
     if (!got.length || got.some(c => c !== '#7b3fb0' && c !== '#b48ad6')) throw new Error('primer colours: ' + got.join(','));
+    // the forward ones ride outside the backbone, the reverse ones inside
+    const sides = await p.evaluate(() => {
+      const g2 = window.__gc, d = g2.D(), A = g2.analyze ? null : null;
+      const box = document.querySelector('#mapwrap svg').getBoundingClientRect();
+      return [...document.querySelectorAll('#mapwrap g.prim')].map(el => {
+        const t = el.querySelector('title').textContent;
+        const r = el.getBoundingClientRect();
+        return { rev: /reverse/.test(t), d: Math.hypot(r.left + r.width / 2 - (box.left + box.width / 2), r.top + r.height / 2 - (box.top + box.height / 2)) };
+      });
+    });
+    const fwd = sides.filter(x => !x.rev), rev = sides.filter(x => x.rev);
+    if (fwd.length && rev.length && Math.min(...fwd.map(x => x.d)) <= Math.max(...rev.map(x => x.d))) {
+      throw new Error('a reverse primer is further out than a forward one');
+    }
   });
   await step('the pieces of a digest are listed', async () => {
     await p.evaluate(() => window.__gc.menuAct('Cloning', 'Restriction Cloning…'));
