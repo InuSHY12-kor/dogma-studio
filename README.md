@@ -1,6 +1,6 @@
 # GeneCanvas
 
-플라스미드·DNA 서열 편집 프로그램입니다. 화면 구성과 작업 흐름은 the reference tool과 비슷하게 만들었고,
+플라스미드·DNA 서열 편집 프로그램입니다. 분자생물학 작업대에서 익숙한 화면 구성(지도·서열·효소·feature·프라이머 탭)을 따르며,
 **Windows 데스크톱**과 **안드로이드** 두 가지로 나옵니다. 둘은 `app/` 폴더 하나를 같이 쓰기 때문에
 기능을 한 번 만들면 양쪽에 함께 들어갑니다.
 
@@ -42,7 +42,7 @@
 
 | 영역 | 내용 |
 |---|---|
-| 파일 | GenBank(.gb/.gbk), FASTA, .dna 열기 · GenBank/FASTA 저장 · 지도 SVG 내보내기 · 끌어다 놓기로 열기 · 파일 연결(더블클릭으로 열기) · 여러 파일을 탭으로 열기 |
+| 파일 | GenBank(.gb/.gbk), FASTA, `.dna` 열기 · GenBank/FASTA 저장 · 지도 SVG 내보내기 · 끌어다 놓기로 열기 · 파일 연결(더블클릭으로 열기) · 여러 파일을 탭으로 열기 |
 | **NCBI** | **accession 번호(예: L09137, NM_000546)로 서열 바로 받기 · 단어로 검색해서 목록에서 고르기 · 받은 뒤 흔한 feature 자동 인식** |
 | Map | 원형/선형 지도, Feature 화살표, 제한효소 절단 위치 라벨, 프라이머, ORF, 지도에서 드래그로 영역 선택, 확대/축소 |
 | Sequence | 이중가닥 표시, 10 bp 눈금, Feature 막대, 아미노산 번역, 효소 위치, 직접 타이핑으로 편집, 복사/붙여넣기, DNA·단백질 검색(IUPAC 지원), 위치로 이동 |
@@ -168,25 +168,6 @@ RNA 파일은 화면에 U로 보이고 상보가닥을 그리지 않습니다(�
 | Frequency sampling | 자연 빈도 그대로 섞음 |
 | Harmonised to the source organism | 원래 organism에서의 희귀/흔함 정도를 목표 organism에서도 비슷하게 맞춤. 번역 속도 리듬이 folding에 중요할 때 |
 
-## the reference tool 사용자 가이드 기준
-
-v0.2.0에서는 the reference tool 사용자 가이드 15개 챕터(131개 문서)를 전부 읽고 빠진 기능을 채웠고,
-v0.3.0에서는 그 화면들을 the reference tool 쪽에 더 가깝게 다시 만들었습니다.
-챕터별로 무엇이 들어갔는지는 [CHANGELOG.md](CHANGELOG.md)에 적어 두었습니다.
-
-| 챕터 | 다룬 내용 |
-|---|---|
-| 01 Projects, 02·03·04 Display Options | Split Window, Focus on Region, GC 플롯, 지도 회전, 글꼴 크기, Compact/Plain text, Blocks, 고정 줄너비, 미니맵, 단백질 Region/Site/Bond |
-| 05 Info Panel | 파일 메타데이터, 참고문헌(PubMed), 첨부 파일 |
-| 06 Enzymes | Enzymes 메뉴 전체, 효소별 표시, noncutters, silent mutagenesis |
-| 07·08 Features | 세그먼트·인트론, 번역 옵션, point feature, cleavage arrow, custom feature type |
-| 09·10 Primers | 결합 조건, 삽입 도구, 구조 탭, 프라이머 데이터베이스 |
-| 11 Translations | 리딩프레임 행, 유전암호 14종, Letter Codes, Genetic Code Tables |
-| 12 Colors | 염기·단백질 색 스킴, 직접 칠하기, History colours |
-| 13 Searching | 질의 문법, 4개 검색 모드, feature 메타데이터 검색 |
-| 14 Focus on Region | 포커스 창과 모든 뷰 연동 |
-| 15 History | 텍스트 보기·내보내기·복사·인쇄, 단계별 색칠, Trim |
-
 ## 직접 빌드하기
 
 ```bash
@@ -229,7 +210,7 @@ app/primer.js   프라이머 설계
 app/msa.js      여러 서열 비교 (앵커 기반 정렬)
 app/codon.js    코돈 최적화
 app/silent.js   효소 사이트를 단백질 그대로 넣기·빼기 (silent mutagenesis)
-app/search.js   검색 (the reference tool 질의 문법, 정확·유사·단백질 검색)
+app/search.js   검색 (질의 문법, 정확·유사·단백질 검색)
 app/assembly.js 클로닝 엔진 (벡터 준비, overlap 설계, 제품 조립)
 app/asmui.js    Vector/Fragment/Product 창 (본 창과 별도 창에서 모두 동작)
 app/struct.js   프라이머 구조, RNA 접기, 단백질 성질
@@ -269,10 +250,20 @@ tools/build-codon-tables.js  NCBI CDS에서 코돈 사용표를 다시 만드는
 
 검증 삼아 효모 tRNA-Phe를 접어 보면 acceptor stem(1–7 / 66–72)을 정확히 찾습니다. 접기 속도는 100 nt 0.14초, 200 nt 0.5초이며, 길이의 세제곱에 비례하므로 앱 안에서는 600 nt로 제한하고 그보다 길면 외부 서버로 안내합니다.
 
+## 상표와 파일 형식에 대하여
+
+GeneCanvas는 독립적으로 만든 프로그램이며 어떤 상용 소프트웨어 회사와도 관련이 없고,
+어느 회사의 후원·보증·제휴도 받지 않았습니다. 본문에 나오는 제품명과 상표는 각 소유자의
+것이며, **어떤 파일을 읽을 수 있는지 설명하기 위해서만** 쓰였습니다.
+
+`.dna` 파일은 **읽기 전용**으로 지원합니다. 공개된 형식 설명을 바탕으로 자체 구현한
+파서이며, 다른 프로그램의 코드를 가져오거나 변환해 쓰지 않았습니다. 저장은 공개 표준인
+GenBank와 FASTA로만 합니다.
+
 ## 알아두실 점
 
 - 예제 플라스미드(pGC-Demo)는 기능을 보여주려고 만든 합성 서열이며, 실제 벡터 서열이 아닙니다.
 - NCBI 요청은 공개 E-utilities API를 씁니다. API 키 없이 쓰므로 요청 간격을 자동으로 띄웁니다. 받은 서열 말고는 아무것도 보내지 않습니다.
-- 저장은 GenBank 형식입니다. the reference tool `.dna` 형식으로는 저장할 수 없습니다(읽기만 됩니다).
+- 저장은 GenBank 형식입니다. `.dna` 형식은 **읽기만** 지원하고 그 형식으로 저장하지는 않습니다.
 - Tm은 nearest-neighbor 모델(50 mM Na⁺, 250 nM primer) 기준입니다.
 - Gateway 시뮬레이션은 att 자리의 7 bp core에서 교차시키는 방식입니다. 표준이 아닌 att 자리를 쓰면 연결 부위가 attB가 아니라고 알려줍니다.

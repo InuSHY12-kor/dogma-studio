@@ -118,7 +118,7 @@ svg .lbl.p.hov { font-weight: 700; }
   const FEATURE_TYPES = Object.keys(TYPE_COL).filter(t => t !== 'ORF');
   let featPicked = new Set();   // features ticked in the Features table
   let primPicked = new Set();   // primers ticked in the Primers table
-  // Forward ORFs orange, reverse ORFs green, as the reference tool draws them
+  // Forward ORFs orange, reverse ORFs green
   const ORF_FWD = '#e8a33d', ORF_REV = '#4fa86a';
   const CDS_PALETTE = ['#f4c95d', '#8ec3f2', '#f29e8e', '#a6dd8b', '#d6a8f0', '#f6b26b', '#7fd1c7'];
 
@@ -1774,7 +1774,7 @@ svg .lbl.p.hov { font-weight: 700; }
   function rememberType(t) {
     SET.recentTypes = [t, ...(SET.recentTypes || []).filter(x => x !== t)].slice(0, 8);
   }
-  // Custom types travel as a small CSV, which is what the reference tool shares between users.
+  // Custom types travel as a small CSV, so a set of them can be passed between users.
   function exportTypes(list) {
     if (!list.length) { toast('No custom types to export.'); return; }
     const esc2 = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
@@ -1831,7 +1831,8 @@ svg .lbl.p.hov { font-weight: 700; }
     toast(`${added} feature type${added === 1 ? '' : 's'} imported${skipped ? `, ${skipped} skipped (already known)` : ''}`);
   }
   /* A file may carry a type GeneCanvas has never seen. This offers the same choice
-   * the reference tool does: keep it as a custom type, or fall back to misc_feature. */
+   * there are two sensible answers: keep it as a custom type, or fall back to
+   * misc_feature. */
   function checkUnknownTypes(d) {
     const known = new Set([...STD_TYPES.map(([t]) => t), ...customTypes().map(c => c.name)]);
     const unknown = [...new Set(d.features.map(f => f.type).filter(t => t && !known.has(t)))];
@@ -2279,7 +2280,7 @@ svg .lbl.p.hov { font-weight: 700; }
   }
   /* Set Origin: for a circular sequence this rotates the molecule, which is what the
    * existing Set Origin at Cursor does. For a linear one nothing can be rotated, so the
-   * numbering is offset instead, which is how the reference tool lets a linear sequence carry the
+   * numbering is offset instead, which lets a linear sequence carry the
    * coordinates of a larger one (a gene within a chromosome, with negative positions
    * upstream of it). */
   function dlgSetOrigin() {
@@ -2631,7 +2632,7 @@ svg .lbl.p.hov { font-weight: 700; }
   // ---------------------------------------------------------------- map view side strip
   /* Everything that used to live in the left panel now hangs off this strip: each row is
    * an icon that toggles the thing on and off, and a small chevron that opens the rest of
-   * that group's settings beside it. The glyphs follow the reference tool's side toolbar. */
+   * that group's settings beside it. */
   const MS_ICONS = {
     enz: '<path d="M6 4v7h7" stroke-width="1.8"/><path d="M12 11h6" stroke-width="1.8"/><path d="M18 11v9" stroke-width="1.8"/><text x="4" y="22" font-size="7.5" stroke="none" fill="currentColor" font-family="Georgia,serif">SalI</text>',
     feat: '<path d="M3 8h12l5 4-5 4H3z" stroke-width="1.5"/>',
@@ -2976,7 +2977,7 @@ svg .lbl.p.hov { font-weight: 700; }
     const cx = W / 2, cy = H / 2;
     const laneW = 14, laneGap = 5;
     /* Primers sit on the backbone itself: the forward ones just outside the two lines,
-     * the reverse ones just inside, which is how the reference tool draws them. */
+     * the reverse ones just inside. */
     const pFwd = prims.filter(p => p.strand !== -1), pRev = prims.filter(p => p.strand === -1);
     assignLanes(pFwd, n); assignLanes(pRev, n);
     const nPF = pFwd.reduce((m2, p) => Math.max(m2, p.lane + 1), 0);
@@ -4069,7 +4070,7 @@ svg .lbl.p.hov { font-weight: 700; }
           else f.res = SEARCH.similar(d.seq, d.circular, f.q, { maxErr: f.maxErr, gaps: f.gaps });
         }
         else if (f.mode === 'prot') {
-          // visible translations first, as the reference tool does, then every frame if those are shown
+          // visible translations first, then every frame if those are shown
           const regions = d.features.filter(x => x.translated && !x.hidden).map(x => ({ start: x.start, end: x.end }));
           const everyFrame = d.opts.showTrans && d.opts.transMode !== 'orfs';
           f.res = SEARCH.protein(d.seq, d.circular, f.q, {
@@ -4169,7 +4170,7 @@ svg .lbl.p.hov { font-weight: 700; }
     // While a focus window is on, only the sites inside it are listed.
     const fo = focusOf(d);
     if (fo) list = list.map(x => ({ e: x.e, s: x.s.filter(t => DNA.overlaps({ start: t.pos, end: (t.pos + t.len) % n || n }, fo, n)) })).filter(x => x.s.length);
-    // sorting, including the two the reference tool offers beyond the column headers
+    // sorting, including the two orderings that have no column of their own
     const selPos = selLen(d) ? d.sel.start : null;
     const distOf = x => {
       if (selPos == null || !x.s.length) return Infinity;
@@ -4481,7 +4482,7 @@ svg .lbl.p.hov { font-weight: 700; }
 
   // ================================================================ FEATURE SEGMENTS & INTRONS
   // The feature a command should act on: the selected one, else the largest that
-  // overlaps the selection, which is the rule the reference tool uses for segment commands.
+  // overlaps the selection, which is the rule the segment commands follow.
   function targetFeature(d, needOverlap) {
     const n = d.seq.length;
     if (S.featSel) { const f = d.features.find(x => x.id === S.featSel); if (f) return f; }
@@ -4528,7 +4529,7 @@ svg .lbl.p.hov { font-weight: 700; }
     editSegments(f, out, `Marked ${fmt(b - a)} bp of ${f.name} as an intron`);
   }
   // A small editor shared by both commands, so segments can be named and coloured
-  // before the change is committed, as the reference tool's Edit Feature dialog does.
+  // before the change is committed.
   function editSegments(f, segs, label) {
     const d = D(), n = d.seq.length;
     const list = segs.slice();
@@ -4774,7 +4775,7 @@ svg .lbl.p.hov { font-weight: 700; }
     const fs = d.features.filter(f => !fo || DNA.overlaps(f, fo, n)).sort(featDesc ? (a, b) => -cmp(a, b) : cmp);
     const arrow = k => featSort === k ? (featDesc ? ' ▾' : ' ▴') : '';
     const dirTxt = f => f.strand === 1 ? '→ forward' : f.strand === -1 ? '← reverse' : (f.strand === 2 ? '↔ bidirectional' : '— none');
-    // the expanded detail block, which is what the reference tool's disclosure button shows
+    // the expanded detail block the disclosure button shows
     const detail = f => {
       const segList = DNA.featSegs(f, n);
       const t = (!isProt(d) && f.translated) ? DNA.featTranslate(d.seq, f, n, { code: f.code, startMet: f.startMet, frame: f.frame, startAt: f.startAt }) : null;
@@ -5175,7 +5176,7 @@ svg .lbl.p.hov { font-weight: 700; }
 
   /* History colours: the bases one step changed, found by comparing that step's stored
    * snapshot with the one before it. Clicking the step's name in History view turns them
-   * on, which is how the reference tool shows what an operation touched. */
+   * on, so what an operation touched can be seen at a glance. */
   function showHistoryColors(d, i) {
     if (i <= 0) { d.changed = []; d.opts.colorScheme = 'none'; renderAll(true); toast('The first step is the file as it was opened.'); return; }
     let a, b;
@@ -5475,7 +5476,7 @@ svg .lbl.p.hov { font-weight: 700; }
   function dlgFeature(f, preset = {}) {
     const d = D(), n = d.seq.length, isNew = !f;
     // A cursor with no selection makes a zero-length point feature, which is how
-    // the reference tool marks a splice junction or any other boundary between two bases.
+    // marks a splice junction or any other boundary between two bases.
     const point = isNew && !selLen(d);
     const cur = f || {
       name: preset.name || 'New feature', type: preset.type || 'misc_feature',
@@ -5962,7 +5963,7 @@ svg .lbl.p.hov { font-weight: 700; }
     }
     return out;
   }
-  // the reference tool hands primer sequences to IDT's OligoAnalyzer; so do we, one tab each.
+  // Primer sequences are handed to IDT's OligoAnalyzer, one tab each.
   function analyzeAtIDT() {
     const d = D();
     const picked = d.primers.filter(x => primPicked.has(x.id));
@@ -7246,7 +7247,7 @@ svg .lbl.p.hov { font-weight: 700; }
   }
 
   // A feature editor for protein documents, where positions are residues.
-  /* Protein annotations come in three kinds, as the reference tool draws them:
+  /* Protein annotations come in three kinds:
    *   region  one or more contiguous residues, a coloured bar, optionally a subtype
    *   site    one residue, or a scattered group, marked above the sequence
    *   bond    a covalent link, drawn as a loop within the protein or a line out of it */
@@ -7411,7 +7412,7 @@ svg .lbl.p.hov { font-weight: 700; }
       body: `<table class="grid"><thead><tr><th>Colour</th><th>Residues</th></tr></thead><tbody>
         ${Object.entries(byCol).map(([col, res]) => `<tr><td><span class="sw" style="background:${col};width:30px"></span></td><td class="mono">${res.sort().join(' ')}</td></tr>`).join('')}
       </tbody></table>
-      <div class="hint">${scheme === 'dnastar' ? 'The categories are the ones the the reference tool guide lists for the DNASTAR scheme; the colours are GeneCanvas’s own.' : (scheme === 'tm' ? 'Shaded from most hydrophilic to least, in the order given by Zhao and London (2006).' : 'Palette as published for this scheme.')}</div>`,
+      <div class="hint">${scheme === 'dnastar' ? 'The categories are those of the published DNASTAR scheme; the colours are GeneCanvas’s own.' : (scheme === 'tm' ? 'Shaded from most hydrophilic to least, in the order given by Zhao and London (2006).' : 'Palette as published for this scheme.')}</div>`,
       buttons: [{ label: 'Close', primary: true }]
     });
   }
@@ -8272,7 +8273,7 @@ svg .lbl.p.hov { font-weight: 700; }
       } }]
     });
   }
-  // the reference tool writes enzyme sets as plain text, one name per line; we do the same so
+  // Enzyme sets are plain text, one name per line, so a set can be shared as a file and
   // a set can be carried to another machine.
   function exportEnzSet() {
     const d = D();

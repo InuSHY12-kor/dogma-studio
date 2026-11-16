@@ -1,6 +1,6 @@
 /* GeneCanvas — sequence search. Exposes window.SEARCH
  *
- * Implements the query syntax the reference tool documents:
+ * The query syntax:
  *   GGTCT(AG)CTTC   a set of allowed letters at one position
  *   GGTCTRCTTC      an IUPAC ambiguity code, expanded to the letters it stands for
  *   !R  !(AG)       letters that must NOT appear at that position

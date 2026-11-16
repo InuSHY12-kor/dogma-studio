@@ -2,7 +2,7 @@
   "name": "genecanvas",
   "productName": "GeneCanvas",
   "version": "0.3.1",
-  "description": "Desktop plasmid and DNA sequence editor: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
+  "description": "Plasmid and DNA sequence editor for Windows and Android: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
   "main": "main.js",
   "author": "GeneCanvas",
   "license": "UNLICENSED",
@@ -86,7 +86,7 @@
       {
         "ext": "dna",
         "name": "DNA sequence file",
-        "description": "DNA sequence file"
+        "description": "Annotated DNA sequence (.dna)"
       },
       {
         "ext": [

@@ -24,7 +24,7 @@
   /* ---------- Nucleotide masses and composition ----------
    * Average monoisotopic-free (average) masses of the monophosphate nucleotides, less
    * the water lost at each phosphodiester bond. An ambiguity code is counted as the
-   * mean of the bases it stands for, which is what the reference tool does.
+   * mean of the bases it stands for, which is the usual convention.
    * A 5'-phosphate adds HPO3 (79.98); an unphosphorylated 5' end has none. */
   const NT_MW = { A: 331.22, C: 307.20, G: 347.22, T: 322.21, U: 324.18 };
   const H2O = 18.02, HPO3 = 79.98;
@@ -768,7 +768,9 @@ ZraI GACGTC 3 3`;
     return r;
   }
 
-  // .dna binary (block stream: type byte, uint32 BE length, payload)
+  /* The .dna binary layout: a stream of blocks, each a type byte, a big-endian
+   * uint32 length and that many bytes of payload. Read only; nothing is written in
+   * this format. */
   function parseDnaBinary(buf, filename) {
     const dv = new DataView(buf); let o = 0;
     let seq = '', circular = false; const features = [], primers = [];
@@ -806,7 +808,7 @@ ZraI GACGTC 3 3`;
         }
       }
     }
-    if (!sawCookie && !seq) throw new Error('This is not a .dna file.');
+    if (!sawCookie && !seq) throw new Error('This file is not in the .dna format.');
     seq = clean(seq);
     if (!seq) throw new Error('The .dna file has no DNA sequence block.');
     const n = seq.length;

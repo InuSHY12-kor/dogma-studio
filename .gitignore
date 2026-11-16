@@ -12,3 +12,6 @@ android/app/build/
 android/capacitor-cordova-android-plugins/build/
 android/local.properties
 *.keystore
+
+# development screenshots
+shots*/

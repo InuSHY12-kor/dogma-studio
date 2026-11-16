@@ -47,7 +47,7 @@
 - **시퀀스 뷰에서는** 올려놓은 효소가 **실제 자르는 모양**으로 그려집니다 — 인식서열이 상자로
   둘리고 각 가닥이 잘리는 자리에 선이 들어가, 5′·3′ 돌출과 blunt가 눈에 보입니다.
 - 분자 전체에서 **한 번만 자르는 효소는 굵게**, **blunt end를 만드는 효소는 녹색**입니다.
-- **프라이머가 보라색**이 되었고, the reference tool처럼 backbone 두 줄의 **바깥(정방향)·안쪽(역방향)**에
+- **프라이머가 보라색**이 되었고, backbone 두 줄의 **바깥(정방향)·안쪽(역방향)**에
   붙습니다. feature와 ORF는 그만큼 밀려나 겹치지 않습니다.
 - **맵 표시 옵션**이 사이드 메뉴 feature 그룹에 들어왔습니다 — Show Features on Line,
   Show Feature Labels, Internal/External 라벨, Show Label Background, Show Feature Length,
@@ -68,7 +68,7 @@
 
 ## v0.3.0
 
-the reference tool 화면을 기준으로 **지도·클로닝·시뮬레이션 화면을 다시 만든 판**입니다.
+**지도·클로닝·시뮬레이션 화면을 다시 만든 판**입니다.
 요청하신 16가지 항목을 모두 반영했고, 각 항목은 headless Chromium과 Electron에서 동작을 확인했습니다.
 
 ### 새로 생긴 것
@@ -106,7 +106,7 @@ the reference tool 화면을 기준으로 **지도·클로닝·시뮬레이션 �
   나중에 그립니다(원형·선형 모두).
 - **왼쪽 패널의 기능이 전부 오른쪽 사이드 메뉴로** 들어갔습니다. 아이콘은 켜고 끄기, 옆의 작은
   **펼침 단추**는 그 그룹의 나머지 설정을 엽니다. 순서는 **효소 · feature · primer · ORF · 색 ·
-  줄 번호 · alignment**이고, 글리프는 the reference tool 사이드 툴바를 따랐습니다. 왼쪽 패널은 선택·서열
+  줄 번호 · alignment**이고, 각 그룹을 한눈에 알아볼 글리프를 새로 그렸습니다. 왼쪽 패널은 선택·서열
   수치만 남기고 기본 꺼짐(View → Show Details Panel로 다시 켬).
 - **아미노산으로 DNA를 고를 수 있습니다.** 아미노산을 클릭하면 그 코돈 3염기가 선택되고, 드래그
   하면 코돈 단위로 늘어나며, 더블클릭하면 번역된 feature 전체가 선택됩니다. 역방향 CDS에서도
@@ -140,8 +140,7 @@ the reference tool 화면을 기준으로 **지도·클로닝·시뮬레이션 �
 
 ## v0.2.0
 
-the reference tool 사용자 가이드 15개 챕터(131개 문서)를 전부 읽고 빠진 기능을 채운 판입니다.
-작업 단위는 챕터별로 커밋되어 있고, 각 항목은 headless Chromium에서 동작을 확인했습니다.
+빠져 있던 기능을 폭넓게 채운 판입니다. 각 항목은 headless Chromium에서 동작을 확인했습니다.
 
 ### Cloning
 
@@ -255,6 +254,6 @@ the reference tool 사용자 가이드 15개 챕터(131개 문서)를 전부 읽
 
 ## v0.1.0
 
-첫 공개 판. Map/Sequence/Enzymes/Features/Primers/History 뷰, GenBank·FASTA·.dna
+첫 공개 판. Map/Sequence/Enzymes/Features/Primers/History 뷰, GenBank·FASTA·`.dna`
 읽기, NCBI accession 다운로드, 제한효소·Golden Gate·Gibson·Gateway 클로닝, 코돈 최적화,
 .ab1 정렬, 아가로스 젤, 프라이머 설계, 인쇄·PDF.
