@@ -340,6 +340,35 @@ svg .lbl.p.hov { font-weight: 700; }
     const v = n2 => { const c = parseInt(h.substr(n2, 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     return (0.2126 * v(0) + 0.7152 * v(2) + 0.0722 * v(4)) < 0.42;
   }
+  /* A primer's sequence is held in upper case, because that is what every calculation
+   * expects, and the letters as they were typed are kept beside it so the screen can
+   * show the case a person used to mark a tail, a mismatch or an added site. */
+  const VALID_BASE = /[ACGTUNRYKMSWBDHVacgtunrykmswbdhv]/;
+  function keepCase(s) {
+    let o = '';
+    for (const c of String(s || '')) {
+      if (!VALID_BASE.test(c)) continue;
+      o += c === 'u' ? 't' : (c === 'U' ? 'T' : c);
+    }
+    return o;
+  }
+  const primerLetters = p => {
+    if (!p) return '';
+    if (p.seqCase && p.seqCase.length === (p.seq || '').length) return p.seqCase;   // as typed
+    return p.case === 'lower' ? (p.seq || '').toLowerCase() : (p.seq || '');        // or as the batch edit asked
+  };
+  // complement, letter by letter, leaving upper and lower case as they were
+  function compCase(s) {
+    const M = { a: 't', t: 'a', g: 'c', c: 'g', u: 'a', n: 'n', r: 'y', y: 'r', k: 'm', m: 'k', s: 's', w: 'w', b: 'v', v: 'b', d: 'h', h: 'd' };
+    let o = '';
+    for (const c of s) {
+      const low = c.toLowerCase(), m = M[low] || 'n';
+      o += c === low ? m : m.toUpperCase();
+    }
+    return o;
+  }
+  const rcCase = s => compCase(s).split('').reverse().join('');
+
   // Primers are drawn in purple so they are never taken for an enzyme or a feature.
   const PRIMER_COL = '#7b3fb0', PRIMER_SOFT = '#b48ad6';
   /* A phone-sized window. The desktop never matches this, so everything behind it is
@@ -364,7 +393,7 @@ svg .lbl.p.hov { font-weight: 700; }
     }
     if (o.showPrimers) for (const p of d.primers) {
       if (p.hidden) continue;
-      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? PRIMER_COL : PRIMER_SOFT), type: 'primer' }));
+      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? PRIMER_COL : PRIMER_SOFT), type: 'primer', full: b.full, ann: b.annealed }));
     }
     if (o.showORFs && o.transMode === 'orfs') A.orfs.forEach((r, i) => items.push({
       kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand,
@@ -3696,10 +3725,17 @@ svg .lbl.p.hov { font-weight: 700; }
       /* Primers binding the top strand sit above it, the ones binding the bottom strand
        * below, each in as many rows as it takes not to overlap a neighbour. */
       const PRH = 26;
-      const myPrims = compact ? [] : primerItems.flatMap(it => DNA.segs(it, n)
-        .map(([a, b]) => ({ it, a, b }))
-        .filter(x => x.a < re && x.b > rs)
-        .map(x => ({ it, a: Math.max(x.a, rs), b: Math.min(x.b, re), whole: x })));
+      const myPrims = compact ? [] : primerItems.flatMap(it => {
+        const pieces = [];
+        let off = 0;                                   // how many bases of the primer come before this piece
+        for (const [a, b] of DNA.segs(it, n)) {
+          pieces.push({ it, a, b, off });
+          off += b - a;
+        }
+        return pieces
+          .filter(x => x.a < re && x.b > rs)
+          .map(x => ({ it, a: Math.max(x.a, rs), b: Math.min(x.b, re), whole: x, off: x.off + Math.max(0, rs - x.a) }));
+      });
       const lanePrim = (list) => {
         const ends = [];
         for (const q of list) {
@@ -3732,14 +3768,21 @@ svg .lbl.p.hov { font-weight: 700; }
        * so it can be read against the strand rather than guessed at from a bar. */
       const primBox = (q, top, above) => {
         const x = G + (q.a - rs) * CW, w = (q.b - q.a) * CW;
-        const sub = DNA.sub(d.seq, q.a, q.b);
-        const txt = q.it.strand === -1 ? DNA.comp(sub) : sub;
+        /* The letters are the primer's own, as typed, not the template's: the part of
+         * it that anneals here, turned to read along the strand it sits on. */
+        const all = primerLetters(q.it.ref);
+        const bound = q.it.full === false && q.it.ann ? all.slice(all.length - q.it.ann) : all;
+        /* A primer binding the bottom strand runs right to left, so its letters are
+         * written in reverse to stand over the bases they pair with: reversing — not
+         * complementing — is what puts a primer over its own binding site. */
+        const along = q.it.strand === -1 ? bound.split('').reverse().join('') : bound;
+        const txt = along.substr(q.off, q.b - q.a) || DNA.sub(d.seq, q.a, q.b);
         const col = q.it.ref.color || PRIMER_COL;
         const startsHere = q.a === (q.it.strand === -1 ? q.whole.b : q.whole.a) || q.a === q.whole.a;
         const endsHere = q.b === q.whole.b;
         const hook = q.it.strand === -1 ? (startsHere ? ' hookL' : '') : (endsHere ? ' hookR' : '');
         return `<div class="primbox${hook}" data-k="${q.it.key}" data-prim="${q.it.ref.id}" title="${esc(q.it.name)} \u00b7 ${fmt(Math.min(q.it.start, q.it.end) + 1)}..${fmt(Math.max(q.it.start, q.it.end))} \u00b7 ${q.it.strand === -1 ? 'binds the bottom strand' : 'binds the top strand'}"
-          style="left:${x}px;top:${top}px;width:${w}px;color:${col};border-color:${col}">${esc(txt)}</div>
+          style="left:${x - 1}px;top:${top}px;width:${w}px;color:${col};border-color:${col}">${esc(txt)}</div>
           <div class="primname" data-k="${q.it.key}" data-prim="${q.it.ref.id}" style="left:${x}px;top:${above ? top - 11 : top + 16}px;color:${col}">${esc(q.it.name)}</div>`;
       };
       for (const q of pFwd) parts.push(primBox(q, 4 + enzH + (nPF - 1 - q.lane) * PRH + 12, true));
@@ -5034,7 +5077,7 @@ svg .lbl.p.hov { font-weight: 700; }
     }[primSort] || ((a, b) => a.name.localeCompare(b.name));
     const list = list0.slice().sort(primDesc ? (a, b) => -cmp(a, b) : cmp);
     const arrow = k => primSort === k ? (primDesc ? ' ▾' : ' ▴') : '';
-    const show = p => p.case === 'lower' ? p.seq.toLowerCase() : p.seq;
+    const show = p => primerLetters(p);
     // the expanded row, which is where the structure buttons live
     const detail = p => {
       const b = A.psites[p.id] || [];
@@ -5390,7 +5433,7 @@ svg .lbl.p.hov { font-weight: 700; }
     dialog({
       title: 'Primer — ' + name,
       body: p ? `<div class="form">
-        <label>Sequence</label><div class="mono wrap">${esc(p.seq)}</div>
+        <label>Sequence</label><div class="mono wrap">${esc(primerLetters(p))}</div>
         <label>Length</label><div>${p.seq.length} nt</div>
         <label>Tm</label><div>${DNA.tm(p.seq).toFixed(1)} °C</div>
         <label>GC</label><div>${DNA.gcPct(p.seq).toFixed(0)} %</div>
@@ -5819,12 +5862,14 @@ svg .lbl.p.hov { font-weight: 700; }
       return strand === 1 ? raw : DNA.rc(raw);
     };
     const cur = p || preset || { name: `Primer ${d.primers.length + 1}`, seq: fromSel ? baseOf() : '' };
-    let seq = cur.seq || '';
+    let seq = primerLetters(cur) || cur.seq || '';
     let template = seq;                       // the part that came from the template
     let caret = seq.length;
     const upd = () => {
       const box = $('#dlg'); if (!box) return;
-      const b = seq.length >= 6 ? primerBind(d, { seq }) : [];
+      // every number comes from the upper-case form; only what is shown keeps the case
+      const useq = DNA.clean(seq);
+      const b = seq.length >= 6 ? primerBind(d, { seq: useq }) : [];
       const site = b[0];
       const addedCount = Math.max(0, seq.length - (template ? template.length : 0));
       // the sequence with any added bases marked
@@ -5835,11 +5880,11 @@ svg .lbl.p.hov { font-weight: 700; }
       const made = [];
       for (const e of DNA.ENZYMES) {
         if (e.core < 6) continue;
-        const hits = SEARCH.exact(seq, false, e.site);
+        const hits = SEARCH.exact(useq, false, e.site);
         for (const h of hits) made.push({ name: e.name, at: h.start, len: e.site.length });
       }
       $('#pinfo').innerHTML = seq.length
-        ? `${seq.length} nt · Tm ${DNA.tm(seq).toFixed(1)} °C · GC ${DNA.gcPct(seq).toFixed(0)} % · MW ${fmt(Math.round(DNA.strandMW(seq, { ends: $('#pPhos') && $('#pPhos').checked ? 'phosphorylated' : 'unphosphorylated' })))} Da`
+        ? `${useq.length} nt · Tm ${DNA.tm(useq).toFixed(1)} °C · GC ${DNA.gcPct(useq).toFixed(0)} % · MW ${fmt(Math.round(DNA.strandMW(useq, { ends: $('#pPhos') && $('#pPhos').checked ? 'phosphorylated' : 'unphosphorylated' })))} Da`
         + `<br>${b.length ? `${b.length} binding site${b.length === 1 ? '' : 's'} · ${site.annealed} of ${seq.length} bases annealed · annealed Tm ${site.tm.toFixed(1)} °C` : '<span style="color:var(--danger)">no binding site with the current hybridisation parameters</span>'}`
         + (addedCount ? `<br>${addedCount} base${addedCount === 1 ? '' : 's'} added to the 5′ end` : '')
         + (made.length ? `<br>enzyme sites in the primer: ${made.map(m => `<span title="at ${m.at + 1}" style="color:#1a7f37">${esc(m.name)}</span>`).join(', ')}` : '')
@@ -5853,7 +5898,7 @@ svg .lbl.p.hov { font-weight: 700; }
       const ref = DNA.sub(d.seq, from, to);
       const refRC = DNA.comp(ref);
       const pad = site.start - from;
-      const pr = topStrand ? seq : DNA.rc(seq);
+      const pr = topStrand ? seq : DNA.rc(useq);
       const lead = pad - (seq.length - site.annealed) * (topStrand ? 1 : 0);
       const prLine = ' '.repeat(Math.max(0, topStrand ? pad - (seq.length - site.annealed) : pad)) + pr;
       panel.innerHTML = `<div class="palign">
@@ -5893,10 +5938,13 @@ svg .lbl.p.hov { font-weight: 700; }
       { label: 'Structure…', act: () => { closeDialog(); dlgPrimerStruct({ id: p ? p.id : 0, name: val('pn') || 'primer', seq }, null); return false; } },
       { label: 'Cancel' }, {
         label: isNew ? 'Add Primer to Template' : 'Save', primary: true, act: () => {
-          const name = val('pn').trim(), s2 = DNA.clean(val('ps'));
+          const name = val('pn').trim(), raw = keepCase(val('ps')), s2 = DNA.clean(val('ps'));
           if (!name) return showErr('Enter a primer name.');
           if (s2.length < 6) return showErr('A primer needs at least 6 bases.');
-          const rec = { name, seq: s2, notes: val('pNotes').trim(), phos: $('#pPhos').checked, color: val('pColor') };
+          // the upper-case form is what every calculation uses; the typed form is kept
+          // beside it, and only when it actually says something the other does not
+          const rec = { name, seq: s2, seqCase: (raw !== s2 && raw.length === s2.length) ? raw : undefined,
+            notes: val('pNotes').trim(), phos: $('#pPhos').checked, color: val('pColor') };
           if (isNew) { d.primers.push({ id: uid(), added: Date.now(), ...rec }); commit(d, `Added primer ${name}`); }
           else { Object.assign(p, rec); commit(d, `Edited primer ${name}`); }
           renderAll(true);
@@ -5904,7 +5952,7 @@ svg .lbl.p.hov { font-weight: 700; }
       }],
       onOpen: box => {
         const ta = box.querySelector('#ps');
-        const sync = () => { seq = DNA.clean(ta.value); upd(); };
+        const sync = () => { seq = keepCase(ta.value); upd(); };
         ta.addEventListener('input', sync);
         ta.addEventListener('keyup', () => { caret = ta.selectionStart; });
         ta.addEventListener('click', () => { caret = ta.selectionStart; });
@@ -5977,7 +6025,7 @@ svg .lbl.p.hov { font-weight: 700; }
     const list = picked.length ? picked : d.primers;
     const COLS = [
       ['name', 'Name', x => x.name],
-      ['seq', 'Sequence (5′→3′)', x => (x.case === 'lower' ? x.seq.toLowerCase() : x.seq)],
+      ['seq', 'Sequence (5′→3′)', x => primerLetters(x)],
       ['length', 'Length', x => x.seq.length],
       ['tm', 'Tm (°C)', x => DNA.tm(x.seq).toFixed(1)],
       ['gc', 'GC (%)', x => DNA.gcPct(x.seq).toFixed(0)],
@@ -9049,7 +9097,7 @@ svg .lbl.p.hov { font-weight: 700; }
       parts.push(`<h2>Features</h2><table><thead><tr><th>Name</th><th>Type</th><th>Location</th><th>Length</th><th>Direction</th></tr></thead><tbody>${fs.map(f => `<tr><td>${esc(f.name)}</td><td>${esc(f.type)}</td><td>${fmt(f.start + 1)}..${fmt(f.end)}</td><td>${fmt(DNA.rlen(f, n))} bp</td><td>${f.strand === 1 ? 'forward' : f.strand === -1 ? 'reverse' : '—'}</td></tr>`).join('')}</tbody></table>`);
     }
     if (opts.primers && d.primers.length) {
-      parts.push(`<h2>Primers</h2><table><thead><tr><th>Name</th><th>Sequence 5′→3′</th><th>Length</th><th>Tm</th><th>Binds</th></tr></thead><tbody>${d.primers.map(p => { const b = A.psites[p.id] || []; return `<tr><td>${esc(p.name)}</td><td class="mono">${esc(p.seq)}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}`).join(', ') : 'no site'}</td></tr>`; }).join('')}</tbody></table>`);
+      parts.push(`<h2>Primers</h2><table><thead><tr><th>Name</th><th>Sequence 5′→3′</th><th>Length</th><th>Tm</th><th>Binds</th></tr></thead><tbody>${d.primers.map(p => { const b = A.psites[p.id] || []; return `<tr><td>${esc(p.name)}</td><td class="mono">${esc(primerLetters(p))}</td><td>${p.seq.length}</td><td>${DNA.tm(p.seq).toFixed(1)} °C</td><td>${b.length ? b.map(x => `${fmt(x.start + 1)}..${fmt(x.end)} ${x.strand > 0 ? '→' : '←'}`).join(', ') : 'no site'}</td></tr>`; }).join('')}</tbody></table>`);
     }
     if (opts.enzymes) {
       const list = shownEnz(d, A);

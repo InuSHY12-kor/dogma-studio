@@ -104,6 +104,48 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     const asFeature = await p.$$eval('#seqrows .fbar', (es, nm) => es.some(e => e.textContent.trim() === nm), r.name);
     if (asFeature) throw new Error('it is still drawn as a feature bar too');
   });
+  await step('a primer box stands exactly over the bases it binds', async () => {
+    const r = await p.evaluate(() => {
+      const out = [];
+      for (const box of document.querySelectorAll('#seqrows .primbox')) {
+        const row = box.closest('.srow'), nts = row.querySelectorAll('.nt');
+        const top = nts[0], bot = nts[1] || nts[0];
+        const rb = box.getBoundingClientRect(), rt = top.getBoundingClientRect();
+        const CW = rt.width / top.textContent.length;
+        const at = (rb.left + 1 - rt.left) / CW;          // the 1px is the box's own border
+        const idx = Math.round(at);
+        const strand = rb.top > rt.top ? bot.textContent : top.textContent;
+        out.push({
+          off: Math.abs(at - idx),
+          same: strand.substr(idx, box.textContent.length).toUpperCase() === box.textContent.toUpperCase()
+        });
+      }
+      return out;
+    });
+    if (!r.length) throw new Error('no primer boxes to check');
+    const slip = r.filter(x => x.off > 0.05);
+    if (slip.length) throw new Error(`${slip.length} box(es) start between two bases`);
+    const wrong = r.filter(x => !x.same);
+    if (wrong.length) throw new Error(`${wrong.length} box(es) do not read as the strand under them`);
+  });
+  await step('a primer keeps the case it was typed in', async () => {
+    await p.evaluate(() => {
+      const d = window.__gc.D();
+      d.primers.push({ id: 987654, name: 'case probe', seq: 'GTAAAACGACGGCCAGT', seqCase: 'gtaaaaCGACGGCCAGT' });
+      d.cache = null;                       // the binding sites are worked out again
+      window.__gc.renderAll();
+    });
+    await p.waitForTimeout(700);
+    const shown = await p.$$eval('#seqrows .primbox', es => es.map(e => e.textContent));
+    if (!shown.some(t => /[a-z]/.test(t) && /[A-Z]/.test(t))) throw new Error('the case was flattened: ' + shown.join(' | '));
+    await p.evaluate(() => {
+      const d = window.__gc.D();
+      d.primers = d.primers.filter(x => x.id !== 987654);
+      d.cache = null;
+      window.__gc.renderAll();
+    });
+    await p.waitForTimeout(400);
+  });
   await step('a translated feature carries a bar behind its residues', async () => {
     const n = await p.$$eval('#seqrows .aaband', es => es.length);
     if (!n) throw new Error('no band behind any amino acid row');

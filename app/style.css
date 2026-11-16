@@ -171,9 +171,11 @@ button { cursor: pointer; }
 
 /* A primer is not a feature: it is a box of its own bases, in its own colour, beside
    the strand it binds, with a hook at its 3′ end. */
-.srow .primbox { position: absolute; height: 15px; font: 12.5px/15px var(--f-mono); white-space: pre; overflow: hidden;
+/* The box is drawn at the very size and font of a strand, and its border sits outside
+   that, so each of its letters stands over the base it binds. */
+.srow .primbox { position: absolute; height: 17px; font: 13.5px/17px var(--f-mono); white-space: pre; overflow: hidden;
   border: 1px solid currentColor; border-radius: 2px; background: rgba(255, 255, 255, .92); cursor: pointer;
-  letter-spacing: 0; box-sizing: border-box; }
+  letter-spacing: 0; box-sizing: content-box; -webkit-font-smoothing: antialiased; }
 .srow .primbox.hookR { border-right-width: 3px; }
 .srow .primbox.hookL { border-left-width: 3px; }
 .srow .primbox:hover { background: #fff; filter: brightness(.9); }
