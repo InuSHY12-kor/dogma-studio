@@ -586,12 +586,63 @@ ZraI GACGTC 3 3`;
   ];
 
   // `short` entries are left out by default: a motif of a few residues turns up by chance.
+  /* Detection walks a long list — well over a thousand standard features — so each one
+   * gets a cheap look before an expensive one. The sequence is laid out once, forwards,
+   * reverse complemented and translated in all six frames, and a feature only reaches
+   * the real search if a plain substring of it turns up somewhere in that. Nothing is
+   * decided by the quick look: it only rules candidates out, so what is found is exactly
+   * what the full search would have found on its own. */
+  const PROBE = 14;
+  function prepScan(seq, circular, list) {
+    let longest = 0;
+    for (const f of list) if (f && f.seq) longest = Math.max(longest, f.kind === 'protein' ? f.seq.length * 3 : f.seq.length);
+    const ext = circular && longest > 1 ? seq + seq.slice(0, Math.min(seq.length, longest - 1)) : seq;
+    const p = { dna: ext, rna: null, rc: rc(ext), aa: [] };
+    for (let f = 0; f < 3; f++) p.aa.push(translate(ext.slice(f)), translate(p.rc.slice(f)));
+    return p;
+  }
+  // the first stretch of a feature with no ambiguity code in it, or '' when it has none
+  function probeOf(f) {
+    if (f.kind === 'protein') return f.seq.slice(0, Math.min(10, f.seq.length)).replace(/\*/g, '');
+    const s = String(f.seq).toUpperCase();
+    if (s.length < PROBE) return /^[ACGT]+$/.test(s) ? s : '';
+    for (let i = 0; i + PROBE <= s.length; i++) {
+      const w = s.slice(i, i + PROBE);
+      if (/^[ACGT]+$/.test(w)) return w;
+    }
+    return '';
+  }
+  function mayBeThere(f, p, probe) {
+    if (!probe) return true;                       // nothing cheap to test: let it through
+    if (f.kind === 'protein') return p.aa.some(fr => fr.indexOf(probe) >= 0);
+    return p.dna.indexOf(probe) >= 0 || p.rc.indexOf(probe) >= 0;
+  }
+
+  /* The core list above is what the program knows on its own. features-db.js, when it
+   * ships, adds the rest of the standard library beside it; anything already named here
+   * with the same sequence is left alone, so the core stays the one definition. */
+  (function mergeLibrary() {
+    const lib = root.FEATURE_DB;
+    if (!Array.isArray(lib)) return;
+    const have = new Set(COMMON.map(f => (f.kind || 'dna') + ':' + f.seq));
+    for (const f of lib) {
+      if (!f || !f.seq) continue;
+      const k = (f.kind || 'dna') + ':' + f.seq;
+      if (have.has(k)) continue;
+      have.add(k);
+      COMMON.push(f);
+    }
+  })();
+
   function detectCommon(seq, circular, existing, opts) {
     opts = opts || {};
     const found = [];
-    for (const f of COMMON.concat(opts.extra || [])) {
+    const list = COMMON.concat(opts.extra || []);
+    const prep = prepScan(seq, circular, list);
+    for (const f of list) {
       if (!f || !f.seq) continue;
       if (f.short && !opts.includeShort) continue;
+      if (!mayBeThere(f, prep, probeOf(f))) continue;
       const hits = f.kind === 'protein' ? searchProtein(seq, circular, f.seq) : searchDNA(seq, circular, f.seq);
       for (const h of hits) {
         if (existing.some(x => x.start === h.start && x.end === h.end)) continue;

@@ -1,0 +1,147 @@
+#!/usr/bin/env node
+/* Build app/features-db.js from a folder of annotated sequence files.
+ *
+ *   node tools/build-feature-db.js <folder> [out]
+ *
+ * Each file in the folder holds one standard feature: the sequence itself and, in the
+ * file's annotation block, the feature's name, its type, its colour and whether the
+ * program should look for it as DNA or as a translation. This reads those out and
+ * writes the list the program ships, leaving out anything the core list in dna.js
+ * already defines with the same sequence.
+ *
+ * The folder is not part of the repository — the generated file is, so this only has to
+ * be run again when the library it was built from changes.
+ */
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const SRC = process.argv[2];
+const OUT = process.argv[3] || path.join(__dirname, '..', 'app', 'features-db.js');
+if (!SRC) {
+  console.error('usage: node tools/build-feature-db.js <folder of .dna files> [out]');
+  process.exit(2);
+}
+
+/* The files are a chain of blocks: one byte saying what the block is, four bytes of
+ * length, then that many bytes. Block 0 is the sequence and block 10 the annotation. */
+function blocks(buf) {
+  const out = [];
+  let o = 0;
+  while (o + 5 <= buf.length) {
+    const t = buf[o];
+    const n = buf.readUInt32BE(o + 1);
+    if (n < 0 || o + 5 + n > buf.length) break;
+    out.push([t, buf.slice(o + 5, o + 5 + n)]);
+    o += 5 + n;
+  }
+  return out;
+}
+
+const NAMED = { lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', amp: '&' };
+const unescapeXml = s => String(s).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (whole, body) => {
+  if (body[0] === '#') {
+    const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+  }
+  return body in NAMED ? NAMED[body] : whole;
+}).replace(/\u00a0/g, ' ');   // a no-break space reads as a space and searches as one
+const attrs = s => {
+  const o = {};
+  for (const m of String(s).matchAll(/(\w+)="([^"]*)"/g)) o[m[1]] = m[2];
+  return o;
+};
+
+function readOne(file) {
+  const buf = fs.readFileSync(file);
+  let seq = null, xml = null;
+  for (const [t, body] of blocks(buf)) {
+    if (t === 0) seq = body.slice(1).toString('ascii').toUpperCase();
+    else if (t === 10) xml = body.toString('utf8');
+  }
+  if (!seq || !xml) return null;
+  const m = xml.match(/<Feature\b([^>]*)>([\s\S]*?)<\/Feature>/);
+  if (!m) return null;
+  const a = attrs(m[1]), body = m[2];
+  const name = unescapeXml(a.name || '').trim();
+  if (!name) return null;
+
+  const segs = [...body.matchAll(/<Segment\b([^>]*)\/>/g)].map(x => attrs(x[1]));
+  const colour = (segs.find(s => s.color && s.color.toLowerCase() !== '#ffffff') || {}).color || '';
+  const q = key => {
+    const mm = body.match(new RegExp('<Q name="' + key + '"><V text="([^"]*)"'));
+    if (!mm) return '';
+    return unescapeXml(unescapeXml(mm[1])).replace(/<[^>]+>/g, '').trim();
+  };
+
+  const rec = { name, type: a.type || 'misc_feature' };
+  if (a.detectionMode === 'exactProteinMatch') {
+    // found by its translation, so a gene with different codons is still recognised
+    const prot = q('translation').replace(/[*,]/g, '');
+    if (!prot) return null;
+    rec.kind = 'protein';
+    rec.seq = prot;
+  } else {
+    rec.kind = 'dna';
+    rec.seq = seq;
+  }
+  if (colour) rec.color = colour;
+  if (segs.some(s => s.translated === '1')) rec.translated = true;
+  const note = q('note') || q('product') || q('gene');
+  if (note) rec.note = note;
+  return rec;
+}
+
+const walk = d => fs.readdirSync(d, { withFileTypes: true })
+  .flatMap(e => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+
+const files = walk(SRC).filter(f => f.toLowerCase().endsWith('.dna')).sort();
+const seen = new Set();
+const list = [];
+let dropped = 0;
+for (const f of files) {
+  let rec = null;
+  try { rec = readOne(f); } catch (e) { rec = null; }
+  if (!rec) { dropped++; continue; }
+  const k = rec.kind + ':' + rec.seq;
+  if (seen.has(k)) { dropped++; continue; }
+  seen.add(k);
+  list.push(rec);
+}
+
+// what dna.js already defines stays its own; only the rest is written here
+require(path.join(__dirname, '..', 'app', 'dna.js'));
+const core = new Set((globalThis.DNA.COMMON || []).map(f => (f.kind || 'dna') + ':' + f.seq));
+const fresh = list.filter(f => !core.has(f.kind + ':' + f.seq));
+fresh.sort((a, b) => (a.type || '').localeCompare(b.type || '') || a.name.localeCompare(b.name));
+
+const head = `/* Dogma Studio — the standard feature library.
+ *
+ * The annotations a sequence is checked against by Features > Detect Common Features:
+ * promoters, tags, origins, resistance genes, recombination sites and the rest. Each
+ * one is a name, what kind of feature it is, and the sequence that identifies it — DNA
+ * for most, the protein for those recognised by their translation, so a codon-optimized
+ * gene is found as well as the original.
+ *
+ * Generated by tools/build-feature-db.js; it is not edited by hand. A short core list
+ * lives in dna.js and is merged with this one, so the program still detects the common
+ * cases without this file.
+ *
+ * ${fresh.length} features.
+ */
+(function (root) {
+  'use strict';
+  root.FEATURE_DB = [
+`;
+const body = fresh.map(f => {
+  const o = { name: f.name, type: f.type, kind: f.kind, seq: f.seq };
+  if (f.color) o.color = f.color;
+  if (f.translated) o.translated = true;
+  if (f.note) o.note = f.note;
+  return '    ' + JSON.stringify(o);
+}).join(',\n');
+fs.writeFileSync(OUT, head + body + "\n  ];\n})(typeof window !== 'undefined' ? window : globalThis);\n");
+
+console.log(`${files.length} files read, ${fresh.length} written to ${path.relative(process.cwd(), OUT)}` +
+  (dropped ? `, ${dropped} skipped as unreadable or repeated` : '') +
+  `, ${list.length - fresh.length} already in the core list`);
