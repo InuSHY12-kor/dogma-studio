@@ -23,18 +23,18 @@
   const SVG_CSS = `
 svg .bb { fill: none; stroke: var(--bb); stroke-width: 1.2; }
 svg .tick { stroke: var(--faint); stroke-width: 1; }
-svg .tickl { fill: var(--faint); font: 10px var(--f-ui); }
+svg .tickl { fill: var(--faint); font-size: calc(10px * var(--ui-scale)); font-family: var(--f-ui); }
 svg .feat { stroke: rgba(0, 0, 0, .38); stroke-width: .8; cursor: pointer; }
 svg .feat:hover { stroke: #000; stroke-width: 1.6; }
-svg .ftxt { fill: #111; font: 600 11px var(--f-ui); pointer-events: none; }
-svg .lbl { font: 11px var(--f-ui); fill: var(--ink); cursor: pointer; }
+svg .ftxt { fill: #111; font-weight: 600; font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); pointer-events: none; }
+svg .lbl { font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); fill: var(--ink); cursor: pointer; }
 svg .lbl.e { fill: #3a3f4b; }
 svg .lbl.e.u { font-weight: 600; }
 svg .intron { fill: none; stroke: #8d95a3; stroke-width: 1.4px; stroke-dasharray: 5 4; }
 svg .gcbg { fill: #f4f6f8; }
 svg .gcline { fill: none; stroke: #45506280; stroke-width: 1px; }
 svg .gcmid { stroke: #9aa2ae; stroke-width: 1px; stroke-dasharray: 4 3; }
-svg .gcax { font-size: 9px; fill: #8d95a3; }
+svg .gcax { font-size: calc(9px * var(--ui-scale)); fill: #8d95a3; }
 svg .cleave { stroke: #11306e; stroke-width: 1.6px; }
 svg .lbl.e.hl { fill: #6b4b00; font-weight: 700; paint-order: stroke; stroke: #ffd24d; stroke-width: 7px; stroke-linejoin: round; }
 svg .lbl.e.bl { fill: #157a3c; }
@@ -49,8 +49,8 @@ svg .lbl.bg { paint-order: stroke; stroke: #fff; stroke-width: 4.5px; stroke-lin
 svg .lbl:hover { fill: var(--accent); text-decoration: underline; }
 svg .lead { fill: none; stroke: #9aa2af; stroke-width: .8; }
 svg .ecut { stroke: #48505e; stroke-width: 1; }
-svg .ctr1 { font: 700 17px var(--f-ui); fill: var(--ink); }
-svg .ctr2 { font: 13px var(--f-ui); fill: var(--muted); }
+svg .ctr1 { font-weight: 700; font-size: calc(17px * var(--ui-scale)); font-family: var(--f-ui); fill: var(--ink); }
+svg .ctr2 { font-size: calc(13px * var(--ui-scale)); font-family: var(--f-ui); fill: var(--muted); }
 svg .selarea { fill: var(--sel); stroke: var(--selline); stroke-width: .8; pointer-events: none; }
 svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
 svg .orf { stroke: none; cursor: pointer; }
@@ -58,7 +58,7 @@ svg .prim { cursor: pointer; }
 svg .primline { stroke-width: 1.6; }
 svg .primhook { stroke-width: 1.6; }
 svg .prim:hover .primline, svg .prim:hover .primhook { stroke-width: 2.6; }
-svg .lbl.p { fill: var(--primer); font-size: 10.5px; }
+svg .lbl.p { fill: var(--primer); font-size: calc(10.5px * var(--ui-scale)); }
 svg .lbl.p.hov { font-weight: 700; }
 `;
   /* The standard feature types, as the INSDC defines them for the nucleotide
@@ -636,16 +636,27 @@ svg .lbl.p.hov { font-weight: 700; }
         { label: 'Primers', key: 'Ctrl+5', chk: S.view === 'primer', dis: !has, act: () => setView('primer') },
         { label: 'History', key: 'Ctrl+6', chk: S.view === 'hist', dis: !has, act: () => setView('hist') },
         '-',
-        { label: 'Circular Map', chk: has && d.opts.mapMode === 'circular', dis: !has, act: () => setOpt('mapMode', 'circular') },
-        { label: 'Linear Map', chk: has && d.opts.mapMode === 'linear', dis: !has, act: () => setOpt('mapMode', 'linear') },
-        '-',
-        { label: 'Show Features', chk: has && d.opts.showFeat, dis: !has, act: () => setOpt('showFeat', !d.opts.showFeat) },
-        { label: 'Show Primers', chk: has && d.opts.showPrimers, dis: !has, act: () => setOpt('showPrimers', !d.opts.showPrimers) },
-        { label: 'Show ORFs', chk: has && d.opts.showORFs, dis: !has, act: () => setOpt('showORFs', !d.opts.showORFs) },
-        { label: 'Translation Options…', dis: !has, act: dlgTranslationOptions },
-        { label: 'Use 3-Letter Amino Acid Codes', chk: has && d.opts.aa3, dis: !has, act: () => setOpt('aa3', !d.opts.aa3) },
-        '-',
-        { label: 'Sequence Format', items: [
+        /* The rest is grouped by what it acts on, so the menu stays short enough to fit
+         * a laptop screen: the map, the sequence, what is drawn, the colours, the window
+         * and the size of everything. */
+        { label: 'Map', items: [
+          { label: 'Circular Map', chk: has && d.opts.mapMode === 'circular', dis: !has, act: () => setOpt('mapMode', 'circular') },
+          { label: 'Linear Map', chk: has && d.opts.mapMode === 'linear', dis: !has, act: () => setOpt('mapMode', 'linear') },
+          '-',
+          { label: 'Show Minimap', chk: has && d.opts.showMinimap, dis: !has, act: () => setOpt('showMinimap', !d.opts.showMinimap) },
+          { label: 'Show Locations', chk: has && d.opts.showLocations !== false, dis: !has, act: () => setOpt('showLocations', d.opts.showLocations === false) },
+          '-',
+          { label: 'Set Origin\u2026', dis: !has, act: dlgSetOrigin },
+          { label: 'Flip (Reverse Complement the View)', dis: !has, act: revCompAll },
+          { label: 'Rotate Map\u2026', key: 'Ctrl+Alt+R', dis: !has || !d.circular, act: dlgRotateMap },
+          '-',
+          { label: 'Zoom In', key: 'Ctrl+Shift++', dis: !has, act: () => zoom(1.25) },
+          { label: 'Zoom Out', key: 'Ctrl+Shift+-', dis: !has, act: () => zoom(0.8) },
+          { label: 'Reset Zoom', key: 'Ctrl+Shift+0', dis: !has, act: () => { S.zoom = 1; renderView(); } },
+          { label: 'Zoom Controls', key: 'Ctrl+Alt++', chk: !!S.zoomCtl, dis: !has, act: () => { S.zoomCtl = !S.zoomCtl; renderView(true); } },
+          { label: 'Focus on Region', key: 'Ctrl+Alt+Z', chk: has && !!focusOf(d), dis: !has, act: focusOnSelection }
+        ] },
+        { label: 'Sequence', items: [
           { label: 'Default', chk: has && (d.opts.seqFormat || 'default') === 'default', dis: !has, act: () => setOpt('seqFormat', 'default') },
           { label: 'Compact', chk: has && d.opts.seqFormat === 'compact', dis: !has, act: () => setOpt('seqFormat', 'compact') },
           { label: 'Plain text', chk: has && d.opts.seqFormat === 'plain', dis: !has, act: () => setOpt('seqFormat', 'plain') },
@@ -655,38 +666,35 @@ svg .lbl.p.hov { font-weight: 700; }
           { label: 'Blocks of 10', chk: has && d.opts.blockSize === 10, dis: !has, act: () => setOpt('blockSize', 10) },
           '-',
           { label: 'Wrap to Window', chk: has && !d.opts.lineWidth, dis: !has, act: () => setOpt('lineWidth', 0) },
-          { label: 'Fixed Line Width…', chk: has && !!d.opts.lineWidth, dis: !has, act: dlgLineWidth }
+          { label: 'Fixed Line Width\u2026', chk: has && !!d.opts.lineWidth, dis: !has, act: dlgLineWidth },
+          '-',
+          { label: 'Show Complementary Strand', chk: has && d.opts.showComp, dis: !has, act: () => setOpt('showComp', !d.opts.showComp) },
+          { label: 'Use 3-Letter Amino Acid Codes', chk: has && d.opts.aa3, dis: !has, act: () => setOpt('aa3', !d.opts.aa3) }
         ] },
-        { label: 'Show Minimap', chk: has && d.opts.showMinimap, dis: !has, act: () => setOpt('showMinimap', !d.opts.showMinimap) },
-        { label: 'Show GC Content Plot', chk: has && d.opts.showGC, dis: !has, act: () => setOpt('showGC', !d.opts.showGC) },
-        { label: 'GC Content Plot…', dis: !has, act: dlgGCRange },
-        { label: 'Show Locations', chk: has && d.opts.showLocations !== false, dis: !has, act: () => setOpt('showLocations', d.opts.showLocations === false) },
-        '-',
-        { label: 'Set Origin…', dis: !has, act: dlgSetOrigin },
-        { label: 'Flip (Reverse Complement the View)', dis: !has, act: revCompAll },
-        '-',
-        { label: 'Show Colours', items: [
+        { label: 'Show', items: [
+          { label: 'Show Features', chk: has && d.opts.showFeat, dis: !has, act: () => setOpt('showFeat', !d.opts.showFeat) },
+          { label: 'Show Primers', chk: has && d.opts.showPrimers, dis: !has, act: () => setOpt('showPrimers', !d.opts.showPrimers) },
+          { label: 'Show ORFs', chk: has && d.opts.showORFs, dis: !has, act: () => setOpt('showORFs', !d.opts.showORFs) },
+          { label: 'Show Translations', chk: has && d.opts.showTrans, dis: !has, act: () => setOpt('showTrans', !d.opts.showTrans) },
+          { label: 'Translation Options\u2026', dis: !has, act: dlgTranslationOptions },
+          '-',
+          { label: 'Show GC Content Plot', chk: has && d.opts.showGC, dis: !has, act: () => setOpt('showGC', !d.opts.showGC) },
+          { label: 'GC Content Plot\u2026', dis: !has, act: dlgGCRange }
+        ] },
+        { label: 'Colours', items: [
           ...SCHEMES.map(([k, t]) => ({ label: t, chk: has && (d.opts.colorScheme || 'none') === k, dis: !has, act: () => { d.opts.colorScheme = k; if (k === 'nt') d.opts.baseColors.enabled = true; renderAll(true); } })),
           '-',
-          { label: 'Set DNA Colour…', dis: !sl, act: dlgSetDnaColor },
-          { label: 'Base Colours…', dis: !has, act: dlgBaseColors }
+          { label: 'Set DNA Colour\u2026', dis: !sl, act: dlgSetDnaColor },
+          { label: 'Base Colours\u2026', dis: !has, act: dlgBaseColors }
         ] },
-        { label: 'Show Translations', chk: has && d.opts.showTrans, dis: !has, act: () => setOpt('showTrans', !d.opts.showTrans) },
-        { label: 'Show Complementary Strand', chk: has && d.opts.showComp, dis: !has, act: () => setOpt('showComp', !d.opts.showComp) },
         '-',
-        { label: 'Focus on Region', key: 'Ctrl+Alt+Z', chk: has && !!focusOf(d), dis: !has, act: focusOnSelection },
-        { label: 'Zoom Controls', key: 'Ctrl+Alt++', chk: !!S.zoomCtl, dis: !has, act: () => { S.zoomCtl = !S.zoomCtl; renderView(true); } },
-        '-',
-        { label: 'Split Window', items: [
+        { label: 'Window', items: [
           { label: 'Side by Side', chk: S.split === 'v', dis: !has, act: () => { S.split = S.split === 'v' ? null : 'v'; renderAll(true); } },
           { label: 'Top and Bottom', chk: S.split === 'h', dis: !has, act: () => { S.split = S.split === 'h' ? null : 'h'; renderAll(true); } },
+          { label: 'No Split', chk: !S.split, dis: !has, act: () => { S.split = null; renderAll(true); } },
           '-',
-          { label: 'No Split', chk: !S.split, dis: !has, act: () => { S.split = null; renderAll(true); } }
-        ] },
-        { label: 'Rotate Map…', key: 'Ctrl+Alt+R', dis: !has || !d.circular, act: dlgRotateMap },
-        '-',
-        { label: 'Toolbar', items: [
           { label: 'Show Details Panel', chk: !!S.sideShown, act: () => { S.sideShown = !S.sideShown; renderAll(); } },
+          { label: 'Info Panel', chk: !!S.infoShown, dis: !has, act: () => { S.infoShown = !S.infoShown; renderAll(true); } },
           { label: 'Show Top Toolbar', chk: !S.toolbarHidden, act: () => { S.toolbarHidden = !S.toolbarHidden; applyChrome(); } },
           '-',
           { label: 'Icons and Text', chk: (SET.toolbarStyle || 'both') === 'both', act: () => { SET.toolbarStyle = 'both'; saveSettings(); applyChrome(); } },
@@ -694,13 +702,13 @@ svg .lbl.p.hov { font-weight: 700; }
           { label: 'Text Only', chk: SET.toolbarStyle === 'text', act: () => { SET.toolbarStyle = 'text'; saveSettings(); applyChrome(); } },
           { label: 'Use Small Size', chk: !!SET.toolbarSmall, act: () => { SET.toolbarSmall = !SET.toolbarSmall; saveSettings(); applyChrome(); } }
         ] },
-        { label: 'Font Size', items: FONT_SIZES.map(px => ({ label: px + ' px', chk: (SET.fontSize || 13) === px, act: () => setFontSize(px) })) },
-        '-',
-        { label: 'Show Details Panel', chk: !!S.sideShown, act: () => { S.sideShown = !S.sideShown; renderAll(); } },
-        { label: 'Info Panel', chk: !!S.infoShown, dis: !has, act: () => { S.infoShown = !S.infoShown; renderAll(true); } },
-        { label: 'Zoom In', key: 'Ctrl++', dis: !has, act: () => zoom(1.25) },
-        { label: 'Zoom Out', key: 'Ctrl+-', dis: !has, act: () => zoom(0.8) },
-        { label: 'Reset Zoom', key: 'Ctrl+0', dis: !has, act: () => { S.zoom = 1; renderView(); } }
+        { label: 'Interface Size', items: [
+          { label: 'Larger', key: 'Ctrl++', act: () => stepUiScale(1) },
+          { label: 'Smaller', key: 'Ctrl+-', act: () => stepUiScale(-1) },
+          { label: 'Reset', key: 'Ctrl+0', act: () => setUiScale(1) },
+          '-',
+          ...UI_SCALES.map(f => ({ label: Math.round(f * 100) + '%', chk: Math.abs(uiScale() - f) < 0.001, act: () => setUiScale(f) }))
+        ] }
       ] },
       { label: 'Features', items: [
         { label: 'Add Feature…', key: 'Ctrl+K', dis: !has, act: () => dlgFeature(null) },
@@ -942,6 +950,24 @@ svg .lbl.p.hov { font-weight: 700; }
     const sig = menus().map(m => m.label).join(',');
     if (sig !== menuBarSig) { menuBarSig = sig; renderMenuBar(); }
   }
+  /* A menu is placed under what opened it, and told how much room is left below so it
+   * can scroll instead of running off the screen. On a short window it is lifted up to
+   * use the space above as well. */
+  const POP_GAP = 6;
+  function fitPop(pop, top, left) {
+    pop.style.maxHeight = 'none';
+    const h = pop.getBoundingClientRect().height;
+    const room = window.innerHeight - top - POP_GAP;
+    if (h > room) {
+      const above = top - POP_GAP;
+      if (above > room && h <= above) top = Math.max(POP_GAP, top - h);   // it fits above
+      else { top = Math.max(POP_GAP, Math.min(top, window.innerHeight - POP_GAP - Math.min(h, window.innerHeight - 2 * POP_GAP))); }
+      pop.style.maxHeight = (window.innerHeight - top - POP_GAP) + 'px';
+    }
+    pop.style.top = top + 'px';
+    if (left !== undefined) pop.style.left = Math.max(0, left) + 'px';
+  }
+
   function showMenu(i) {
     closeCtx();
     const m = menus()[i]; openMenu = i;
@@ -950,7 +976,7 @@ svg .lbl.p.hov { font-weight: 700; }
     const pop = $('#menupop');
     pop.innerHTML = popItems(m.items);
     pop.hidden = false;
-    pop.style.left = Math.min(anchor.left, window.innerWidth - 270) + 'px'; pop.style.top = anchor.bottom + 'px';
+    fitPop(pop, anchor.bottom, Math.min(anchor.left, window.innerWidth - 270));
     pop.onmousedown = e => e.preventDefault();
     pop.onmouseover = e => {
       const it = e.target.closest('#menupop > .it'); if (!it) return;
@@ -975,8 +1001,7 @@ svg .lbl.p.hov { font-weight: 700; }
     sub.hidden = false;
     const r = anchorEl.getBoundingClientRect();
     const w = sub.getBoundingClientRect().width || 240;
-    sub.style.left = (r.right + w > window.innerWidth ? Math.max(0, r.left - w) : r.right - 2) + 'px';
-    sub.style.top = Math.min(r.top - 4, window.innerHeight - sub.getBoundingClientRect().height - 8) + 'px';
+    fitPop(sub, r.top - 4, r.right + w > window.innerWidth ? Math.max(0, r.left - w) : r.right - 2);
     sub.onmousedown = e => e.preventDefault();
   }
   function closeSubmenu() { const sub = $('#menusub'); sub.hidden = true; sub.__anchor = null; }
@@ -990,8 +1015,7 @@ svg .lbl.p.hov { font-weight: 700; }
     closeMenu();
     const c = $('#ctx'); c.innerHTML = items.map((a, j) => a === '-' ? '<div class="sep"></div>' : `<div class="it${a.dis ? ' dis' : ''}" data-i="${j}">${esc(a.label)}</div>`).join('');
     c.hidden = false;
-    const w = 220, h = items.length * 26;
-    c.style.left = Math.min(x, window.innerWidth - w - 8) + 'px'; c.style.top = Math.min(y, window.innerHeight - h - 8) + 'px';
+    fitPop(c, y, Math.min(x, window.innerWidth - 228));
     c.onclick = e => { const it = e.target.closest('.it'); if (!it) return; closeCtx(); items[+it.dataset.i].act(); };
   }
   function closeCtx() { $('#ctx').hidden = true; }
@@ -2478,7 +2502,9 @@ svg .lbl.p.hov { font-weight: 700; }
       tb.classList.toggle('text-only', SET.toolbarStyle === 'text');
       tb.classList.toggle('small', !!SET.toolbarSmall);
     }
-    if (SET.fontSize) document.body.style.fontSize = SET.fontSize + 'px';
+    // a size saved by an older version was a plain font size; it becomes a scale
+    if (SET.fontSize && !SET.uiScale) { SET.uiScale = SET.fontSize / UI_BASE; delete SET.fontSize; }
+    applyUiScale();
     renderMenuState();
   }
 
@@ -2503,15 +2529,33 @@ svg .lbl.p.hov { font-weight: 700; }
     });
   }
   // Font size: scales every view, since feature widths follow the label size.
-  const FONT_SIZES = [11, 12, 13, 14, 16, 18];
-  function setFontSize(px) {
-    SET.fontSize = px;
-    document.documentElement.style.setProperty('--ui-size', px + 'px');
-    document.body.style.fontSize = px + 'px';
+  /* One size for the whole interface. It is not the page zoom a browser does — the
+   * window's panes keep their size and only what is drawn in them changes, so turning
+   * it down fits more bases on a row and more labels round a map rather than making the
+   * same picture smaller. Everything follows it: the text, the feature and primer bars,
+   * the enzyme labels, the tables and the dialogs. */
+  const UI_BASE = 13;
+  const UI_SCALES = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6];
+  const uiScale = () => SET.uiScale || 1;
+  function applyUiScale() {
+    const f = uiScale();
+    document.documentElement.style.setProperty('--ui-scale', String(f));
+    document.documentElement.style.setProperty('--ui-size', (UI_BASE * f).toFixed(2) + 'px');
+    document.body.style.fontSize = (UI_BASE * f).toFixed(2) + 'px';
+  }
+  function setUiScale(f, quiet) {
+    SET.uiScale = Math.max(UI_SCALES[0], Math.min(UI_SCALES[UI_SCALES.length - 1], f));
+    applyUiScale();
     saveSettings();
     measureCW();
     renderAll(true);
-    toast('Font size ' + px + ' px');
+    if (!quiet) toast('Interface size ' + Math.round(uiScale() * 100) + '%');
+  }
+  function stepUiScale(dir) {
+    const f = uiScale();
+    const next = dir > 0 ? UI_SCALES.find(x => x > f + 0.001) : [...UI_SCALES].reverse().find(x => x < f - 0.001);
+    if (next === undefined) { toast(dir > 0 ? 'Already at the largest size' : 'Already at the smallest size'); return; }
+    setUiScale(next);
   }
 
   // ================================================================ DNA / RNA CALCULATIONS
@@ -3160,8 +3204,8 @@ svg .lbl.p.hov { font-weight: 700; }
       g.push(`<line class="ecut" data-enz="${esc(e.name)}" x1="${fmtP(P(R - 7, a)).replace(',', '" y1="')}" x2="${fmtP(P(R + 7, a)).replace(',', '" y2="')}"/>`);
       labels.push({ a, text: o.showLocations ? `${e.name} (${fmt(s.cut)})` : e.name, cls: enzCls(e, d), k: `e:${e.name}:${i}`, r0: Math.max(R + 7, outer), enz: e.name });
     });
-    // label layout
-    const sp = 14;
+    // label layout: the rows are as tall as the text, so a smaller interface fits more
+    const sp = 14 * uiScale();
     const sides = [[], []];
     for (const l of labels) { l.side = Math.cos(l.a) >= -1e-6 ? 0 : 1; l.ty = cy + Rl * Math.sin(l.a); sides[l.side].push(l); }
     for (const arr of sides) {
@@ -3230,7 +3274,7 @@ svg .lbl.p.hov { font-weight: 700; }
     const pFwd = prims.filter(p => p.strand !== -1), pRev = prims.filter(p => p.strand === -1);
     let nF = pxLanes(feats, true), nO = pxLanes(orfs, false);
     const nPF = pxLanes(pFwd, true), nPR = pxLanes(pRev, true);
-    const PH = 16;                       // one primer row: the bar and its name
+    const PH = 16 * uiScale();           // one primer row: the bar and its name
     const fwdBand = nPF * PH, revBand = nPR * PH;
     if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
     const enz = shownEnz(d, A);
@@ -3707,7 +3751,10 @@ svg .lbl.p.hov { font-weight: 700; }
     const rows = [], html = [];
     const comp = o.showComp;
     const compact = (o.seqFormat || 'default') === 'compact';
-    const NT_H = 17, RULER_H = compact ? 0 : 15, NUM_H = 13, AA_H = 15;
+    /* Every height on a row is a multiple of the interface size, so turning the size
+     * down packs more bases into the window instead of drawing the same rows smaller. */
+    const US = uiScale();
+    const NT_H = 17 * US, RULER_H = compact ? 0 : 15 * US, NUM_H = 13 * US, AA_H = 15 * US;
     const fo = focusOf(d);
     const rowFrom = fo ? Math.floor(fo.start / bpr) * bpr : 0;
     const rowTo = fo ? Math.min(n, Math.ceil((fo.start + DNA.rlen(fo, n)) / bpr) * bpr) : n;
@@ -3718,14 +3765,14 @@ svg .lbl.p.hov { font-weight: 700; }
       const lineEnd = [];
       const myCuts = compact ? [] : cuts.filter(c => c.pos >= rs && (c.pos < re || (re === n && c.pos === n)));
       for (const c of myCuts) {
-        const x = (c.pos - rs) * CW, w = c.name.length * 6.6 + 6;
+        const x = (c.pos - rs) * CW, w = c.name.length * 6.6 * US + 6 * US;
         let l = 0; while (lineEnd[l] !== undefined && lineEnd[l] > x - 1) l++;
         lineEnd[l] = x + w; c.line = l;
       }
-      const nL = lineEnd.length, enzH = nL ? nL * 14 + 6 : 3;
+      const nL = lineEnd.length, enzH = nL ? nL * 14 * US + 6 * US : 3 * US;
       /* Primers binding the top strand sit above it, the ones binding the bottom strand
        * below, each in as many rows as it takes not to overlap a neighbour. */
-      const PRH = 26;
+      const PRH = 26 * US;
       const myPrims = compact ? [] : primerItems.flatMap(it => {
         const pieces = [];
         let off = 0;                                   // how many bases of the primer come before this piece
@@ -3782,8 +3829,14 @@ svg .lbl.p.hov { font-weight: 700; }
         const startsHere = q.a === (q.it.strand === -1 ? q.whole.b : q.whole.a) || q.a === q.whole.a;
         const endsHere = q.b === q.whole.b;
         const hook = q.it.strand === -1 ? (startsHere ? ' hookL' : '') : (endsHere ? ' hookR' : '');
+        /* The arrow head carries on from the box at the 3' end, as wide as half the row
+         * is tall, so the direction reads at any interface size. */
+        const AW = 9 * US;
+        const arrow = !hook ? '' :
+          `<div class="primarrow ${hook === ' hookR' ? 'r' : 'l'}" data-k="${q.it.key}" data-prim="${q.it.ref.id}"
+            style="left:${(hook === ' hookR' ? x - 1 + w + 1 : x - 1 - AW).toFixed(1)}px;top:${top}px;width:${AW.toFixed(1)}px;color:${col}"></div>`;
         return `<div class="primbox${hook}" data-k="${q.it.key}" data-prim="${q.it.ref.id}" title="${esc(q.it.name)} \u00b7 ${fmt(Math.min(q.it.start, q.it.end) + 1)}..${fmt(Math.max(q.it.start, q.it.end))} \u00b7 ${q.it.strand === -1 ? 'binds the bottom strand' : 'binds the top strand'}"
-          style="left:${x - 1}px;top:${top}px;width:${w}px;color:${col};border-color:${col}">${esc(txt)}</div>
+          style="left:${x - 1}px;top:${top}px;width:${w}px;color:${col};border-color:${col}">${esc(txt)}</div>${arrow}
           <div class="primname" data-k="${q.it.key}" data-prim="${q.it.ref.id}" style="left:${x}px;top:${above ? top - 11 : top + 16}px;color:${col}">${esc(q.it.name)}</div>`;
       };
       for (const q of pFwd) parts.push(primBox(q, 4 + enzH + (nPF - 1 - q.lane) * PRH + 12, true));
@@ -3801,8 +3854,8 @@ svg .lbl.p.hov { font-weight: 700; }
       }
       const laneBar = [], laneAA = [], laneNum = [];
       for (let l = 0; l < laneEnd.length; l++) {
-        if (laneTrans[l]) { laneNum[l] = y; laneAA[l] = y + NUM_H; laneBar[l] = y + NUM_H + AA_H; y += NUM_H + AA_H + 16; }
-        else { laneBar[l] = y; y += 17; }
+        if (laneTrans[l]) { laneNum[l] = y; laneAA[l] = y + NUM_H; laneBar[l] = y + NUM_H + AA_H; y += NUM_H + AA_H + 16 * US; }
+        else { laneBar[l] = y; y += 17 * US; }
       }
       const keyLane = {};
       // dashed intron lines, drawn in the lane the feature occupies
@@ -3813,7 +3866,7 @@ svg .lbl.p.hov { font-weight: 700; }
         if (s.tipR && s.x2 === s.b) clip = 'clip-path:polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%);';
         else if (s.tipL && s.x1 === s.a) clip = 'clip-path:polygon(8px 0,100% 0,100% 100%,8px 100%,0 50%);';
         const label = w > s.it.name.length * 6.4 + 16 ? esc(s.it.name) : '';
-        const h = s.it.kind === 'o' ? 8 : 14;
+        const h = (s.it.kind === 'o' ? 8 : 14) * US;
         parts.push(`<div class="fbar${s.it.kind === 'o' ? ' orf' : ''}${inkLight(s.it.color) ? ' ink-light' : ''}" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneBar[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:10px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
         keyLane[s.it.key] = s.lane;
       }
@@ -8061,7 +8114,7 @@ svg .lbl.p.hov { font-weight: 700; }
   // ================================================================ stored settings
   // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
   const SETTINGS_KEY = 'dogma-studio.settings';
-  const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [], featureTypes: [], typeColors: {}, recentTypes: [], primerDb: { primers: [], labels: [] } };
+  const DEFAULT_SETTINGS = { uiScale: 1, enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [], featureTypes: [], typeColors: {}, recentTypes: [], primerDb: { primers: [], labels: [] } };
   let SET = { ...DEFAULT_SETTINGS };
 
   async function loadSettings() {
@@ -9432,7 +9485,11 @@ svg .lbl.p.hov { font-weight: 700; }
       n: dlgNew, o: openFiles, s: () => saveDoc(e.shiftKey), w: () => D() && closeDoc(S.active), f: openFind, g: () => D() && dlgGoto(), k: () => D() && dlgFeature(null),
       d: dlgNCBI, p: () => D() && dlgPrint(),
       '1': () => setView('map'), '2': () => setView('seq'), '3': () => setView('enz'), '4': () => setView('feat'), '5': () => setView('primer'), '6': () => setView('align'), '7': () => setView('hist'),
-      '=': () => zoom(1.25), '+': () => zoom(1.25), '-': () => zoom(0.8), '0': () => { S.zoom = 1; renderView(); }
+      '=': () => (e.shiftKey ? zoom(1.25) : stepUiScale(1)),
+      '+': () => (e.shiftKey ? zoom(1.25) : stepUiScale(1)),
+      '-': () => (e.shiftKey ? zoom(0.8) : stepUiScale(-1)),
+      '_': () => (e.shiftKey ? zoom(0.8) : stepUiScale(-1)),
+      '0': () => (e.shiftKey ? (() => { S.zoom = 1; renderView(); })() : setUiScale(1))
     };
     if (!inField) {
       map.z = () => (e.shiftKey ? redo() : undo()); map.y = redo;
@@ -9515,5 +9572,5 @@ svg .lbl.p.hov { font-weight: 700; }
     if (it.dis) throw new Error('Disabled: ' + itemLabel);
     return it.act();
   }
-  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings, checkUnknownTypes, loadContent };
+  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings, checkUnknownTypes, loadContent, setUiScale, uiScale, stepUiScale };
 })();

@@ -336,6 +336,86 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     console.log('     round-trip features ' + r.f + '/' + r.orig);
   });
 
+  await step('the View menu fits a short window', async () => {
+    await p.setViewportSize({ width: 1200, height: 620 });
+    await p.waitForTimeout(250);
+    await p.click('.menubar .mi[data-i="2"]');
+    await p.waitForTimeout(250);
+    const m = await p.evaluate(() => {
+      const el = document.querySelector('#menupop');
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, h: r.height, win: window.innerHeight,
+               scrolls: el.scrollHeight > el.clientHeight + 1,
+               groups: [...el.querySelectorAll('.it.has-sub')].map(x => x.textContent.trim()) };
+    });
+    if (m.bottom > m.win) throw new Error('it runs off the bottom: ' + JSON.stringify(m));
+    for (const g of ['Map', 'Sequence', 'Show', 'Colours', 'Window', 'Interface Size']) {
+      if (!m.groups.includes(g)) throw new Error('no ' + g + ' group: ' + m.groups.join(', '));
+    }
+    await p.keyboard.press('Escape');
+    await p.setViewportSize({ width: 1280, height: 860 });
+    await p.waitForTimeout(250);
+  });
+
+  await step('a long menu scrolls instead of running off', async () => {
+    await p.setViewportSize({ width: 1200, height: 360 });
+    await p.waitForTimeout(250);
+    await p.click('.menubar .mi[data-i="0"]');            // File, the longest one
+    await p.waitForTimeout(250);
+    const m = await p.evaluate(() => {
+      const el = document.querySelector('#menupop');
+      const r = el.getBoundingClientRect();
+      return { bottom: r.bottom, win: window.innerHeight, scrolls: el.scrollHeight > el.clientHeight + 1 };
+    });
+    if (m.bottom > m.win) throw new Error('it still runs off: ' + JSON.stringify(m));
+    if (!m.scrolls) throw new Error('it was not given a scrollbar: ' + JSON.stringify(m));
+    await p.keyboard.press('Escape');
+    await p.setViewportSize({ width: 1280, height: 860 });
+    await p.waitForTimeout(250);
+  });
+
+  await step('the interface size fits more on the screen, it does not magnify', async () => {
+    await p.evaluate(() => window.__gc.setView('seq'));
+    await p.waitForTimeout(500);
+    const read = async f => {
+      await p.evaluate(x => window.__gc.setUiScale(x, true), f);
+      await p.waitForTimeout(450);
+      return p.evaluate(() => {
+        const nt = document.querySelector('.srow .nt');
+        const bar = document.querySelector('.srow .fbar');
+        return { px: parseFloat(getComputedStyle(nt).fontSize), perRow: nt.textContent.trim().length,
+                 barH: bar ? Math.round(bar.getBoundingClientRect().height) : 0 };
+      });
+    };
+    const small = await read(0.8), big = await read(1.25);
+    if (!(small.px < big.px)) throw new Error('the text did not change size: ' + JSON.stringify([small, big]));
+    if (!(small.perRow > big.perRow)) throw new Error('a smaller size has to fit more bases per row: ' + JSON.stringify([small, big]));
+    if (!(small.barH < big.barH)) throw new Error('the feature bars did not follow: ' + JSON.stringify([small, big]));
+    console.log(`     ${small.perRow} bases a row at 80%, ${big.perRow} at 125%`);
+    await p.evaluate(() => window.__gc.setUiScale(1, true));
+    await p.waitForTimeout(400);
+  });
+
+  await step('every primer points the way it reads', async () => {
+    await p.evaluate(() => window.__gc.setView('seq'));
+    await p.waitForTimeout(500);
+    const arrows = await p.evaluate(() => [...document.querySelectorAll('.primarrow')].map(a => {
+      // a primer split over several rows has one box per row; take the one beside this head
+      const box = [...a.closest('.srow').querySelectorAll('.primbox')].find(x => x.dataset.prim === a.dataset.prim);
+      const ar = a.getBoundingClientRect(), br = box.getBoundingClientRect();
+      const top = box.closest('.srow').querySelector('.nt').getBoundingClientRect();
+      return { right: a.className.trim().endsWith('r'), after: ar.left > br.left, bottomStrand: br.top > top.top,
+               touching: Math.abs(a.className.trim().endsWith('r') ? ar.left - br.right : br.left - ar.right) < 2 };
+    }));
+    if (!arrows.length) throw new Error('no primer was given a head');
+    for (const a of arrows) {
+      if (a.bottomStrand === a.right) throw new Error('a head points the wrong way: ' + JSON.stringify(a));
+      if (a.right !== a.after) throw new Error('a head is on the wrong end: ' + JSON.stringify(a));
+      if (!a.touching) throw new Error('a head is adrift from its box: ' + JSON.stringify(a));
+    }
+    console.log('     ' + arrows.length + ' primer heads, each at its 3\u2032 end');
+  });
+
   console.log('\nERRORS:', errs.length);
   errs.forEach(e => console.log('  ' + e));
   await b.close();
