@@ -104,6 +104,28 @@
   // what makes one of the user's own features that one and not another
   const featKey = f => (f.name || '') + '\u0001' + (f.seq || '');
 
+  /* Two kinds are chosen one at a time. A primer and one of the user's own features go
+   * to the account only where the user has ticked them, because a primer database is a
+   * personal thing and not all of it is meant to leave the machine. Everything else —
+   * the named sets, the primer labels, the feature types — follows the account whole.
+   *
+   * Unticking is not deleting: the row is taken out of the account for good, on every
+   * machine, while the primer or the feature stays where it is on this one. */
+  const CHOSEN = { primer: true, feature: true };
+  const pickOf = SET => (SET.cloudPick = SET.cloudPick || {});
+  const isShared = (SET, kind, name) => !CHOSEN[kind] || (pickOf(SET)[kind] || []).indexOf(name) >= 0;
+  function setShared(SET, kind, name, on) {
+    if (!CHOSEN[kind]) return;
+    const p = pickOf(SET);
+    const s = new Set(p[kind] || []);
+    if (on) s.add(name); else s.delete(name);
+    p[kind] = [...s];
+  }
+  /* Everything of one kind that is on this machine, each said to be ticked or not, so a
+   * dialog can show the list without knowing how any of it is stored. */
+  const choices = (SET, kind) => (KINDS[kind] ? KINDS[kind].list(SET) : [])
+    .map(it => ({ name: it.name, payload: it.payload, shared: isShared(SET, kind, it.name) }));
+
   // ---------------------------------------------------------------- small helpers
   const hash = o => {
     const s = JSON.stringify(o);
@@ -215,13 +237,14 @@
   async function sync(SET) {
     if (!session) throw new Error('Sign in first.');
     const st = stamp(SET);
-    const rows = await api(`/rest/v1/${TABLE}?select=kind,name,payload,updated_at,deleted`);
+    const rows = await api(`/rest/v1/${TABLE}?select=id,kind,name,payload,updated_at,deleted`);
     const server = new Map();
     for (const r of rows || []) server.set(keyOf(r.kind, r.name), r);
 
     const mine = localItems(SET);
     const push = [];
-    const stats = { sent: 0, taken: 0, removedHere: 0, removedThere: 0, kept: 0 };
+    const drop = [];                       // rows to take out of the account for good
+    const stats = { sent: 0, taken: 0, removedHere: 0, removedThere: 0, kept: 0, unshared: 0, unsharedThere: 0 };
     const send = (kind, name, payload, deleted) => { push.push({ kind, name, payload: payload || {}, deleted: !!deleted }); };
 
     const keys = new Set([...mine.keys(), ...server.keys(), ...Object.keys(st.tombs)]);
@@ -231,19 +254,34 @@
       const was = st.items[k] || null;
       const [kind, name] = k.split('\u0000');
       if (!KINDS[kind]) continue;
+
+      /* Unticked here: the row leaves the account altogether, which is a plain delete
+       * and not a tombstone — the other machines are meant to keep their copy and
+       * simply stop sharing it, not to lose it. */
+      if (it && !isShared(SET, kind, name)) {
+        if (row && !row.deleted) { drop.push(row.id); stats.unshared++; }
+        continue;
+      }
       const changedHere = it ? (!was || was.h !== hash(it.payload)) : false;
       const changedThere = row ? (!was || was.v !== row.updated_at) : false;
 
-      if (it && !row) { send(kind, name, it.payload, false); stats.sent++; continue; }
+      if (it && !row) {
+        /* A row this machine had seen is gone, with no tombstone in its place: it was
+         * unticked somewhere else. The copy here stays, and stops being shared. */
+        if (was && was.v) { setShared(SET, kind, name, false); stats.unsharedThere++; }
+        else { send(kind, name, it.payload, false); stats.sent++; }
+        continue;
+      }
       if (!it && st.tombs[k]) {
         // gone from this machine since the last sync
         const seenAt = st.tombs[k].v;
         if (row && !row.deleted && row.updated_at === seenAt) { send(kind, name, row.payload, true); stats.removedThere++; }
-        else if (row && !row.deleted) { KINDS[kind].apply(SET, name, row.payload); stats.taken++; }
+        else if (row && !row.deleted) { KINDS[kind].apply(SET, name, row.payload); setShared(SET, kind, name, true); stats.taken++; }
         continue;
       }
       if (!it && row) {
-        if (!row.deleted) { KINDS[kind].apply(SET, name, row.payload); stats.taken++; }
+        // it is in the account, so it is shared by definition once it lands here
+        if (!row.deleted) { KINDS[kind].apply(SET, name, row.payload); setShared(SET, kind, name, true); stats.taken++; }
         continue;
       }
       if (row.deleted) {
@@ -274,6 +312,9 @@
       }
     }
 
+    if (drop.length) {
+      await api(`/rest/v1/${TABLE}?id=in.(${drop.join(',')})`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+    }
     if (push.length) {
       const body = push.map(p => Object.assign({ user_id: session.user_id }, p));
       await api(`/rest/v1/${TABLE}?on_conflict=user_id,kind,name`, {
@@ -283,7 +324,7 @@
 
     /* The merged state is read back, so what this machine remembers about each item is
      * the server's own stamp rather than a guess. */
-    const after = await api(`/rest/v1/${TABLE}?select=kind,name,payload,updated_at,deleted`);
+    const after = await api(`/rest/v1/${TABLE}?select=id,kind,name,payload,updated_at,deleted`);
     st.items = {};
     st.tombs = {};
     const now = localItems(SET);
@@ -302,6 +343,9 @@
     configured, stamp, sync, signIn, signUp, signOut,
     session: () => session,
     kinds: Object.keys(KINDS),
+    chosenKinds: Object.keys(CHOSEN),
+    choices, isShared, setShared,
+    countShared: SET => [...localItems(SET)].filter(([k, it]) => isShared(SET, it.kind, it.name)).length,
     countLocal: SET => localItems(SET).size
   };
 })(typeof window !== 'undefined' ? window : globalThis);

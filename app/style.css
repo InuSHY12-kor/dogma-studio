@@ -752,3 +752,9 @@ svg.imap text.ctr1 { fill: #1c2230; font-weight: 600; }
 .simtabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .simbody { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 0 4px 4px 4px; background: var(--canvas); padding: 6px; }
 .simseq { font: 12px/1.5 var(--f-mono); white-space: pre; margin: 0; }
+
+/* Choose What to Sync: one block per kind, each with its own heading and count. */
+.cpksec { margin-top: 10px; }
+.cpksec:first-of-type { margin-top: 2px; }
+.cpkhd { display: flex; align-items: center; gap: 8px; padding: 2px 0 5px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.cpkhd .note { color: var(--muted); }

@@ -605,6 +605,7 @@ svg .lbl.p.hov { font-weight: 700; }
         '-',
         { label: cloudSignedIn() ? `Account (${cloudEmail()})\u2026` : 'Sign In\u2026', act: dlgAccount },
         { label: 'Sync Now', dis: !cloudSignedIn(), act: () => cloudSync(true) },
+        { label: 'Choose What to Sync\u2026', dis: !cloudOn(), act: dlgCloudPick },
         ...(host ? ['-', { label: 'Exit', act: () => host.quit() }] : [])
       ] },
       { label: 'Edit', items: [
@@ -8113,11 +8114,96 @@ svg .lbl.p.hov { font-weight: 700; }
       if (st.taken) bits.push(`${st.taken} taken`);
       if (st.removedHere) bits.push(`${st.removedHere} removed here`);
       if (st.removedThere) bits.push(`${st.removedThere} removed there`);
+      if (st.unshared) bits.push(`${st.unshared} taken out of the account`);
+      if (st.unsharedThere) bits.push(`${st.unsharedThere} no longer shared`);
       if (loud || bits.length) toast(bits.length ? 'Synced \u2014 ' + bits.join(', ') : 'Synced \u2014 nothing had changed');
     } catch (e) {
       toast('Sync failed: ' + e.message);
     }
   }
+  // how many of one of the chosen kinds are ticked for the account
+  const nShared = kind => (cloudOn() ? CLOUD.choices(SET, kind).filter(c => c.shared).length : 0);
+
+  /* Choose What to Sync: the primers and the features this machine puts in the account.
+   * Ticking one sends it up on the next sync; unticking one takes it out of the account
+   * altogether, on every machine, while the copy here stays exactly where it is. */
+  function dlgCloudPick() {
+    if (!cloudOn()) { dlgAccount(); return; }
+    const KINDS = [
+      { kind: 'primer', title: 'Primers', empty: 'The primer database is empty.' },
+      { kind: 'feature', title: 'My features', empty: 'You have not added any of your own common features yet.' }
+    ];
+    // a working copy, so Cancel really cancels
+    const want = {};
+    for (const { kind } of KINDS) want[kind] = new Set(CLOUD.choices(SET, kind).filter(c => c.shared).map(c => c.name));
+    let q = '';
+    const clip = (t, n) => t.length > n ? t.slice(0, n) + '\u2026' : t;
+
+    const rowsOf = kind => {
+      const all = CLOUD.choices(SET, kind);
+      const t = q.trim().toLowerCase();
+      return !t ? all : all.filter(c => ((c.payload.name || '') + ' ' + (c.payload.seq || '')).toLowerCase().includes(t));
+    };
+    const render = () => {
+      for (const { kind, empty } of KINDS) {
+        const el = $('#cpk-' + kind); if (!el) continue;
+        const list = rowsOf(kind);
+        el.innerHTML = list.length ? `<table class="grid"><thead><tr>
+            <th style="width:26px"></th><th>Name</th><th>Sequence</th><th style="width:70px">Length</th></tr></thead><tbody>
+          ${list.map(c => `<tr><td><input type="checkbox" data-cpk="${kind}" data-n="${esc(c.name)}" ${want[kind].has(c.name) ? 'checked' : ''}></td>
+            <td><b>${esc(c.payload.name || '(no name)')}</b>${c.payload.kind === 'protein' ? ' <span class="note">protein</span>' : ''}</td>
+            <td class="mono wrap">${esc(clip(c.payload.seq || '', 48))}</td>
+            <td class="note">${fmt((c.payload.seq || '').length)}</td></tr>`).join('')}
+        </tbody></table>` : `<div class="hint">${q ? 'Nothing matches that search.' : empty}</div>`;
+        const n = $('#cpkn-' + kind);
+        if (n) n.textContent = `${fmt(want[kind].size)} of ${fmt(CLOUD.choices(SET, kind).length)} ticked`;
+      }
+    };
+    dialog({
+      title: 'Choose What to Sync', wide: true,
+      body: `<div class="ecbar">
+          <input type="text" id="cpkQ" placeholder="Filter by name or sequence" style="width:240px">
+          <span class="sp" style="flex:1"></span></div>
+        ${KINDS.map(({ kind, title }) => `<div class="cpksec">
+            <div class="cpkhd"><b>${title}</b><span class="note" id="cpkn-${kind}"></span>
+              <span class="sp" style="flex:1"></span>
+              <button class="ib" data-cpkall="${kind}" type="button">Tick all</button>
+              <button class="ib" data-cpknone="${kind}" type="button">Untick all</button></div>
+            <div class="tscroll" style="max-height:30vh" id="cpk-${kind}"></div></div>`).join('')}
+        <div class="hint">Only what is ticked is kept in your account, with its sequence, so the same primers and features are there on another computer or on the phone. <b>Unticking one takes it out of the account on every machine</b> \u2014 the copy on this machine is not touched. Enzyme sets, saved primer sets and feature types always follow the account.</div>`,
+      buttons: [{ label: 'Cancel' }, {
+        label: 'Apply', primary: true, act: () => {
+          const p = (SET.cloudPick = SET.cloudPick || {});
+          for (const { kind } of KINDS) p[kind] = [...want[kind]];
+          return saveSettings().then(() => {
+            closeDialog();
+            if (!cloudSignedIn()) { toast('Saved. Sign in to put them in your account.'); return; }
+            return cloudSync(true);
+          });
+        }
+      }],
+      onOpen: box => {
+        render();
+        box.querySelector('#cpkQ').oninput = e => { q = e.target.value; render(); };
+        box.querySelector('.bd').addEventListener('change', e => {
+          const c = e.target.closest('[data-cpk]'); if (!c) return;
+          const set = want[c.dataset.cpk];
+          if (c.checked) set.add(c.dataset.n); else set.delete(c.dataset.n);
+          const n = $('#cpkn-' + c.dataset.cpk);
+          if (n) n.textContent = `${fmt(set.size)} of ${fmt(CLOUD.choices(SET, c.dataset.cpk).length)} ticked`;
+        });
+        box.querySelector('.bd').addEventListener('click', e => {
+          const on = e.target.closest('[data-cpkall]'), off = e.target.closest('[data-cpknone]');
+          if (!on && !off) return;
+          const kind = (on || off).dataset.cpkall || (on || off).dataset.cpknone;
+          // only what the filter is showing, so a search can tick a handful at a time
+          for (const c of rowsOf(kind)) { if (on) want[kind].add(c.name); else want[kind].delete(c.name); }
+          render();
+        });
+      }
+    });
+  }
+
   function dlgAccount() {
     if (!cloudOn()) {
       dialog({
@@ -8134,11 +8220,13 @@ svg .lbl.p.hov { font-weight: 700; }
         body: `<div class="form">
           <label>Signed in as</label><div><b>${esc(s.email || '(no address)')}</b></div>
           <label>Last sync</label><div>${esc(when)}</div>
-          <label>Kept in the account</label><div>${fmt(Object.keys(SET.enzymeSets || {}).length)} enzyme sets \u00b7 ${fmt(((SET.primerDb || {}).primers || []).length)} primers in ${fmt(Object.keys(SET.primerSets || {}).length)} saved sets \u00b7 ${fmt((SET.myFeatures || []).length)} of my features \u00b7 ${fmt((SET.featureTypes || []).length + Object.keys(SET.typeColors || {}).length)} feature types</div>
-          <label></label><div class="hint">Primers and features travel with their sequences. Sequence files are not uploaded.</div>
-          <div class="full hint">Sequences are never uploaded \u2014 only these three libraries.</div></div>`,
+          <label>Always kept</label><div>${fmt(Object.keys(SET.enzymeSets || {}).length)} enzyme sets \u00b7 ${fmt(Object.keys(SET.primerSets || {}).length)} saved primer sets \u00b7 ${fmt((SET.featureTypes || []).length + Object.keys(SET.typeColors || {}).length)} feature types</div>
+          <label>Kept where ticked</label><div>${fmt(nShared('primer'))} of ${fmt(((SET.primerDb || {}).primers || []).length)} primers \u00b7 ${fmt(nShared('feature'))} of ${fmt((SET.myFeatures || []).length)} of my features</div>
+          <label></label><div class="hint">A primer or a feature goes to the account only where you tick it, and travels with its sequence. Untick one and it is taken out of the account on every machine; the copy here stays.</div>
+          <div class="full hint">Sequence files are never uploaded.</div></div>`,
         buttons: [
           { label: 'Sign Out', danger: true, act: () => { CLOUD.signOut(); renderAll(); toast('Signed out. Everything stays on this machine.'); } },
+          { label: 'Choose What to Sync\u2026', act: () => { closeDialog(); dlgCloudPick(); } },
           { label: 'Close' },
           { label: 'Sync Now', primary: true, act: () => { cloudSync(true); } }
         ]

@@ -15,16 +15,27 @@ const { INDEX, runner } = require('./lib');
  * hands the rows to this side, which sets updated_at the way the real table's trigger
  * does — later for every write, so "who edited last" is decided by the server. */
 const rows = [];
-let clock = Date.now();
+let clock = Date.now(), nextId = 1;
 function dbGet() { return rows; }
 function dbUpsert(list) {
   for (const row of list) {
     clock = Math.max(clock, Date.now()) + 1000;
-    const rec = Object.assign({}, row, { updated_at: new Date(clock).toISOString() });
-    const at = rows.findIndex(r => r.user_id === rec.user_id && r.kind === rec.kind && r.name === rec.name);
+    const at = rows.findIndex(r => r.user_id === row.user_id && r.kind === row.kind && r.name === row.name);
+    const id = at >= 0 ? rows[at].id : 'id-' + (nextId++);
+    const rec = Object.assign({ id }, row, { updated_at: new Date(clock).toISOString() });
     if (at >= 0) rows[at] = rec; else rows.push(rec);
   }
   return true;
+}
+/* A row taken out of the account is really gone, the way the real table deletes it —
+ * no tombstone, nothing left behind. */
+function dbDelete(ids) {
+  let n = 0;
+  for (const id of ids) {
+    const at = rows.findIndex(r => r.id === id);
+    if (at >= 0) { rows.splice(at, 1); n++; }
+  }
+  return n;
 }
 
 function pageStub() {
@@ -39,7 +50,13 @@ function pageStub() {
       return reply({ access_token: 'tok', refresh_token: 'ref', user: { id: 'u1', email: b.email } });
     }
     if (u.includes('/rest/v1/dogma_items')) {
-      if ((o.method || 'GET') === 'GET') return reply(await window.__dbGet());
+      const m = o.method || 'GET';
+      if (m === 'GET') return reply(await window.__dbGet());
+      if (m === 'DELETE') {
+        const ids = (u.match(/id=in\.\(([^)]*)\)/) || [, ''])[1].split(',').filter(Boolean);
+        await window.__dbDelete(ids);
+        return reply(null, 204);
+      }
       await window.__dbUpsert(JSON.parse(o.body));
       return reply(null, 201);
     }
@@ -59,11 +76,12 @@ function pageStub() {
     p.on('console', m => { if (m.type() === 'error') errs.push(`CONSOLE (${name}): ` + m.text()); });
     await p.exposeFunction('__dbGet', dbGet);
     await p.exposeFunction('__dbUpsert', dbUpsert);
+    await p.exposeFunction('__dbDelete', dbDelete);
     await p.addInitScript(pageStub);
     await p.goto(INDEX);
     await p.waitForTimeout(900);
     // each machine keeps its own settings, as two computers would
-    await p.evaluate(n => { window.__gc.SET.enzymeSets = {}; window.__gc.SET.cloud = { items: {}, tombs: {}, lastSync: 0, email: '' }; }, name);
+    await p.evaluate(n => { const S = window.__gc.SET; S.enzymeSets = {}; S.cloudPick = {}; S.cloud = { items: {}, tombs: {}, lastSync: 0, email: '' }; }, name);
     return p;
   };
 
@@ -77,6 +95,18 @@ function pageStub() {
     return s;
   });
   const sets = p => p.evaluate(() => Object.keys(window.__gc.SET.enzymeSets || {}).sort());
+  // a primer or a feature is only shared where it is ticked, as the dialog does it
+  const tick = (p, kind, on) => p.evaluate(async ([k, yes]) => {
+    const S = window.__gc.SET;
+    S.cloudPick = S.cloudPick || {};
+    S.cloudPick[k] = yes ? window.CLOUD.choices(S, k).map(c => c.name) : [];
+    await window.__gc.saveSettings();
+  }, [kind, on]);
+  const untick = (p, kind, has) => p.evaluate(async ([k, h]) => {
+    const S = window.__gc.SET;
+    S.cloudPick[k] = (S.cloudPick[k] || []).filter(n => !n.includes(h));
+    await window.__gc.saveSettings();
+  }, [kind, has]);
   const addSet = (p, name, list) => p.evaluate(async ([n, l]) => {
     window.__gc.SET.enzymeSets[n] = l;
     await window.__gc.saveSettings();
@@ -141,6 +171,8 @@ function pageStub() {
       S.myFeatures.push({ name: 'my tag', type: 'CDS', kind: 'protein', seq: 'MGSSHHHH', molecule: 'DNA', color: '#3366cc', translated: true, matchProtein: true });
       await window.__gc.saveSettings();
     });
+    await tick(a, 'primer', true);
+    await tick(a, 'feature', true);
     await syncOf(a);
     await syncOf(c);
     const got = await c.evaluate(() => {
@@ -211,6 +243,61 @@ function pageStub() {
     if (await c.evaluate(() => !!(window.__gc.SET.primerSets || {})['pET screening'])) throw new Error('it came back on the other machine');
     await syncOf(a);
     if (await a.evaluate(() => !!(window.__gc.SET.primerSets || {})['pET screening'])) throw new Error('it came back here');
+  });
+
+  await step('a primer that is not ticked never leaves the machine', async () => {
+    await a.evaluate(async () => {
+      const S = window.__gc.SET;
+      S.primerDb.primers.push({ id: 9, name: 'Private fwd', seq: 'CCCGGGAAATTTCCCGGG', notes: 'not for the account' });
+      await window.__gc.saveSettings();
+    });
+    await syncOf(a);                       // ticked list still holds only what was ticked
+    await syncOf(c);
+    const there = await c.evaluate(() => (window.__gc.SET.primerDb.primers || []).map(p => p.name));
+    if (there.includes('Private fwd')) throw new Error('it went up without being ticked: ' + there.join(','));
+    const here = await a.evaluate(() => (window.__gc.SET.primerDb.primers || []).map(p => p.name));
+    if (!here.includes('Private fwd')) throw new Error('it was lost on the machine that made it');
+  });
+
+  await step('ticking it later sends it', async () => {
+    await tick(a, 'primer', true);
+    await syncOf(a);
+    await syncOf(c);
+    const there = await c.evaluate(() => (window.__gc.SET.primerDb.primers || []).map(p => [p.name, p.seq]));
+    const got = there.find(p => p[0] === 'Private fwd');
+    if (!got) throw new Error('ticking did not send it: ' + JSON.stringify(there));
+    if (got[1] !== 'CCCGGGAAATTTCCCGGG') throw new Error('it arrived without its sequence');
+  });
+
+  await step('unticking takes it out of the account and off the other machine\u2019s list', async () => {
+    await untick(a, 'primer', 'Private fwd');
+    const st = await syncOf(a);
+    if (!st.unshared) throw new Error('nothing was taken out of the account: ' + JSON.stringify(st));
+    // it is gone from the table, not tombstoned
+    const rowsNow = rows.filter(r => !r.deleted && r.kind === 'primer' && r.name.startsWith('Private fwd'));
+    if (rowsNow.length) throw new Error('the row is still in the table: ' + JSON.stringify(rowsNow));
+    // and the machine that made it still has it
+    const here = await a.evaluate(() => (window.__gc.SET.primerDb.primers || []).map(p => p.name));
+    if (!here.includes('Private fwd')) throw new Error('unticking deleted the primer here');
+  });
+
+  await step('the other machine keeps its copy but stops sharing it', async () => {
+    const st = await syncOf(c);
+    if (!st.unsharedThere) throw new Error('it did not notice: ' + JSON.stringify(st));
+    const there = await c.evaluate(() => (window.__gc.SET.primerDb.primers || []).map(p => p.name));
+    if (!there.includes('Private fwd')) throw new Error('unticking elsewhere deleted it here');
+    const ticked = await c.evaluate(() => (window.__gc.SET.cloudPick.primer || []).some(n => n.startsWith('Private fwd')));
+    if (ticked) throw new Error('it is still ticked on the other machine');
+  });
+
+  await step('and it does not creep back on the next sync', async () => {
+    await syncOf(c); await syncOf(a); await syncOf(c);
+    const back = rows.filter(r => !r.deleted && r.kind === 'primer' && r.name.startsWith('Private fwd'));
+    if (back.length) throw new Error('it came back into the account');
+    for (const [who, p] of [['A', a], ['B', c]]) {
+      const has = await p.evaluate(() => (window.__gc.SET.primerDb.primers || []).map(x => x.name).includes('Private fwd'));
+      if (!has) throw new Error('machine ' + who + ' lost its copy');
+    }
   });
 
   await step('an edit on both machines keeps both copies', async () => {
