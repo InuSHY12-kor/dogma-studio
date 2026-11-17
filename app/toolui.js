@@ -1,4 +1,4 @@
-/* GeneCanvas — the pages that run in a tool window of their own. Exposes window.TOOLUI.
+/* Dogma Studio — the pages that run in a tool window of their own. Exposes window.TOOLUI.
  *
  * A tool window gets a snapshot of the open documents and a context object with the
  * few things it needs from the host: a toast, a dialog, and a way to send a result

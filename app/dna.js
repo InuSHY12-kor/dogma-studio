@@ -1,4 +1,4 @@
-/* GeneCanvas — DNA logic (no DOM). Exposes window.DNA */
+/* Dogma Studio — DNA logic (no DOM). Exposes window.DNA */
 (function (root) {
   'use strict';
 
@@ -607,7 +607,9 @@ ZraI GACGTC 3 3`;
   }
 
   // ---------- File formats ----------
-  const HIST_TAG = 'GeneCanvas-History-v1';
+  const HIST_TAG = 'DogmaStudio-History-v1';
+  // files written before the program was renamed carry the old tag; they still open
+  const HIST_TAGS = [HIST_TAG, 'GeneCanvas-History-v1'];
   function b64encode(str) {
     const bytes = new TextEncoder().encode(str);
     let bin = '';
@@ -681,7 +683,7 @@ ZraI GACGTC 3 3`;
       }
       if (ln.startsWith('COMMENT')) {
         mode = 'C';
-        if (ln.slice(12).trim() === HIST_TAG) { histLines = []; comment = null; }
+        if (HIST_TAGS.includes(ln.slice(12).trim())) { histLines = []; comment = null; }
         else { comment = [ln.slice(12).trim()]; header.comments.push(comment); }
         continue;
       }
@@ -856,7 +858,7 @@ ZraI GACGTC 3 3`;
     let s = `LOCUS       ${nm.padEnd(16)} ${String(n).padStart(11)} bp    DNA     ${d.circular ? 'circular' : 'linear  '} ${division} ${date}\n`;
     s += wrapField('DEFINITION', (info.description || d.name).replace(/\.$/, '') + '.');
     s += `ACCESSION   ${info.accession || '.'}\nVERSION     ${info.accession || '.'}\n`;
-    s += `KEYWORDS    ${[info.code, 'GeneCanvas'].filter(Boolean).join('; ')}\n`;
+    s += `KEYWORDS    ${[info.code, 'Dogma Studio'].filter(Boolean).join('; ')}\n`;
     s += wrapField('SOURCE', org);
     s += wrapField('  ORGANISM', org);
     (info.references || []).forEach((r, i) => {
@@ -968,7 +970,7 @@ ZraI GACGTC 3 3`;
       { name: 'M13 rev', seq: 'CAGGAAACAGCTATGAC' },
       { name: 'AmpR-R', seq: rc(seq.slice(ampS + 300, ampS + 321)) }
     ];
-    return { name: 'pGC-Demo', seq, circular: true, features, primers, demo: true };
+    return { name: 'pDogma-Demo', seq, circular: true, features, primers, demo: true };
   }
 
   root.DNA = {

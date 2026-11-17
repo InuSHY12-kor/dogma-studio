@@ -1,4 +1,4 @@
-/* GeneCanvas — the phone pass.
+/* Dogma Studio — the phone pass.
  *
  * Opens the same app/index.html as a phone would: an Android device profile, a coarse
  * pointer, and a stand-in for the Capacitor bridge so the Android host in
@@ -107,10 +107,10 @@ const SIZES = [
   await step('settings are kept by the phone', async () => {
     await p.evaluate(async () => { window.__gc.SET.toolbarSmall = true; await window.__gc.saveSettings(); });
     await p.waitForTimeout(300);
-    const saved = await p.evaluate(() => window.__native.prefs['genecanvas-settings']);
+    const saved = await p.evaluate(() => window.__native.prefs['dogma-studio-settings']);
     if (!saved || !JSON.parse(saved).toolbarSmall) throw new Error('Preferences did not take the settings');
     // and come back on the next start
-    const again = await p.evaluate(() => JSON.parse(window.__native.prefs['genecanvas-settings']).toolbarSmall);
+    const again = await p.evaluate(() => JSON.parse(window.__native.prefs['dogma-studio-settings']).toolbarSmall);
     if (!again) throw new Error('the setting did not survive');
   });
 
@@ -119,7 +119,7 @@ const SIZES = [
     await p.evaluate(async () => {
       const d = window.__gc.D();
       const gb = window.DNA.toGenBank(d, () => []);
-      await window.gcHost.saveFile({ defaultName: 'pGC-Demo.gb', content: gb });
+      await window.gcHost.saveFile({ defaultName: 'pDogma-Demo.gb', content: gb });
     });
     await p.waitForTimeout(400);
     const r = await p.evaluate(() => {
@@ -128,7 +128,7 @@ const SIZES = [
       const data = w ? atob(window.__native.files[w.args.path]) : '';
       return { name: w && w.args.path, dir: w && w.args.directory, shared: !!s, head: data.slice(0, 6), len: data.length };
     });
-    if (r.name !== 'pGC-Demo.gb') throw new Error('wrote ' + r.name);
+    if (r.name !== 'pDogma-Demo.gb') throw new Error('wrote ' + r.name);
     if (r.dir !== 'DOCUMENTS') throw new Error('wrote into ' + r.dir);
     if (r.head !== 'LOCUS ') throw new Error('the file does not start with a GenBank header: ' + r.head);
     if (!r.shared) throw new Error('the share sheet was not offered');
@@ -136,7 +136,7 @@ const SIZES = [
 
   await step('opening a file goes through the system picker', async () => {
     const gb = await p.evaluate(() => window.DNA.toGenBank(window.__gc.D(), () => []));
-    const tmp = path.join(require('os').tmpdir(), 'genecanvas-mobile-open.gb');
+    const tmp = path.join(require('os').tmpdir(), 'dogma-mobile-open.gb');
     fs.writeFileSync(tmp, gb.replace(/^LOCUS {7}\S+/m, 'LOCUS       picked-from-phone'));
     const before = await p.evaluate(() => window.__gc.S.docs.length);
     // the host opens the system picker; the browser's own chooser stands in for it here

@@ -1,4 +1,4 @@
-// GeneCanvas — Electron main process
+// Dogma Studio — Electron main process
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -20,7 +20,7 @@ function readForRenderer(p) {
 
 function sendFile(p) {
   if (!win || win.webContents.isLoading()) { pendingFiles.push(p); return; }
-  try { win.webContents.send('open-file', readForRenderer(p)); } catch (e) { dialog.showErrorBox('GeneCanvas', `Could not open ${p}\n${e.message}`); }
+  try { win.webContents.send('open-file', readForRenderer(p)); } catch (e) { dialog.showErrorBox('Dogma Studio', `Could not open ${p}\n${e.message}`); }
 }
 
 function createWindow() {
@@ -29,7 +29,7 @@ function createWindow() {
     height: 920,
     minWidth: 900,
     minHeight: 600,
-    title: 'GeneCanvas',
+    title: 'Dogma Studio',
     backgroundColor: '#ffffff',
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
@@ -209,6 +209,21 @@ ipcMain.on('assembly-close', e => { const w = BrowserWindow.fromWebContents(e.se
 // app's own data so they survive reinstalling and are shared by all documents.
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
+/* The folder is named after the program, so renaming it left the old settings behind
+ * under the old name. They are carried over once, on the first start that finds the new
+ * folder empty, and the old folder is left untouched in case an older copy is still
+ * installed. */
+function carryOverOldSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return;
+    const was = path.join(path.dirname(app.getPath('userData')), 'GeneCanvas', 'settings.json');
+    if (!fs.existsSync(was)) return;
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    fs.copyFileSync(was, SETTINGS_FILE);
+  } catch (e) { /* nothing is lost: the program simply starts with its defaults */ }
+}
+carryOverOldSettings();
+
 ipcMain.handle('load-settings', async () => {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); }
   catch (e) { return {}; }
@@ -225,7 +240,7 @@ ipcMain.handle('save-settings', async (_e, data) => {
 // Downloads sequence records by accession. NCBI asks unauthenticated clients to stay
 // under three requests a second, so every call goes through one paced queue.
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
-const TOOL = 'GeneCanvas';
+const TOOL = 'DogmaStudio';
 let lastCall = 0;
 let chain = Promise.resolve();
 
@@ -293,7 +308,7 @@ ipcMain.handle('ncbi-fetch', async (_e, { db, id, rettype }) => {
 
 // ---------------------------------------------------------------- printing
 function withPrintWindow(html, fn) {
-  const file = path.join(os.tmpdir(), `genecanvas-print-${Date.now()}.html`);
+  const file = path.join(os.tmpdir(), `dogma-print-${Date.now()}.html`);
   fs.writeFileSync(file, html, 'utf8');
   const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
   const cleanup = () => { try { fs.unlinkSync(file); } catch (e) { } if (!w.isDestroyed()) w.destroy(); };

@@ -1,4 +1,4 @@
-/* GeneCanvas — the optional account.
+/* Dogma Studio — the optional account.
  *
  * Signing in is never required: everything works exactly as before without it, kept on
  * the machine it was made on. With an account, three libraries follow the user instead
@@ -13,8 +13,8 @@
 (function (root) {
   'use strict';
   const CFG = () => root.GC_CLOUD || {};
-  const SESSION_KEY = 'genecanvas-cloud-session';
-  const TABLE = 'genecanvas_items';
+  const SESSION_KEY = 'dogma-studio-cloud-session';
+  const TABLE = 'dogma_items';
 
   /* What is kept in the cloud, and how each library is taken apart into items. One item
    * is one thing a person made: a set, a primer, a label, a feature. They are matched up
@@ -108,7 +108,10 @@
   // ---------------------------------------------------------------- the account
   const configured = () => { const c = CFG(); return !!(c.url && c.anonKey); };
   let session = null;
-  try { session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch (e) { session = null; }
+  // the key is named after the program; one saved under the old name still signs in
+  try {
+    session = JSON.parse(localStorage.getItem(SESSION_KEY) || localStorage.getItem('genecanvas-cloud-session') || 'null');
+  } catch (e) { session = null; }
   const saveSession = s => {
     session = s;
     try { s ? localStorage.setItem(SESSION_KEY, JSON.stringify(s)) : localStorage.removeItem(SESSION_KEY); } catch (e) { /* a private window */ }

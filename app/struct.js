@@ -1,4 +1,4 @@
-/* GeneCanvas — structure and thermodynamics. Exposes window.STRUCT
+/* Dogma Studio — structure and thermodynamics. Exposes window.STRUCT
  *
  * Three separate things live here:
  *   1. Oligo structures (hairpin, self-dimer, cross-dimer) from nearest-neighbour

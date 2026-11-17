@@ -1,4 +1,4 @@
-/* GeneCanvas — cloning simulation: restriction ligation, Gibson, Gateway. Exposes window.CLONE */
+/* Dogma Studio — cloning simulation: restriction ligation, Gibson, Gateway. Exposes window.CLONE */
 (function (root) {
   'use strict';
   const DNA = root.DNA;

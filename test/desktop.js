@@ -1,4 +1,4 @@
-/* GeneCanvas — the desktop pass.
+/* Dogma Studio — the desktop pass.
  *
  * Opens app/index.html in a desktop-sized window and walks the application: every view,
  * the dialogs, the side strip, the maps, the cloning window and the simulation. It is
@@ -56,7 +56,7 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     ['File', 'Print…'],
     ['File', 'Open from NCBI…'],
     ['Help', 'Keyboard Shortcuts'],
-    ['Help', 'About GeneCanvas'],
+    ['Help', 'About Dogma Studio'],
     ['Edit', 'Go To Position…'],
     ['Features', 'Add Feature…'],
     ['Primers', 'Add Primer…']

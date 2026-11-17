@@ -53,7 +53,7 @@ function bind(req, resolve, reject) {
 }
 
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
-const TOOL = 'GeneCanvas';
+const TOOL = 'DogmaStudio';
 const LIMIT = 600;          // genes per organism; codon usage converges well before this
 const BATCH = 100;
 
@@ -171,7 +171,7 @@ function countCodons(fasta) {
   const order = [];
   for (let i = 0; i < 64; i++) order.push(BASES[i >> 4] + BASES[(i >> 2) & 3] + BASES[i & 3]);
 
-  let out = `/* GeneCanvas — codon usage tables. Exposes window.CODON_TABLES.
+  let out = `/* Dogma Studio — codon usage tables. Exposes window.CODON_TABLES.
  *
  * GENERATED FILE — do not edit by hand. Rebuild with:
  *     node tools/build-codon-tables.js

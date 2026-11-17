@@ -1,4 +1,4 @@
-/* GeneCanvas — codon optimization. Exposes window.CODON
+/* Dogma Studio — codon optimization. Exposes window.CODON
  *
  * Works on a coding sequence and rewrites synonymous codons for a chosen organism,
  * while respecting regions the user wants left alone, removing unwanted restriction

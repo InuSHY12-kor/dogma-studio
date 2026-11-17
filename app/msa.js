@@ -1,4 +1,4 @@
-/* GeneCanvas — comparing whole sequences to one another. Exposes window.MSA
+/* Dogma Studio — comparing whole sequences to one another. Exposes window.MSA
  *
  * Plasmids being compared are usually near-identical, so the alignment is anchored on
  * exact unique matches and only the stretches between anchors go through dynamic

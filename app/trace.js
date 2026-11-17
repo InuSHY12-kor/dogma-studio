@@ -1,4 +1,4 @@
-/* GeneCanvas — Sanger trace (.ab1 / .scf) reading and alignment to a reference. Exposes window.TRACE */
+/* Dogma Studio — Sanger trace (.ab1 / .scf) reading and alignment to a reference. Exposes window.TRACE */
 (function (root) {
   'use strict';
   const DNA = root.DNA;

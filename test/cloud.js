@@ -1,4 +1,4 @@
-/* GeneCanvas — what the optional account does with two machines.
+/* Dogma Studio — what the optional account does with two machines.
  *
  * The account's job is to merge three libraries between places without losing an edit
  * or resurrecting a deletion. That is logic, not network, so this pass runs it against
@@ -38,7 +38,7 @@ function pageStub() {
       const b = JSON.parse(o.body || '{}');
       return reply({ access_token: 'tok', refresh_token: 'ref', user: { id: 'u1', email: b.email } });
     }
-    if (u.includes('/rest/v1/genecanvas_items')) {
+    if (u.includes('/rest/v1/dogma_items')) {
       if ((o.method || 'GET') === 'GET') return reply(await window.__dbGet());
       await window.__dbUpsert(JSON.parse(o.body));
       return reply(null, 201);

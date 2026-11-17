@@ -1,4 +1,4 @@
-/* GeneCanvas — using the map and the sequence with a finger.
+/* Dogma Studio — using the map and the sequence with a finger.
  *
  * The application is written against mouse events. Rather than rewrite those handlers,
  * this layer reads touch gestures and hands the application the mouse events it already

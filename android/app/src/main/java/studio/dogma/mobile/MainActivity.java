@@ -1,4 +1,4 @@
-package app.genecanvas.mobile;
+package studio.dogma.mobile;
 
 import com.getcapacitor.BridgeActivity;
 

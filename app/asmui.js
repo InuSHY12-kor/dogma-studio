@@ -1,4 +1,4 @@
-/* GeneCanvas — the Vector / Fragment / Product cloning window.
+/* Dogma Studio — the Vector / Fragment / Product cloning window.
  * Exposes window.ASMUI.open(method, ctx)
  *
  * The same window runs inside the main window and, on the desktop, in a window of its own.

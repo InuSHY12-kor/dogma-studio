@@ -1,4 +1,4 @@
-/* GeneCanvas — silent mutagenesis of restriction sites. Exposes window.SILENT
+/* Dogma Studio — silent mutagenesis of restriction sites. Exposes window.SILENT
  *
  * Two jobs, both done without changing a single amino acid:
  *   addSites()    finds every place inside a coding sequence where an enzyme site

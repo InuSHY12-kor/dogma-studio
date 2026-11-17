@@ -1,4 +1,4 @@
-/* GeneCanvas — the Simulation window. Exposes window.SIMUI.
+/* Dogma Studio — the Simulation window. Exposes window.SIMUI.
  *
  * A gel on the left and the sequence on the right. Each lane holds a ladder or a
  * sequence; a sequence lane is either cut with enzymes or amplified with a pair of

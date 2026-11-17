@@ -1,10 +1,10 @@
 {
-  "name": "genecanvas",
-  "productName": "GeneCanvas",
-  "version": "0.3.2",
+  "name": "dogma-studio",
+  "productName": "Dogma Studio",
+  "version": "0.4.0",
   "description": "Plasmid and DNA sequence editor for Windows and Android: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
   "main": "main.js",
-  "author": "GeneCanvas",
+  "author": "Dogma Studio",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -31,9 +31,9 @@
     "electron-builder": "25.1.8"
   },
   "build": {
-    "appId": "app.genecanvas.desktop",
-    "productName": "GeneCanvas",
-    "copyright": "GeneCanvas",
+    "appId": "studio.dogma.desktop",
+    "productName": "Dogma Studio",
+    "copyright": "Dogma Studio",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -67,11 +67,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "GeneCanvas",
-      "artifactName": "GeneCanvas-Setup-${version}.${ext}"
+      "shortcutName": "Dogma Studio",
+      "artifactName": "DogmaStudio-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "GeneCanvas-${version}-portable.${ext}"
+      "artifactName": "DogmaStudio-${version}-portable.${ext}"
     },
     "fileAssociations": [
       {

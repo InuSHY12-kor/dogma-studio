@@ -1,4 +1,4 @@
-/* GeneCanvas — desktop molecular-biology editor look */
+/* Dogma Studio — desktop molecular-biology editor look */
 :root {
   --bg: #e9ebef;
   --win: #ffffff;
@@ -41,7 +41,8 @@ button { cursor: pointer; }
 .menubar .mi svg { display: none; }                 /* the glyph is for the phone layout */
 .menubar .mi:hover, .menubar .mi.open { background: var(--chrome2); }
 .menubar .brand { margin-left: auto; padding: 0 12px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-.brand-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); }
+.brand-dot { width: 16px; height: 16px; border-radius: 4px; background: url(brand.png) center/cover no-repeat;
+  box-shadow: 0 0 0 1px rgba(20, 30, 50, .10); }
 .menu-pop { position: fixed; z-index: 50; min-width: 250px; background: var(--win); border: 1px solid var(--border); box-shadow: 0 6px 22px rgba(20, 30, 50, .18); padding: 4px 0; border-radius: 4px; }
 .menu-pop .it { display: flex; align-items: center; gap: 18px; padding: 5px 14px 5px 26px; cursor: default; white-space: nowrap; position: relative; }
 .menu-pop .it .k { margin-left: auto; color: var(--faint); font-size: 12px; }

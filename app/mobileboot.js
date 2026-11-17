@@ -1,4 +1,4 @@
-/* GeneCanvas — the Android host.
+/* Dogma Studio — the Android host.
  *
  * The application code talks to its surroundings through one object, window.gcHost:
  * on the desktop that object comes from the Electron preload, and here it comes from
@@ -16,7 +16,7 @@
   if (window.gcHost) return;                                        // never override the Electron preload
   const P = C.Plugins || {};
   const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
-  const TOOL = 'GeneCanvas';
+  const TOOL = 'DogmaStudio';
   const q = o => Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 
@@ -66,7 +66,7 @@
    * comes back is what the application reports to the user. */
   async function saveFile(opts) {
     const o = opts || {};
-    const name = (o.path && String(o.path).split('/').pop()) || o.defaultName || 'GeneCanvas.txt';
+    const name = (o.path && String(o.path).split('/').pop()) || o.defaultName || 'DogmaStudio.txt';
     const data = o.encoding === 'base64' ? o.content : b64(o.content || '');
     if (!P.Filesystem) throw new Error('This build cannot write files.');
     await P.Filesystem.writeFile({ path: name, data, directory: DOCS, recursive: true });
@@ -82,7 +82,7 @@
   }
 
   // ---------------------------------------------------------------- settings
-  const KEY = 'genecanvas-settings';
+  const KEY = 'dogma-studio-settings';
   async function loadSettings() {
     if (!P.Preferences) return null;
     const { value } = await P.Preferences.get({ key: KEY });
@@ -137,7 +137,7 @@
   /* A phone has no print dialog to hand the page to, so the printable page is written
    * out as a file and offered to whatever can open or print it. */
   async function printHtml(html) {
-    const name = `GeneCanvas-${Date.now()}.html`;
+    const name = `DogmaStudio-${Date.now()}.html`;
     await saveFile({ defaultName: name, content: html });
     return true;
   }

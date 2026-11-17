@@ -1,4 +1,4 @@
-/* GeneCanvas — bootstrap for the separate cloning window.
+/* Dogma Studio — bootstrap for the separate cloning window.
  *
  * This window has no documents of its own. It is handed a snapshot of the open
  * sequences when it opens, is told again whenever they change in the main window, and
@@ -54,7 +54,7 @@
 
   function mount(payload) {
     DOCS = payload.docs || [];
-    document.title = 'Cloning — GeneCanvas';
+    document.title = 'Cloning — Dogma Studio';
     window.ASMUI.open(payload.method || 'gibson', {
       standalone: true,
       docs: () => DOCS,
@@ -80,6 +80,6 @@
       toast('The open sequences changed in the main window');
     });
   } else {
-    document.body.innerHTML = '<div class="empty"><h2>Cloning</h2><p>This window is opened by GeneCanvas.</p></div>';
+    document.body.innerHTML = '<div class="empty"><h2>Cloning</h2><p>This window is opened by Dogma Studio.</p></div>';
   }
 })();

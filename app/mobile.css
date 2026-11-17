@@ -1,4 +1,4 @@
-/* GeneCanvas — the phone layout.
+/* Dogma Studio — the phone layout.
  *
  * Everything here is inside a media query or a coarse-pointer query, so a desktop
  * window is untouched: the same stylesheet ships in both builds and only the Android

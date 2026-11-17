@@ -1,4 +1,4 @@
-/* GeneCanvas — agarose gel simulation. Exposes window.GEL
+/* Dogma Studio — agarose gel simulation. Exposes window.GEL
  *
  * Migration is modelled, not measured. For each agarose percentage the model holds the
  * two ends of the useful resolving range: the size that barely leaves the well and the

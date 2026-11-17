@@ -1,4 +1,4 @@
-/* GeneCanvas — application UI */
+/* Dogma Studio — application UI */
 (function () {
   'use strict';
   const DNA = window.DNA, CLONE = window.CLONE, TRACE = window.TRACE, PRIMER = window.PRIMER, MSA = window.MSA, CODON = window.CODON, STRUCT = window.STRUCT, GEL = window.GEL, ASSEMBLY = window.ASSEMBLY;
@@ -530,7 +530,7 @@ svg .lbl.p.hov { font-weight: 700; }
     renderMenuState(); renderToolbar(); renderDocTabs(); renderViewTabs(); renderSide(); renderView(keepScroll); renderCompanion(); renderInfo(); renderStatus();
     if (host && host.assemblySync) { try { host.assemblySync(asmDocSnapshot()); } catch (e) { } }
     if (host && host.toolSync) { try { host.toolSync(asmDocSnapshot()); } catch (e) { } }
-    document.title = D() ? `${D().name}${D().dirty ? ' •' : ''} — GeneCanvas` : 'GeneCanvas';
+    document.title = D() ? `${D().name}${D().dirty ? ' •' : ''} — Dogma Studio` : 'Dogma Studio';
   }
   function refreshSel(scroll) {
     if (S.view === 'map') drawSelLayer();
@@ -866,7 +866,7 @@ svg .lbl.p.hov { font-weight: 700; }
       { label: 'Help', items: [
         { label: 'Search Tips', act: dlgSearchTips },
         { label: 'Keyboard Shortcuts', act: dlgShortcuts },
-        { label: 'About GeneCanvas', act: dlgAbout }
+        { label: 'About Dogma Studio', act: dlgAbout }
       ] }
     ];
   }
@@ -930,7 +930,7 @@ svg .lbl.p.hov { font-weight: 700; }
   function renderMenuBar() {
     const mb = $('#menubar');
     menuBarSig = menus().map(m => m.label).join(',');
-    mb.innerHTML = menus().map((m, i) => `<div class="mi" data-i="${i}" title="${esc(m.label)}">${icon(MENU_ICONS[m.label] || 'tbl')}<span>${esc(m.label)}</span></div>`).join('') + `<div class="brand"><span class="brand-dot"></span>GeneCanvas</div>`;
+    mb.innerHTML = menus().map((m, i) => `<div class="mi" data-i="${i}" title="${esc(m.label)}">${icon(MENU_ICONS[m.label] || 'tbl')}<span>${esc(m.label)}</span></div>`).join('') + `<div class="brand"><span class="brand-dot"></span>Dogma Studio</div>`;
     mb.onmousedown = e => { const it = e.target.closest('.mi'); if (!it) return; e.preventDefault(); const i = +it.dataset.i; if (openMenu === i) closeMenu(); else showMenu(i); };
     mb.onmouseover = e => { const it = e.target.closest('.mi'); if (it && openMenu >= 0 && +it.dataset.i !== openMenu) showMenu(+it.dataset.i); };
   }
@@ -1517,7 +1517,7 @@ svg .lbl.p.hov { font-weight: 700; }
   }
   function exportPrimerDb() {
     const db = pdb();
-    const json = JSON.stringify({ kind: 'GeneCanvas primer database', version: 1, saved: new Date().toISOString(), labels: db.labels, primers: db.primers }, null, 1);
+    const json = JSON.stringify({ kind: 'Dogma Studio primer database', version: 1, saved: new Date().toISOString(), labels: db.labels, primers: db.primers }, null, 1);
     if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'primer-database.json', content: json, filters: [{ name: 'JSON', extensions: ['json'] }] }).then(p2 => { if (p2) toast('Database exported to ' + p2.split(/[\\/]/).pop()); });
     else downloadText('primer-database.json', json);
   }
@@ -1872,7 +1872,7 @@ svg .lbl.p.hov { font-weight: 700; }
     if (done) done();
     toast(`${added} feature type${added === 1 ? '' : 's'} imported${skipped ? `, ${skipped} skipped (already known)` : ''}`);
   }
-  /* A file may carry a type GeneCanvas has never seen. This offers the same choice
+  /* A file may carry a type Dogma Studio has never seen. This offers the same choice
    * there are two sensible answers: keep it as a custom type, or fall back to
    * misc_feature. */
   function checkUnknownTypes(d) {
@@ -1882,7 +1882,7 @@ svg .lbl.p.hov { font-weight: 700; }
     dialog({
       title: unknown.length === 1 ? 'Unknown Feature Type' : 'Unknown Feature Types',
       body: `<div class="form">
-        <div class="full">${esc(d.name)} uses ${unknown.length === 1 ? 'a feature type' : 'feature types'} this copy of GeneCanvas does not know:</div>
+        <div class="full">${esc(d.name)} uses ${unknown.length === 1 ? 'a feature type' : 'feature types'} this copy of Dogma Studio does not know:</div>
         <div class="full"><ul style="margin:4px 0 8px 18px">${unknown.map(t => `<li><b class="mono">${esc(t)}</b> — ${d.features.filter(f => f.type === t).length} feature(s)</li>`).join('')}</ul></div>
         <div class="full hint">Keeping them adds each one as a custom feature type, so other files can use it too.</div></div>`,
       buttons: [
@@ -2293,7 +2293,7 @@ svg .lbl.p.hov { font-weight: 700; }
     }
     if (isRNA(d) && S.view === 'struct') { v.onclick = null; return renderRNAStruct(); }
     if (!d) {
-      v.innerHTML = `<div class="empty"><h2>GeneCanvas</h2><p>Open a GenBank, FASTA or .dna file, or start a new sequence. You can also drop a file onto this window.</p><div class="btns"><button class="btn pri" data-a="open">Open File…</button><button class="btn" data-a="new">New DNA File…</button><button class="btn" data-a="demo">Open Example Plasmid</button></div></div>`;
+      v.innerHTML = `<div class="empty"><h2>Dogma Studio</h2><p>Open a GenBank, FASTA or .dna file, or start a new sequence. You can also drop a file onto this window.</p><div class="btns"><button class="btn pri" data-a="open">Open File…</button><button class="btn" data-a="new">New DNA File…</button><button class="btn" data-a="demo">Open Example Plasmid</button></div></div>`;
       v.onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; ({ open: openFiles, new: dlgNew, demo: () => addDoc(DNA.buildDemo()) })[b.dataset.a](); };
       return;
     }
@@ -4500,7 +4500,7 @@ svg .lbl.p.hov { font-weight: 700; }
         <label></label><label><input type="checkbox" id="toApply"> Apply this genetic code to the ${d.features.filter(f => f.translated).length} translated feature(s) in this file too</label>
         <label></label><label><input type="checkbox" id="toAA3" ${o.aa3 ? 'checked' : ''}> Use 3-letter amino acid codes</label>
         <div class="full" id="toSum"></div>
-        <div class="full hint">Forward translations are drawn on an orange background and reverse translations on a green one. GeneCanvas finds simple ORFs only: a coding sequence with introns has to be annotated as a segmented feature.</div>
+        <div class="full hint">Forward translations are drawn on an orange background and reverse translations on a green one. Dogma Studio finds simple ORFs only: a coding sequence with introns has to be annotated as a segmented feature.</div>
         <div class="full err"></div></div>`,
       buttons: [{ label: 'Cancel' }, { label: 'OK', primary: true, act: () => {
         const chosen = [...document.querySelectorAll('#dlg [data-sc]:checked')].map(i => i.dataset.sc);
@@ -4862,7 +4862,7 @@ svg .lbl.p.hov { font-weight: 700; }
       body: `<div class="form">
         <label>Columns</label><div class="enz-pick" style="columns:3 150px;max-height:200px">${COLS.map(([k, t]) => `<label><input type="checkbox" data-xc="${k}" ${on.has(k) ? 'checked' : ''}> ${t}</label>`).join('')}</div>
         <label>Format</label><select id="xfFmt"><option value="tsv">Tab-separated (.tsv)</option><option value="csv">Comma-separated (.csv)</option></select>
-        <div class="full hint">This file is meant for other programs. To copy features into another GeneCanvas file use Features › Import Features from Another File.</div>
+        <div class="full hint">This file is meant for other programs. To copy features into another Dogma Studio file use Features › Import Features from Another File.</div>
         <div class="full err"></div></div>`,
       buttons: [{ label: 'Cancel' }, { label: 'Export', primary: true, act: () => {
         const keys = [...document.querySelectorAll('#dlg [data-xc]:checked')].map(i => i.dataset.xc);
@@ -4970,7 +4970,7 @@ svg .lbl.p.hov { font-weight: 700; }
           <td><button class="ib" data-ed="${f.id}">Edit</button><button class="ib dng" data-del="${f.id}">Delete</button></td></tr>`
         + (featOpen.has(f.id) ? detail(f) : '');
     }).join('')}
-      </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let GeneCanvas detect common features such as promoters, tags and recombination sites. With no selection, Add Feature makes a zero-length point feature at the cursor.</p></div>`}</div></div>`;
+      </tbody></table>` : `<div class="empty"><h2>No features yet</h2><p>Select a region in the Map or Sequence view and choose Add Feature, or let Dogma Studio detect common features such as promoters, tags and recombination sites. With no selection, Add Feature makes a zero-length point feature at the cursor.</p></div>`}</div></div>`;
     // highlight what the Find Features field matched, and open those rows
     if (featFind) {
       const hits = SEARCH.featureMeta(fs, featFind);
@@ -6127,7 +6127,7 @@ svg .lbl.p.hov { font-weight: 700; }
       body: `<div class="form">
         <div class="full">${list.length} primer${list.length === 1 ? '' : 's'} will be opened in IDT's OligoAnalyzer, one browser tab each, with the sequence filled in.</div>
         <div class="full"><ul style="margin:4px 0 8px 18px">${list.slice(0, 10).map(x => `<li>${esc(x.name)} — <span class="mono">${esc(x.seq)}</span></li>`).join('')}${list.length > 10 ? `<li>and ${list.length - 10} more</li>` : ''}</ul></div>
-        <div class="full hint">OligoAnalyzer gives the extinction coefficient, hairpins, self-dimers and hetero-dimers. A free IDT account is needed. GeneCanvas also computes hairpins and dimers itself — see Structure… on a primer.</div></div>`,
+        <div class="full hint">OligoAnalyzer gives the extinction coefficient, hairpins, self-dimers and hetero-dimers. A free IDT account is needed. Dogma Studio also computes hairpins and dimers itself — see Structure… on a primer.</div></div>`,
       buttons: [{ label: 'Cancel' }, { label: `Open ${list.length} tab${list.length === 1 ? '' : 's'}`, primary: true, act: () => {
         for (const x of list) window.open('https://sg.idtdna.com/calc/analyzer?sequence=' + encodeURIComponent(x.seq), '_blank', 'noreferrer');
         toast('Opened OligoAnalyzer');
@@ -6209,8 +6209,8 @@ svg .lbl.p.hov { font-weight: 700; }
   }
   function dlgAbout() {
     dialog({
-      title: 'About GeneCanvas',
-      body: `<p><b>GeneCanvas</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>A desktop editor for plasmids, RNA and protein sequences: maps, sequence editing, restriction analysis, features with segments and introns, primers, cloning simulation, codon optimization, sequencing alignments and simulated gels.</p>
+      title: 'About Dogma Studio',
+      body: `<p><b>Dogma Studio</b> ${host && host.version ? 'version ' + esc(host.version) : ''}<br>An editor for plasmids, RNA and protein sequences, for Windows and Android: maps, sequence editing, restriction analysis, features with segments and introns, primers, cloning simulation, codon optimization, sequencing alignments and simulated gels.</p>
         <p class="hint">Opens GenBank (.gb, .gbk), FASTA, .dna and .ab1 trace files, and downloads from NCBI by accession. Saves GenBank and FASTA. The example plasmid is a synthetic sequence made for demonstration.</p>
         <p class="hint">Melting temperatures and structure free energies use the SantaLucia 1998 nearest-neighbour parameters; codon usage tables were computed from real NCBI coding sequences. RNA folding free energies are approximate and are marked as such where they are shown.</p>`,
       buttons: [{ label: 'Close', primary: true }]
@@ -6223,16 +6223,16 @@ svg .lbl.p.hov { font-weight: 700; }
   async function ncbiSearch(db, term) {
     if (host && host.ncbiSearch) return host.ncbiSearch({ db, term, retmax: 25 }).catch(e => { throw new Error(hostErr(e)); });
     const base = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
-    const r = await fetch(`${base}esearch.fcgi?db=${db}&term=${encodeURIComponent(term)}&retmax=25&retmode=json&tool=GeneCanvas`);
+    const r = await fetch(`${base}esearch.fcgi?db=${db}&term=${encodeURIComponent(term)}&retmax=25&retmode=json&tool=DogmaStudio`);
     const ids = ((await r.json()).esearchresult || {}).idlist || [];
     if (!ids.length) return { ids: [], items: [] };
-    const s = await (await fetch(`${base}esummary.fcgi?db=${db}&id=${ids.join(',')}&retmode=json&tool=GeneCanvas`)).json();
+    const s = await (await fetch(`${base}esummary.fcgi?db=${db}&id=${ids.join(',')}&retmode=json&tool=DogmaStudio`)).json();
     const res = s.result || {};
     return { ids, items: (res.uids || []).map(u => ({ uid: u, accession: res[u].caption || u, title: res[u].title || '', slen: res[u].slen || 0, topology: res[u].topology || '', organism: res[u].organism || '' })) };
   }
   async function ncbiFetch(db, id) {
     if (host && host.ncbiFetch) return host.ncbiFetch({ db, id }).catch(e => { throw new Error(hostErr(e)); });
-    const r = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=${db}&id=${encodeURIComponent(id)}&rettype=gbwithparts&retmode=text&tool=GeneCanvas`);
+    const r = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=${db}&id=${encodeURIComponent(id)}&rettype=gbwithparts&retmode=text&tool=DogmaStudio`);
     if (!r.ok) throw new Error(`NCBI returned HTTP ${r.status}.`);
     return r.text();
   }
@@ -6472,7 +6472,7 @@ svg .lbl.p.hov { font-weight: 700; }
     if (!sites.length) { toast('No att sites found in this sequence.'); return; }
     for (const s of sites) {
       if (d.features.some(f => f.start === s.pos && f.name.startsWith('att'))) continue;
-      d.features.push({ id: uid(), name: s.kind, type: 'protein_bind', start: s.pos, end: (s.pos + 7) % d.seq.length, strand: s.strand, color: '#69c4c6', notes: 'Recombination core detected by GeneCanvas' });
+      d.features.push({ id: uid(), name: s.kind, type: 'protein_bind', start: s.pos, end: (s.pos + 7) % d.seq.length, strand: s.strand, color: '#69c4c6', notes: 'Recombination core detected by Dogma Studio' });
     }
     commit(d, `Marked ${sites.length} att site${sites.length > 1 ? 's' : ''}`); renderAll(true);
     toast(sites.map(s => s.label).join(', '));
@@ -6501,7 +6501,7 @@ svg .lbl.p.hov { font-weight: 700; }
     // in a browser the same page is shown in a wide dialog
     const titles = { featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' };
     dialog({
-      title: titles[kind] || 'GeneCanvas', wide: true,
+      title: titles[kind] || 'Dogma Studio', wide: true,
       body: `<div id="toolhost" style="height:70vh;display:flex;flex-direction:column"></div>`,
       buttons: [{ label: 'Close', primary: true }],
       onOpen: box => {
@@ -6976,8 +6976,8 @@ svg .lbl.p.hov { font-weight: 700; }
           const p = pairs[+b.dataset.add];
           closeDialog();
           addDesigned([
-            { name: `${d.name}-F`, seq: p.fwd.full, notes: `Tm ${p.fwd.tm.toFixed(1)} °C, designed by GeneCanvas` },
-            { name: `${d.name}-R`, seq: p.rev.full, notes: `Tm ${p.rev.tm.toFixed(1)} °C, designed by GeneCanvas` }
+            { name: `${d.name}-F`, seq: p.fwd.full, notes: `Tm ${p.fwd.tm.toFixed(1)} °C, designed by Dogma Studio` },
+            { name: `${d.name}-R`, seq: p.rev.full, notes: `Tm ${p.rev.tm.toFixed(1)} °C, designed by Dogma Studio` }
           ]);
         });
       }
@@ -7565,7 +7565,7 @@ svg .lbl.p.hov { font-weight: 700; }
       body: `<table class="grid"><thead><tr><th>Colour</th><th>Residues</th></tr></thead><tbody>
         ${Object.entries(byCol).map(([col, res]) => `<tr><td><span class="sw" style="background:${col};width:30px"></span></td><td class="mono">${res.sort().join(' ')}</td></tr>`).join('')}
       </tbody></table>
-      <div class="hint">${scheme === 'dnastar' ? 'The categories are those of the published DNASTAR scheme; the colours are GeneCanvas’s own.' : (scheme === 'tm' ? 'Shaded from most hydrophilic to least, in the order given by Zhao and London (2006).' : 'Palette as published for this scheme.')}</div>`,
+      <div class="hint">${scheme === 'dnastar' ? 'The categories are those of the published DNASTAR scheme; the colours are Dogma Studio’s own.' : (scheme === 'tm' ? 'Shaded from most hydrophilic to least, in the order given by Zhao and London (2006).' : 'Palette as published for this scheme.')}</div>`,
       buttons: [{ label: 'Close', primary: true }]
     });
   }
@@ -8059,7 +8059,7 @@ svg .lbl.p.hov { font-weight: 700; }
 
   // ================================================================ stored settings
   // Preferences shared by every file: saved enzyme sets, map and sequence view defaults.
-  const SETTINGS_KEY = 'genecanvas.settings';
+  const SETTINGS_KEY = 'dogma-studio.settings';
   const DEFAULT_SETTINGS = { enzymeSets: {}, lastEnzymeSet: '', mapView: null, seqView: null, ladders: {}, primerSets: {}, myFeatures: [], recentFiles: [], featureTypes: [], typeColors: {}, recentTypes: [], primerDb: { primers: [], labels: [] } };
   let SET = { ...DEFAULT_SETTINGS };
 
@@ -8121,7 +8121,7 @@ svg .lbl.p.hov { font-weight: 700; }
   function dlgAccount() {
     if (!cloudOn()) {
       dialog({
-        title: 'Account', body: `<div class="form"><div class="full hint">This build has no account server set up, so everything is kept on this machine. That is all GeneCanvas needs to work.</div></div>`,
+        title: 'Account', body: `<div class="form"><div class="full hint">This build has no account server set up, so everything is kept on this machine. That is all Dogma Studio needs to work.</div></div>`,
         buttons: [{ label: 'Close', primary: true }]
       });
       return;
@@ -8430,7 +8430,7 @@ svg .lbl.p.hov { font-weight: 700; }
   // a set can be carried to another machine.
   function exportEnzSet() {
     const d = D();
-    const text = `# GeneCanvas enzyme set\n# ${d.chosen.length} enzymes\n` + d.chosen.join('\n') + '\n';
+    const text = `# Dogma Studio enzyme set\n# ${d.chosen.length} enzymes\n` + d.chosen.join('\n') + '\n';
     const name = 'enzyme-set.txt';
     if (host && host.saveFile) host.saveFile({ path: null, defaultName: name, content: text, filters: [{ name: 'Text', extensions: ['txt'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
     else downloadText(name, text);
@@ -8713,8 +8713,8 @@ svg .lbl.p.hov { font-weight: 700; }
     const rows = [['Enzyme', 'Site', 'CoreLength', 'TopCut', 'BottomCut', 'Ends']];
     for (const e of DNA.ENZYMES) rows.push([e.name, e.site, e.core, e.top, e.bot, ends(e).replace(/[′]/g, "'")]);
     const csv = rows.map(r => r.join(',')).join('\n');
-    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'genecanvas-enzymes.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
-    else downloadText('genecanvas-enzymes.csv', csv);
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'dogma-enzymes.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+    else downloadText('dogma-enzymes.csv', csv);
   }
   function dlgFeatureDB() {
     let q = '', tab = 'built';
@@ -8764,8 +8764,8 @@ svg .lbl.p.hov { font-weight: 700; }
     const rows = [['Name', 'Type', 'MatchedOn', 'Length', 'Sequence']];
     for (const f of DNA.COMMON) rows.push([JSON.stringify(f.name), f.type, f.kind, f.seq.length, f.seq]);
     const csv = rows.map(r => r.join(',')).join('\n');
-    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'genecanvas-features.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
-    else downloadText('genecanvas-features.csv', csv);
+    if (host && host.saveFile) host.saveFile({ path: null, defaultName: 'dogma-features.csv', content: csv, filters: [{ name: 'CSV', extensions: ['csv'] }] }).then(p => { if (p) toast('Exported ' + p.split(/[\\/]/).pop()); });
+    else downloadText('dogma-features.csv', csv);
   }
 
   // ================================================================ structure analysis
@@ -9216,7 +9216,7 @@ svg .lbl.p.hov { font-weight: 700; }
       // a file may carry a feature type this copy does not know about
       setTimeout(() => checkUnknownTypes(doc), 150);
     } catch (err) {
-      dialog({ title: 'Could Not Open File', body: `<p>${esc(name)}</p><p class="err">${esc(err.message)}</p><p class="hint">GeneCanvas opens GenBank (.gb, .gbk), FASTA (.fa, .fasta), .dna and plain-text sequences.</p>`, buttons: [{ label: 'OK', primary: true }] });
+      dialog({ title: 'Could Not Open File', body: `<p>${esc(name)}</p><p class="err">${esc(err.message)}</p><p class="hint">Dogma Studio opens GenBank (.gb, .gbk), FASTA (.fa, .fasta), .dna and plain-text sequences.</p>`, buttons: [{ label: 'OK', primary: true }] });
     }
   }
   async function openFiles() {
@@ -9390,7 +9390,7 @@ svg .lbl.p.hov { font-weight: 700; }
     if (host.onCloseRequest) host.onCloseRequest(() => {
       const dirty = S.docs.filter(d => d.dirty);
       if (!dirty.length) { host.confirmClose(); return; }
-      dialog({ title: 'Quit GeneCanvas', body: `<p>${dirty.length} file${dirty.length > 1 ? 's have' : ' has'} unsaved changes: ${dirty.map(d => '“' + esc(d.name) + '”').join(', ')}.</p><p>Quit without saving?</p>`, buttons: [{ label: 'Cancel', primary: true }, { label: 'Quit Without Saving', danger: true, act: () => host.confirmClose() }] });
+      dialog({ title: 'Quit Dogma Studio', body: `<p>${dirty.length} file${dirty.length > 1 ? 's have' : ' has'} unsaved changes: ${dirty.map(d => '“' + esc(d.name) + '”').join(', ')}.</p><p>Quit without saving?</p>`, buttons: [{ label: 'Cancel', primary: true }, { label: 'Quit Without Saving', danger: true, act: () => host.confirmClose() }] });
     });
   }
 

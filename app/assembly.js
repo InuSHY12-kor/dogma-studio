@@ -1,4 +1,4 @@
-/* GeneCanvas — the cloning engine behind the Vector / Fragment / Product window.
+/* Dogma Studio — the cloning engine behind the Vector / Fragment / Product window.
  * Exposes window.ASSEMBLY
  *
  * A run is an ordered, circular list of pieces. The first piece is the vector backbone;

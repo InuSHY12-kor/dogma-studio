@@ -1,4 +1,4 @@
-/* GeneCanvas — primer design. Exposes window.PRIMER */
+/* Dogma Studio — primer design. Exposes window.PRIMER */
 (function (root) {
   'use strict';
   const DNA = root.DNA;

@@ -1,4 +1,4 @@
-/* GeneCanvas — codon usage tables. Exposes window.CODON_TABLES.
+/* Dogma Studio — codon usage tables. Exposes window.CODON_TABLES.
  *
  * GENERATED FILE — do not edit by hand. Rebuild with:
  *     node tools/build-codon-tables.js

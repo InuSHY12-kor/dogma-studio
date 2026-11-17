@@ -1,4 +1,4 @@
-/* GeneCanvas — bootstrap for a tool window. Works out which page it is, asks the main
+/* Dogma Studio — bootstrap for a tool window. Works out which page it is, asks the main
  * process for its payload, and gives the page the small host it expects. */
 (function () {
   'use strict';
@@ -48,7 +48,7 @@
       payload: p,
       saveFavourites: list => send({ kind: 'favourites', list })
     };
-    document.title = ({ featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' })[state.kind] || 'GeneCanvas';
+    document.title = ({ featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' })[state.kind] || 'Dogma Studio';
     if (state.kind === 'featuredb') TOOLUI.featureBrowser(root, ctx);
     else if (state.kind === 'enzymedb') TOOLUI.enzymeBrowser(root, ctx);
     else if (state.kind === 'simulator') SIMUI.open(root, ctx);

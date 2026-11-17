@@ -1,4 +1,4 @@
-/* GeneCanvas — sequence search. Exposes window.SEARCH
+/* Dogma Studio — sequence search. Exposes window.SEARCH
  *
  * The query syntax:
  *   GGTCT(AG)CTTC   a set of allowed letters at one position

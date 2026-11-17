@@ -1,6 +1,6 @@
 {
-  "appId": "app.genecanvas.mobile",
-  "appName": "GeneCanvas",
+  "appId": "studio.dogma.mobile",
+  "appName": "Dogma Studio",
   "webDir": "app",
   "android": {
     "allowMixedContent": false,
