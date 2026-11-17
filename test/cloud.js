@@ -130,14 +130,15 @@ function pageStub() {
     if ((await sets(a)).includes('Cloning kit')) throw new Error('it came back here');
   });
 
-  await step('primers and my own features travel too', async () => {
+  await step('primers and my own features travel with their sequences', async () => {
     await a.evaluate(async () => {
       const S = window.__gc.SET;
       S.primerDb = S.primerDb || { primers: [], labels: [] };
-      S.primerDb.primers.push({ id: 1, name: 'T7 fwd', seq: 'TAATACGACTCACTATAGGG', labels: ['stock'] });
+      S.primerDb.primers.push({ id: 1, name: 'T7 fwd', seq: 'TAATACGACTCACTATAGGG', notes: 'stock tube 4', labels: ['stock'] });
       S.primerDb.labels = ['stock'];
       S.myFeatures = S.myFeatures || [];
-      S.myFeatures.push({ name: 'my tag', type: 'misc_feature', seq: 'GGATCCGAA', color: '#ff8800' });
+      S.myFeatures.push({ name: 'my tag', type: 'misc_feature', kind: 'dna', seq: 'GGATCCGAAGGTGGA', molecule: 'DNA', color: '#ff8800', translated: false, matchProtein: false });
+      S.myFeatures.push({ name: 'my tag', type: 'CDS', kind: 'protein', seq: 'MGSSHHHH', molecule: 'DNA', color: '#3366cc', translated: true, matchProtein: true });
       await window.__gc.saveSettings();
     });
     await syncOf(a);
@@ -145,14 +146,71 @@ function pageStub() {
     const got = await c.evaluate(() => {
       const S = window.__gc.SET;
       return {
-        primers: (S.primerDb.primers || []).map(p => p.name),
+        primers: (S.primerDb.primers || []).map(p => [p.name, p.seq, p.notes]),
         labels: (S.primerDb.labels || []).map(l => typeof l === 'string' ? l : l.name),
-        feats: (S.myFeatures || []).map(f => f.name)
+        feats: (S.myFeatures || []).map(f => [f.name, f.seq, f.kind, f.color, !!f.matchProtein])
       };
     });
-    if (!got.primers.includes('T7 fwd')) throw new Error('primers: ' + got.primers.join(','));
+    const t7 = got.primers.find(p => p[0] === 'T7 fwd');
+    if (!t7) throw new Error('the primer did not arrive: ' + JSON.stringify(got.primers));
+    if (t7[1] !== 'TAATACGACTCACTATAGGG') throw new Error('the primer arrived without its sequence: ' + JSON.stringify(t7));
+    if (t7[2] !== 'stock tube 4') throw new Error('the note was dropped: ' + JSON.stringify(t7));
     if (!got.labels.includes('stock')) throw new Error('labels: ' + got.labels.join(','));
-    if (!got.feats.includes('my tag')) throw new Error('features: ' + got.feats.join(','));
+    // two features share a name and differ only in what they match: both have to arrive
+    const dna = got.feats.find(f => f[1] === 'GGATCCGAAGGTGGA');
+    const pro = got.feats.find(f => f[1] === 'MGSSHHHH');
+    if (!dna || !pro) throw new Error('features: ' + JSON.stringify(got.feats));
+    if (dna[2] !== 'dna' || dna[3] !== '#ff8800') throw new Error('the DNA feature lost something: ' + JSON.stringify(dna));
+    if (pro[2] !== 'protein' || pro[4] !== true) throw new Error('the protein feature lost something: ' + JSON.stringify(pro));
+  });
+
+  await step('a saved primer set travels, primers and all', async () => {
+    await a.evaluate(async () => {
+      const S = window.__gc.SET;
+      S.primerSets = S.primerSets || {};
+      S.primerSets['pET screening'] = [
+        { name: 'T7 fwd', seq: 'TAATACGACTCACTATAGGG', notes: '' },
+        { name: 'T7 term', seq: 'GCTAGTTATTGCTCAGCGG', notes: 'reverse' }
+      ];
+      await window.__gc.saveSettings();
+    });
+    await syncOf(a);
+    await syncOf(c);
+    const set = await c.evaluate(() => (window.__gc.SET.primerSets || {})['pET screening']);
+    if (!set) throw new Error('the set did not arrive: ' + JSON.stringify(await c.evaluate(() => Object.keys(window.__gc.SET.primerSets || {}))));
+    if (set.length !== 2) throw new Error('the set arrived with ' + set.length + ' primers');
+    if (set[0].seq !== 'TAATACGACTCACTATAGGG' || set[1].seq !== 'GCTAGTTATTGCTCAGCGG') throw new Error('a primer in the set lost its sequence: ' + JSON.stringify(set));
+    if (set[1].notes !== 'reverse') throw new Error('a note in the set was dropped: ' + JSON.stringify(set));
+  });
+
+  await step('a feature type and its colour travel with the features that use it', async () => {
+    await a.evaluate(async () => {
+      const S = window.__gc.SET;
+      S.featureTypes = S.featureTypes || [];
+      S.featureTypes.push({ name: 'my linker', color: '#aa44cc', scope: 'dna' });
+      S.typeColors = S.typeColors || {};
+      S.typeColors['CDS'] = '#118822';
+      await window.__gc.saveSettings();
+    });
+    await syncOf(a);
+    await syncOf(c);
+    const got = await c.evaluate(() => ({
+      custom: (window.__gc.SET.featureTypes || []).map(t => [t.name, t.color]),
+      std: window.__gc.SET.typeColors || {}
+    }));
+    const mine = got.custom.find(t => t[0] === 'my linker');
+    if (!mine) throw new Error('the custom type did not arrive: ' + JSON.stringify(got.custom));
+    if (mine[1] !== '#aa44cc') throw new Error('the custom type lost its colour: ' + JSON.stringify(mine));
+    if (got.std.CDS !== '#118822') throw new Error('the recoloured standard type did not arrive: ' + JSON.stringify(got.std));
+  });
+
+  await step('a deleted primer set does not come back', async () => {
+    await a.evaluate(async () => { delete window.__gc.SET.primerSets['pET screening']; await window.__gc.saveSettings(); });
+    await syncOf(a);
+    await syncOf(c);
+    if (await c.evaluate(() => !!(window.__gc.SET.primerSets || {})['pET screening'])) throw new Error('it came back on the other machine');
+    await syncOf(a);
+    if (await a.evaluate(() => !!(window.__gc.SET.primerSets || {})['pET screening'])) throw new Error('it came back here');
   });
 
   await step('an edit on both machines keeps both copies', async () => {

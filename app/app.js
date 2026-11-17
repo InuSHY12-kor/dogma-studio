@@ -8134,7 +8134,8 @@ svg .lbl.p.hov { font-weight: 700; }
         body: `<div class="form">
           <label>Signed in as</label><div><b>${esc(s.email || '(no address)')}</b></div>
           <label>Last sync</label><div>${esc(when)}</div>
-          <label>Kept in the account</label><div>${fmt(Object.keys(SET.enzymeSets || {}).length)} enzyme sets \u00b7 ${fmt(((SET.primerDb || {}).primers || []).length)} primers \u00b7 ${fmt((SET.myFeatures || []).length)} of my features</div>
+          <label>Kept in the account</label><div>${fmt(Object.keys(SET.enzymeSets || {}).length)} enzyme sets \u00b7 ${fmt(((SET.primerDb || {}).primers || []).length)} primers in ${fmt(Object.keys(SET.primerSets || {}).length)} saved sets \u00b7 ${fmt((SET.myFeatures || []).length)} of my features \u00b7 ${fmt((SET.featureTypes || []).length + Object.keys(SET.typeColors || {}).length)} feature types</div>
+          <label></label><div class="hint">Primers and features travel with their sequences. Sequence files are not uploaded.</div>
           <div class="full hint">Sequences are never uploaded \u2014 only these three libraries.</div></div>`,
         buttons: [
           { label: 'Sign Out', danger: true, act: () => { CLOUD.signOut(); renderAll(); toast('Signed out. Everything stays on this machine.'); } },

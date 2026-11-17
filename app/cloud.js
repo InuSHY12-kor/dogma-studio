@@ -54,15 +54,55 @@
       }
     },
     feature: {
-      list: SET => (SET.myFeatures || []).map(f => ({ name: f.name, payload: f })),
+      /* A feature is what it matches, so its own sequence is part of what tells two of
+       * them apart: the same name over a different stretch of DNA is a different feature
+       * and both are kept. The payload is the whole record — sequence, type, colour,
+       * whether it is matched as protein — so a machine that takes it can detect with it
+       * exactly as the machine that made it. */
+      list: SET => (SET.myFeatures || []).map(f => ({ name: featKey(f), payload: f })),
       apply: (SET, name, payload) => {
         SET.myFeatures = SET.myFeatures || [];
-        const at = SET.myFeatures.findIndex(f => f.name === name);
+        const at = SET.myFeatures.findIndex(f => featKey(f) === name);
         if (at >= 0) SET.myFeatures[at] = payload; else SET.myFeatures.push(payload);
       },
-      drop: (SET, name) => { SET.myFeatures = (SET.myFeatures || []).filter(f => f.name !== name); }
+      drop: (SET, name) => { SET.myFeatures = (SET.myFeatures || []).filter(f => featKey(f) !== name); }
+    },
+    /* A saved primer set is a named list of primers, each with its own sequence. It is
+     * what Primers › Saved Sets keeps, and it travels whole. */
+    primer_set: {
+      list: SET => Object.entries(SET.primerSets || {}).map(([name, primers]) => ({ name, payload: { primers } })),
+      apply: (SET, name, payload) => { (SET.primerSets = SET.primerSets || {})[name] = (payload && payload.primers) || []; },
+      drop: (SET, name) => { if (SET.primerSets) delete SET.primerSets[name]; }
+    },
+    /* Feature types the user made, and the colours they gave standard ones. Without
+     * these a feature that followed the account would be drawn in the default grey on
+     * the other machine, under a type it does not know. The two are told apart by the
+     * key's first part, so a custom type never collides with a recoloured standard one. */
+    feature_type: {
+      list: SET => [
+        ...(SET.featureTypes || []).map(t => ({ name: 'custom\u0001' + t.name, payload: t })),
+        ...Object.entries(SET.typeColors || {}).map(([name, color]) => ({ name: 'colour\u0001' + name, payload: { name, color } }))
+      ],
+      apply: (SET, key, payload) => {
+        const [what, name] = key.split('\u0001');
+        if (what === 'custom') {
+          SET.featureTypes = SET.featureTypes || [];
+          const at = SET.featureTypes.findIndex(t => t.name === name);
+          if (at >= 0) SET.featureTypes[at] = payload; else SET.featureTypes.push(payload);
+        } else {
+          (SET.typeColors = SET.typeColors || {})[name] = payload && payload.color;
+        }
+      },
+      drop: (SET, key) => {
+        const [what, name] = key.split('\u0001');
+        if (what === 'custom') SET.featureTypes = (SET.featureTypes || []).filter(t => t.name !== name);
+        else if (SET.typeColors) delete SET.typeColors[name];
+      }
     }
   };
+
+  // what makes one of the user's own features that one and not another
+  const featKey = f => (f.name || '') + '\u0001' + (f.seq || '');
 
   // ---------------------------------------------------------------- small helpers
   const hash = o => {
@@ -214,11 +254,15 @@
       if (changedHere && !changedThere) { send(kind, name, it.payload, false); stats.sent++; continue; }
       if (!changedHere && changedThere) { KINDS[kind].apply(SET, name, row.payload); stats.taken++; continue; }
       if (changedHere && changedThere) {
-        /* Both sides moved. Nothing is thrown away: the account's copy becomes the one
-         * under this name, and what this machine had is kept beside it so it can be
-         * looked at and merged by hand. */
+        /* Both sides moved. For the named lists nothing is thrown away: the account's
+         * copy becomes the one under this name, and what this machine had is kept beside
+         * it so it can be looked at and merged by hand. The other kinds are each one
+         * thing rather than a list — a primer, a feature, a type's colour — and two of
+         * them under one name would only read as a duplicate, so there the account's
+         * copy is taken. A feature carries its sequence in its key, so an edit that
+         * changes what it matches is a new feature and both are kept anyway. */
         if (hash(it.payload) !== hash(row.payload)) {
-          if (kind === 'enzyme_set' || kind === 'feature') {
+          if (kind === 'enzyme_set' || kind === 'primer_set') {
             const alt = name + ' (this device)';
             KINDS[kind].apply(SET, alt, it.payload);
             send(kind, alt, it.payload, false);
