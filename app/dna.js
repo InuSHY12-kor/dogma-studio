@@ -314,6 +314,39 @@ ZraI GACGTC 3 3`;
   });
   const ENZ_BY_NAME = Object.fromEntries(ENZYMES.map(e => [e.name, e]));
 
+  /* Suppliers sell the same enzyme under their own names — FastDigest® EcoRI, EcoRI-HF®,
+   * Anza™ EcoRI — and those are the names on the tube in the freezer. They are not added
+   * as separate enzymes, which would draw the same site twice on every map; they hang off
+   * the enzyme they are, so searching for one finds it. A branded name is only accepted
+   * when the supplier lists the same recognition sequence, so a coincidence of naming
+   * cannot give an enzyme a cut position that is not its own. */
+  const BRANDS = /^(FastDigest®?|Anza™|QuickCut™|EZ-CleanCut™|Fast\s*Digest|FuniCut™|SureCut™|WarmStart®?)\s+/i;
+  function baseEnzymeName(name) {
+    return String(name || '').trim()
+      .replace(BRANDS, '')
+      .replace(/\s*[-\u2013]?\s*HF®?\b/i, '')
+      .replace(/\s*-?v\d+$/i, '')
+      .replace(/[®™]/g, '')
+      .trim();
+  }
+  (function supplierInfo() {
+    const db = root.ENZYME_DB;
+    if (!db) return;
+    for (const s of db.suppliers || []) {
+      for (const e of s.enzymes || []) {
+        const canon = ENZ_BY_NAME[baseEnzymeName(e.name)];
+        if (!canon || canon.site !== e.site) continue;
+        if (!canon.suppliers) { canon.suppliers = []; canon.aliases = []; }
+        if (!canon.suppliers.includes(s.name)) canon.suppliers.push(s.name);
+        if (e.name !== canon.name && !canon.aliases.includes(e.name)) canon.aliases.push(e.name);
+      }
+    }
+    for (const e of ENZYMES) {
+      if (e.suppliers) { e.suppliers.sort(); e.aliases.sort(); }
+      else { e.suppliers = []; e.aliases = []; }
+    }
+  })();
+
   function scan(re, text, fn) { re.lastIndex = 0; let m; while ((m = re.exec(text))) { fn(m.index); re.lastIndex = m.index + 1; } }
 
   function findSites(seq, circular) {
@@ -1028,7 +1061,7 @@ ZraI GACGTC 3 3`;
     COMP, clean, rc, comp, CODON, translate, AA3, proteinMW, gcPct, dsDnaMW, tm,
     GENETIC_CODES, CODE_LIST, featSegs, featLen, featCoding, featTranslate,
     NT_MW, ntMW, strandMW, composition, gcCurve,
-    ENZYMES, ENZ_BY_NAME, findSites, rlen, segs, sub, overlaps, findORFs, searchDNA, searchProtein,
+    ENZYMES, ENZ_BY_NAME, baseEnzymeName, findSites, rlen, segs, sub, overlaps, findORFs, searchDNA, searchProtein,
     digest, detectCommon, COMMON, parseGenBank, parseFASTA, parseAny, parseDnaBinary, toGenBank, toFASTA, buildDemo
   };
 })(typeof window !== 'undefined' ? window : globalThis);

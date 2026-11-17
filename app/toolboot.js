@@ -48,9 +48,10 @@
       payload: p,
       saveFavourites: list => send({ kind: 'favourites', list })
     };
-    document.title = ({ featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' })[state.kind] || 'Dogma Studio';
+    document.title = ({ featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', enzymesupp: 'Enzyme Database', simulator: 'Simulation', cloning: 'Cloning' })[state.kind] || 'Dogma Studio';
     if (state.kind === 'featuredb') TOOLUI.featureBrowser(root, ctx);
     else if (state.kind === 'enzymedb') TOOLUI.enzymeBrowser(root, ctx);
+    else if (state.kind === 'enzymesupp') TOOLUI.enzymeSuppliers(root, ctx);
     else if (state.kind === 'simulator') SIMUI.open(root, ctx);
     else if (state.kind === 'cloning') CLONEUI.open(root, ctx);
     else root.innerHTML = '<div class="hint">Nothing to show.</div>';

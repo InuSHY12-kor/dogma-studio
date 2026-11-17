@@ -402,27 +402,119 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
   /* The enzyme browser: the list on the left, the cut shown on the top right with the
    * supplier's buffer activities underneath, then the enzymes that share the
    * recognition sequence or make compatible ends. */
-  const SUPPLIERS = [
-    { key: 'neb', name: 'New England Biolabs', buffers: ['r1.1', 'r2.1', 'r3.1', 'rCutSmart'], best: 'rCutSmart' },
-    { key: 'thermo', name: 'Thermo Fisher', buffers: ['B', 'G', 'O', 'R', 'Tango'], best: 'Tango' },
-    { key: 'promega', name: 'Promega', buffers: ['A', 'B', 'C', 'D', 'MULTI-CORE'], best: 'MULTI-CORE' },
-    { key: 'takara', name: 'Takara Bio', buffers: ['L', 'M', 'H', 'T', 'K'], best: 'M' }
-  ];
-  /* Activity in each buffer. Real figures are supplier data that changes with the
-   * catalogue, so rather than invent numbers this derives a consistent pattern from
-   * the enzyme itself and says plainly that it is a guide, not the datasheet. */
+  /* Who sells an enzyme, in which buffer, and how well it works in the others. These
+   * are the suppliers' own published figures, carried in enzyme-db.js; where a supplier
+   * publishes none, the table says so rather than guessing. */
+  const EDB = () => root.ENZYME_DB || { suppliers: [], byEnzyme: [] };
+  const SUPPLIERS = () => EDB().suppliers;
+  /* The entry a supplier lists for an enzyme, under that name or a branded one of its
+   * own. The recognition sequence has to match, so a near-miss in naming cannot put one
+   * enzyme's figures under another's name. */
+  function supplierEntry(sup, e) {
+    for (const x of sup.enzymes || []) {
+      if (x.name === e.name) return x;
+      if (DNA.baseEnzymeName(x.name) === e.name && x.site === e.site) return x;
+    }
+    return null;
+  }
+  /* Suppliers that publish buffer figures come first, so the panel opens on one that
+   * has something to show rather than on whoever is first alphabetically. */
+  const sellers = e => SUPPLIERS().filter(s => supplierEntry(s, e))
+    .sort((a, b) => (b.buffers.length ? 1 : 0) - (a.buffers.length ? 1 : 0) || a.name.localeCompare(b.name));
   function bufferActivity(e, sup) {
-    let h = 0;
-    for (const c of e.name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    const steps = [100, 100, 75, 50, 25, 10];
+    const x = supplierEntry(sup, e);
+    if (!x || !sup.buffers.length) return [];
     return sup.buffers.map((b, i) => ({
       buffer: b,
-      best: b === sup.best,
-      activity: b === sup.best ? 100 : steps[(h >> (i * 2)) % steps.length]
+      best: !!x.buffer && b.toLowerCase() === String(x.buffer).toLowerCase(),
+      activity: (x.act && x.act[i]) || ''
     }));
   }
+
+  /* The Enzyme Database: the catalogue rather than the cutting engine. One tab lists a
+   * supplier's enzymes with the buffer it recommends and how well each works in its
+   * other buffers; the other lists every enzyme and who sells it. Nothing here needs a
+   * cut position, so it covers names the program itself cannot digest with — those are
+   * marked, so it is clear which ones the rest of the program can use. */
+  function enzymeSuppliers(host, ctx) {
+    const db = EDB();
+    let tab = 'bysup';
+    let sup = (db.suppliers[0] || {}).name || '';
+    let q = '';
+
+    const current = () => db.suppliers.find(s => s.name === sup) || db.suppliers[0] || { name: '', buffers: [], enzymes: [] };
+    const match = t => !q || String(t).toLowerCase().includes(q.toLowerCase());
+    const canCut = name => !!DNA.ENZ_BY_NAME[DNA.baseEnzymeName(name)];
+
+    const bySupplier = () => {
+      const s = current();
+      const rows = s.enzymes.filter(e => match(e.name) || match(e.site));
+      if (!db.suppliers.length) return '<div class="hint">This build ships no enzyme reference.</div>';
+      return `<table class="grid esgrid"><thead>
+          <tr><th>Enzyme</th><th>Recognition<br>Sequence</th><th>Incubation<br>Temperature</th><th>Recommended<br>Buffer</th>
+          ${s.buffers.length ? `<th colspan="${s.buffers.length}" class="esact">Enzyme activity in ${esc(s.name)} buffers</th>` : ''}</tr>
+          ${s.buffers.length ? `<tr class="essub"><th></th><th></th><th></th><th></th>${s.buffers.map(b => `<th>${esc(b)}</th>`).join('')}</tr>` : ''}
+        </thead><tbody>
+        ${rows.map(e => `<tr>
+          <td class="esname"${canCut(e.name) ? '' : ' title="the program has no cut position for this one, so it is listed but not used for digests"'}>${esc(e.name)}${canCut(e.name) ? '' : ' <span class="note">ref</span>'}</td>
+          <td class="mono">${esc(e.site || '')}</td>
+          <td>${e.temp ? esc(e.temp) + ' \u00b0C' : ''}</td>
+          <td>${esc(e.buffer || '')}</td>
+          ${(e.act || []).map((a, i) => `<td class="esa${s.buffers[i] && e.buffer && s.buffers[i].toLowerCase() === String(e.buffer).toLowerCase() ? ' best' : ''}">${esc(a || '')}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table>${rows.length ? '' : '<div class="hint">Nothing matches that search.</div>'}`;
+    };
+
+    const byEnzyme = () => {
+      const rows = db.byEnzyme.filter(([n, sups]) => match(n) || sups.some(match));
+      return `<table class="grid esgrid"><thead><tr><th>Enzyme</th><th>Suppliers</th></tr></thead><tbody>
+        ${rows.map(([n, sups]) => `<tr>
+          <td class="esname"${canCut(n) ? '' : ' title="listed for reference; the program has no cut position for it"'}>${esc(n)}${canCut(n) ? '' : ' <span class="note">ref</span>'}</td>
+          <td class="wrap">${sups.map(esc).join(', ')}</td></tr>`).join('')}
+      </tbody></table>${rows.length ? '' : '<div class="hint">Nothing matches that search.</div>'}`;
+    };
+
+    const render = () => {
+      const s = current();
+      const n = tab === 'bysup' ? s.enzymes.length : db.byEnzyme.length;
+      host.innerHTML = `<div class="eswrap">
+        <div class="estabs">
+          <button class="estab${tab === 'bysup' ? ' on' : ''}" data-t="bysup">Enzymes By Supplier</button>
+          <button class="estab${tab === 'byenz' ? ' on' : ''}" data-t="byenz">Suppliers by Enzyme</button>
+        </div>
+        <div class="esbar">
+          ${tab === 'bysup' ? `<select id="esSup">${db.suppliers.map(x => `<option value="${esc(x.name)}" ${x.name === s.name ? 'selected' : ''}>${esc(x.name)} (${x.enzymes.length})</option>`).join('')}</select>` : ''}
+          <input type="text" id="esQ" placeholder="Filter by enzyme, sequence or supplier" value="${esc(q)}">
+          <span class="sp" style="flex:1"></span><span class="note">${n} ${tab === 'bysup' ? 'enzymes' : 'entries'}</span>
+        </div>
+        <div class="estable">${tab === 'bysup' ? bySupplier() : byEnzyme()}</div>
+        <div class="esfoot"><span class="note">Marked <span class="note">ref</span>: listed here for reference, with no cut position, so it is not offered for digests.</span>
+          <span class="sp" style="flex:1"></span><button class="btn" id="esPrint">Print\u2026</button></div>
+      </div>`;
+      const sel = host.querySelector('#esSup');
+      if (sel) sel.onchange = e => { sup = e.target.value; render(); };
+      const inp = host.querySelector('#esQ');
+      inp.oninput = e => {
+        q = e.target.value;
+        const at = e.target.selectionStart;
+        render();
+        const again = host.querySelector('#esQ');
+        again.focus(); again.setSelectionRange(at, at);
+      };
+      host.querySelector('.estabs').onclick = e => {
+        const b = e.target.closest('[data-t]'); if (!b) return;
+        tab = b.dataset.t; render();
+      };
+      host.querySelector('#esPrint').onclick = () => {
+        const title = tab === 'bysup' ? current().name + ' restriction enzymes' : 'Restriction enzyme suppliers';
+        ctx.send({ kind: 'printHtml', title, html: host.querySelector('.estable').innerHTML });
+      };
+    };
+    render();
+  }
+
   function enzymeBrowser(host, ctx) {
-    let q = '', pick = (ctx && ctx.payload && ctx.payload.enzyme) || 'BamHI', sup = 'neb';
+    let q = '', pick = (ctx && ctx.payload && ctx.payload.enzyme) || 'BamHI', sup = '';
     const list = () => {
       let L = DNA.ENZYMES.slice();
       if (q) { const u = q.toUpperCase(); L = L.filter(e => e.name.toUpperCase().includes(u) || e.site.includes(u)); }
@@ -435,8 +527,11 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
       pick = e.name;
       host.querySelector('#ebList').innerHTML = L.map(x => `<div class="fbitem${x.name === pick ? ' on' : ''}" data-e="${esc(x.name)}"><span class="nm">${esc(x.name)}</span></div>`).join('');
       host.querySelector('#ebCount').textContent = `${L.length} of ${DNA.ENZYMES.length} enzymes`;
-      const s = SUPPLIERS.find(x => x.key === sup) || SUPPLIERS[0];
-      const acts = bufferActivity(e, s);
+      const mine = sellers(e);
+      const s = mine.find(x => x.name === sup) || mine[0] || null;
+      if (s) sup = s.name;
+      const acts = s ? bufferActivity(e, s) : [];
+      const entry = s ? supplierEntry(s, e) : null;
       const same = DNA.ENZYMES.filter(x => x.name !== e.name && x.site === e.site);
       const compat = DNA.ENZYMES.filter(x => x.name !== e.name && x.overhang === e.overhang && x.overhang !== 0 && overhangSeq(x) === overhangSeq(e));
       host.querySelector('#ebBody').innerHTML = `
@@ -448,12 +543,14 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
           ${e.top > e.site.length ? '<span><b>Type IIS</b> — cuts outside the recognition site</span>' : ''}
         </div>
         <div class="ebsup">
-          <select id="ebSup">${SUPPLIERS.map(x => `<option value="${x.key}" ${x.key === sup ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
-          <table class="ebbuf"><tbody>
+          ${mine.length ? `<select id="ebSup">${mine.map(x => `<option value="${esc(x.name)}" ${x.name === sup ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : '<span class="note">No supplier in the reference lists this enzyme.</span>'}
+          ${entry ? `<div class="ebfacts"><span>Sold as <b>${esc(entry.name)}</b></span>${entry.temp ? `<span>Incubate at <b>${esc(entry.temp)} °C</b></span>` : ''}${entry.buffer ? `<span>Recommended buffer <b>${esc(entry.buffer)}</b></span>` : ''}</div>` : ''}
+          ${acts.length ? `<table class="ebbuf"><tbody>
             <tr><th>Buffer</th>${acts.map(a => `<td class="${a.best ? 'best' : ''}">${esc(a.buffer)}</td>`).join('')}</tr>
-            <tr><th>Activity</th>${acts.map(a => `<td class="${a.best ? 'best' : ''}">${a.activity}%</td>`).join('')}</tr>
-          </tbody></table>
-          <div class="hint">Buffer compatibility is a guide pattern, not the supplier's datasheet — check the catalogue before setting up a double digest.</div>
+            <tr><th>Activity</th>${acts.map(a => `<td class="${a.best ? 'best' : ''}">${esc(a.activity || '—')}</td>`).join('')}</tr>
+          </tbody></table>` : (s ? '<div class="hint">This supplier publishes no buffer figures for it.</div>' : '')}
+          ${e.aliases && e.aliases.length ? `<div class="hint">Also sold as ${e.aliases.map(esc).join(', ')}.</div>` : ''}
+          ${e.suppliers && e.suppliers.length ? `<div class="hint">${e.suppliers.length} supplier${e.suppliers.length === 1 ? '' : 's'}: ${e.suppliers.map(esc).join(', ')}.</div>` : ''}
         </div>
         <div class="ebrow">
           <label>Same recognition sequence</label>
@@ -856,5 +953,5 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
     }
   }
 
-  root.TOOLUI = { interactiveMap, cutDiagram, bindEnzHover, clearEnzHover, mapPane, bindMapPane, mapState, includeEnz, shownSites, shownPrimers, shownFeatures, featureBrowser, enzymeBrowser, SUPPLIERS, bufferActivity, overhangSeq, niceStep };
+  root.TOOLUI = { interactiveMap, cutDiagram, bindEnzHover, clearEnzHover, mapPane, bindMapPane, mapState, includeEnz, shownSites, shownPrimers, shownFeatures, featureBrowser, enzymeBrowser, enzymeSuppliers, SUPPLIERS, bufferActivity, supplierEntry, overhangSeq, niceStep };
 })(window);

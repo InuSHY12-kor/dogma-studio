@@ -416,6 +416,52 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     console.log('     ' + arrows.length + ' primer heads, each at its 3\u2032 end');
   });
 
+  await step('the enzyme reference opens on both of its tabs', async () => {
+    await p.evaluate(() => window.__gc.menuAct('Enzymes', 'Enzyme Database\u2026'));
+    await p.waitForTimeout(800);
+    const sups = await p.$$eval('#esSup option', o => o.length);
+    if (sups < 10) throw new Error('only ' + sups + ' suppliers in the picker');
+    // a supplier that publishes buffer figures shows one column per buffer
+    await p.selectOption('#esSup', 'Yeasen').catch(() => {});
+    await p.waitForTimeout(400);
+    const row = await p.$$eval('.esgrid tbody tr:first-child td', td => td.map(x => x.textContent.trim()));
+    if (row.length < 6) throw new Error('no activity columns: ' + JSON.stringify(row));
+    if (!/^\d+%$/.test(row[4])) throw new Error('the first activity is not a percentage: ' + JSON.stringify(row));
+    if (!/\u00b0C$/.test(row[2])) throw new Error('no incubation temperature: ' + JSON.stringify(row));
+    // the filter narrows it
+    await p.fill('#esQ', 'BamHI');
+    await p.waitForTimeout(350);
+    const n = await p.$$eval('.esgrid tbody tr', r => r.length);
+    if (!n) throw new Error('the filter found no BamHI');
+    await p.fill('#esQ', '');
+    await p.click('[data-t="byenz"]');
+    await p.waitForTimeout(400);
+    const rows2 = await p.$$eval('.esgrid tbody tr', r => r.length);
+    if (rows2 < 500) throw new Error('the supplier list is short: ' + rows2);
+    console.log('     ' + sups + ' suppliers, ' + rows2 + ' enzymes listed');
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(300);
+  });
+
+  await step('every enzyme the program cuts with knows who sells it', async () => {
+    const r = await p.evaluate(() => {
+      const E = window.DNA.ENZYMES;
+      const withSup = E.filter(e => e.suppliers && e.suppliers.length).length;
+      // a branded name must belong to an enzyme with the same recognition sequence
+      let wrong = 0;
+      for (const e of E) for (const a of e.aliases || []) {
+        if (window.DNA.baseEnzymeName(a) !== e.name) wrong++;
+      }
+      const smaI = window.DNA.ENZ_BY_NAME['SmaI'], xmaI = window.DNA.ENZ_BY_NAME['XmaI'];
+      return { total: E.length, withSup, wrong,
+               neo: smaI && xmaI ? (smaI.aliases || []).some(a => /XmaI/.test(a)) : false };
+    });
+    if (r.withSup < r.total) throw new Error(r.withSup + ' of ' + r.total + ' enzymes have a supplier');
+    if (r.wrong) throw new Error(r.wrong + ' branded names hang off the wrong enzyme');
+    if (r.neo) throw new Error('SmaI took XmaI as one of its own names, but they cut the same site differently');
+    console.log('     ' + r.total + ' enzymes, each with its suppliers and branded names');
+  });
+
   console.log('\nERRORS:', errs.length);
   errs.forEach(e => console.log('  ' + e));
   await b.close();

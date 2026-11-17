@@ -770,3 +770,24 @@ svg.imap text.ctr1 { fill: #1c2230; font-weight: 600; }
 .cpksec:first-of-type { margin-top: 2px; }
 .cpkhd { display: flex; align-items: center; gap: 8px; padding: 2px 0 5px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .cpkhd .note { color: var(--muted); }
+
+/* The Enzyme Database: a supplier's catalogue, and who sells what. */
+.eswrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.estabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--chrome); flex: none; }
+.estab { border: 1px solid var(--border); border-bottom: none; background: var(--chrome2); padding: 5px 14px;
+  border-radius: 4px 4px 0 0; font-size: calc(12.5px * var(--ui-scale)); color: var(--muted); cursor: default; }
+.estab.on { background: var(--win); color: var(--ink); font-weight: 600; margin-bottom: -1px; padding-bottom: 6px; }
+.esbar { display: flex; align-items: center; gap: 8px; padding: 7px 8px; background: var(--chrome); border-bottom: 1px solid var(--border-soft); flex: none; }
+.esbar select { max-width: 320px; }
+.esbar input[type=text] { width: 260px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; }
+.estable { flex: 1; min-height: 0; overflow: auto; }
+.esfoot { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--border-soft); background: var(--chrome); flex: none; }
+table.esgrid th { text-align: center; vertical-align: bottom; }
+table.esgrid th.esact { background: #fff6cc; }
+table.esgrid tr.essub th { background: #fff6cc; font-weight: 600; }
+table.esgrid td { vertical-align: top; }
+table.esgrid td.esname { white-space: nowrap; }
+table.esgrid td.esa { text-align: center; font-variant-numeric: tabular-nums; }
+table.esgrid td.esa.best { background: #fff3b0; font-weight: 600; }
+table.esgrid tbody tr:nth-child(odd) td { background: #fdf6e8; }
+table.esgrid tbody tr:nth-child(odd) td.esa.best { background: #fff3b0; }

@@ -803,6 +803,7 @@ svg .lbl.p.hov { font-weight: 700; }
         { label: 'Clear Highlighting for All Enzyme Sites', dis: !has || !enzHi(d).length, act: () => { d.enzHi = []; renderAll(true); } },
         '-',
         { label: 'Restriction Enzymes…', act: () => openTool('enzymedb') },
+        { label: 'Enzyme Database…', act: () => openTool('enzymesupp') },
         { label: 'Noncutters…', dis: !has, act: dlgNoncutters },
         '-',
         { label: 'Save Enzyme Set…', dis: !has || !d.chosen.length, act: dlgSaveEnzSet },
@@ -849,7 +850,8 @@ svg .lbl.p.hov { font-weight: 700; }
       { label: 'Analyze', items: [
         { label: 'Choose Enzymes…', dis: !has, act: () => dlgEnzymeChooser() },
         { label: 'Enzyme Sets…', dis: !has, act: dlgEnzymeSets },
-        { label: 'Enzyme Database…', act: () => openTool('enzymedb') },
+        { label: 'Restriction Enzymes…', act: () => openTool('enzymedb') },
+        { label: 'Enzyme Database…', act: () => openTool('enzymesupp') },
         { label: 'Feature Database…', act: () => openTool('featuredb') },
         '-',
         { label: 'Primer Structures…', dis: !has || !d.primers.length, act: () => dlgPrimerStruct(null, null) },
@@ -6553,7 +6555,7 @@ svg .lbl.p.hov { font-weight: 700; }
     }, extra || {});
     if (host && host.openTool) { host.openTool(kind, payload); return; }
     // in a browser the same page is shown in a wide dialog
-    const titles = { featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', simulator: 'Simulation', cloning: 'Cloning' };
+    const titles = { featuredb: 'Common Features', enzymedb: 'Restriction Enzymes', enzymesupp: 'Enzyme Database', simulator: 'Simulation', cloning: 'Cloning' };
     dialog({
       title: titles[kind] || 'Dogma Studio', wide: true,
       body: `<div id="toolhost" style="height:70vh;display:flex;flex-direction:column"></div>`,
@@ -6574,6 +6576,7 @@ svg .lbl.p.hov { font-weight: 700; }
         };
         if (kind === 'featuredb') TOOLUI.featureBrowser(el, ctx);
         else if (kind === 'enzymedb') TOOLUI.enzymeBrowser(el, ctx);
+        else if (kind === 'enzymesupp') TOOLUI.enzymeSuppliers(el, ctx);
         else if (kind === 'simulator') SIMUI.open(el, ctx);
         else if (kind === 'cloning') CLONEUI.open(el, ctx);
       }
@@ -6584,6 +6587,20 @@ svg .lbl.p.hov { font-weight: 700; }
     if (!msg) return;
     const d = D();
     if (msg.kind === 'favourites') { SET.favFeatures = msg.list; saveSettings(); return; }
+    if (msg.kind === 'printHtml') {
+      // a table a tool window wants on paper, wrapped in the program's own print styles
+      const title = msg.title || 'Dogma Studio';
+      doPrint(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+        body { font: 11px/1.4 var(--f-ui, system-ui, sans-serif); color: #15181f; margin: 18px; }
+        h1 { font-size: 15px; margin: 0 0 10px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #c9ced6; padding: 3px 6px; text-align: left; vertical-align: top; }
+        th { background: #eef1f5; }
+        .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+        .note { color: #6b7280; }
+      </style></head><body><h1>${esc(title)}</h1>${msg.html || ''}</body></html>`, false, { name: title });
+      return;
+    }
     if (msg.kind === 'addFeature') {
       if (!d || !isNuc(d)) { toast('Open a DNA sequence first.'); return; }
       const f = msg.feature;
