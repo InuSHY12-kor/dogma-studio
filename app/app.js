@@ -305,8 +305,13 @@ svg .lbl.p.hov { font-weight: 700; }
   // Which enzymes the chosen set holds, before per-enzyme visibility is applied.
   function chosenEnz(d, A) {
     const m = d.opts.enzMode, out = [];
+    /* The automatic sets are drawn from the enzymes most people keep in the freezer.
+     * The wider catalogue cuts just as well and can be picked by name, but a plasmid
+     * has a hundred of its enzymes and drawing them all buries the few in use. */
+    const wide = !!d.opts.enzWide;
     for (const e of DNA.ENZYMES) {
       const s = A.sites[e.name]; if (!s) continue;
+      if (!wide && !e.common && !d.chosen.includes(e.name)) continue;
       let ok = false;
       if (m === 'unique6') ok = s.length === 1 && e.core >= 6;
       else if (m === 'unique') ok = s.length === 1;
@@ -782,6 +787,7 @@ svg .lbl.p.hov { font-weight: 700; }
       { label: 'Enzymes', items: [
         { label: 'Use Enzyme Set', items: [
           { label: 'Unique 6+ Cutters', chk: has && d.opts.enzMode === 'unique6', dis: !has, act: () => useEnzMode('unique6') },
+          { label: 'Include the Whole Catalogue', chk: has && !!d.opts.enzWide, dis: !has, act: () => { d.opts.enzWide = !d.opts.enzWide; renderAll(true); toast(d.opts.enzWide ? 'Drawing every enzyme in the catalogue' : 'Drawing the enzymes in common use'); } },
           { label: 'All Unique Cutters', chk: has && d.opts.enzMode === 'unique', dis: !has, act: () => useEnzMode('unique') },
           { label: 'Unique & Dual 6+ Cutters', chk: has && d.opts.enzMode === 'dual6', dis: !has, act: () => useEnzMode('dual6') },
           { label: 'Chosen Enzymes', chk: has && d.opts.enzMode === 'chosen', dis: !has, act: () => useEnzMode('chosen') },

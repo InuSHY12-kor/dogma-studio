@@ -413,7 +413,7 @@ ${esc(tri(e.bot, '\u25b2'))}</pre>${outside ? `<div class="note">Cuts outside th
   function supplierEntry(sup, e) {
     for (const x of sup.enzymes || []) {
       if (x.name === e.name) return x;
-      if (DNA.baseEnzymeName(x.name) === e.name && x.site === e.site) return x;
+      if (DNA.baseEnzymeName(x.name) === e.name && (x.site === e.site || DNA.rc(x.site) === e.site)) return x;
     }
     return null;
   }

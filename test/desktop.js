@@ -443,23 +443,58 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     await p.waitForTimeout(300);
   });
 
-  await step('every enzyme the program cuts with knows who sells it', async () => {
+  await step('every enzyme cuts where a palindrome says it must', async () => {
     const r = await p.evaluate(() => {
       const E = window.DNA.ENZYMES;
-      const withSup = E.filter(e => e.suppliers && e.suppliers.length).length;
-      // a branded name must belong to an enzyme with the same recognition sequence
+      // a palindromic site has to be cut symmetrically; anything else is a typo in the table
+      const lop = E.filter(e => window.DNA.rc(e.site) === e.site && e.bot !== e.site.length - e.top)
+        .map(e => `${e.name} ${e.site} (${e.top}/${e.bot})`);
+      const odd = E.filter(e => !(e.top >= 0 && e.bot >= 0 && e.top <= e.site.length + 30 && e.bot <= e.site.length + 30))
+        .map(e => e.name);
+      const dup = E.length - new Set(E.map(e => e.name)).size;
+      return { total: E.length, common: E.filter(e => e.common).length, lop, odd, dup };
+    });
+    if (r.lop.length) throw new Error('cut not mirrored on a palindrome: ' + r.lop.join(', '));
+    if (r.odd.length) throw new Error('cut position out of range: ' + r.odd.join(', '));
+    if (r.dup) throw new Error(r.dup + ' enzymes share a name');
+    if (r.common >= r.total) throw new Error('the catalogue additions are not marked');
+    console.log(`     ${r.total} enzymes, ${r.common} of them in common use`);
+  });
+
+  await step('the catalogue stays out of the way until it is asked for', async () => {
+    const r = await p.evaluate(() => {
+      const d = window.__gc.D();
+      const sites = window.DNA.findSites(d.seq, d.circular);
+      const u6 = wide => window.DNA.ENZYMES.filter(e => {
+        const s = sites[e.name];
+        if (!s || (!wide && !e.common)) return false;
+        return s.length === 1 && e.core >= 6;
+      }).length;
+      return { narrow: u6(false), wide: u6(true) };
+    });
+    if (!(r.wide > r.narrow)) throw new Error('the catalogue adds nothing: ' + JSON.stringify(r));
+    if (r.narrow > 60) throw new Error('too many labels drawn by default: ' + r.narrow);
+    console.log(`     ${r.narrow} unique 6+ cutters drawn, ${r.wide} with the whole catalogue`);
+  });
+
+  await step('an enzyme the catalogue lists knows who sells it', async () => {
+    const r = await p.evaluate(() => {
+      // the supplier tables are what fills e.suppliers, so they are what to check against
+      const listed = new Set();
+      for (const s of window.ENZYME_DB.suppliers) for (const x of s.enzymes) listed.add(window.DNA.baseEnzymeName(x.name));
+      const bad = window.DNA.ENZYMES.filter(e => listed.has(e.name) && !(e.suppliers || []).length).map(e => e.name);
+      const unlisted = window.DNA.ENZYMES.filter(e => !listed.has(e.name)).map(e => e.name);
       let wrong = 0;
-      for (const e of E) for (const a of e.aliases || []) {
+      for (const e of window.DNA.ENZYMES) for (const a of e.aliases || []) {
         if (window.DNA.baseEnzymeName(a) !== e.name) wrong++;
       }
-      const smaI = window.DNA.ENZ_BY_NAME['SmaI'], xmaI = window.DNA.ENZ_BY_NAME['XmaI'];
-      return { total: E.length, withSup, wrong,
-               neo: smaI && xmaI ? (smaI.aliases || []).some(a => /XmaI/.test(a)) : false };
+      const smaI = window.DNA.ENZ_BY_NAME['SmaI'];
+      return { bad, unlisted, wrong, neo: (smaI.aliases || []).some(a => /XmaI/.test(a)) };
     });
-    if (r.withSup < r.total) throw new Error(r.withSup + ' of ' + r.total + ' enzymes have a supplier');
+    if (r.bad.length) throw new Error(r.bad.length + ' listed enzymes have no supplier: ' + r.bad.slice(0, 5).join(', '));
     if (r.wrong) throw new Error(r.wrong + ' branded names hang off the wrong enzyme');
     if (r.neo) throw new Error('SmaI took XmaI as one of its own names, but they cut the same site differently');
-    console.log('     ' + r.total + ' enzymes, each with its suppliers and branded names');
+    console.log(`     every listed enzyme has its suppliers; ${r.unlisted.length} of ours the catalogue does not list (${r.unlisted.join(', ')})`);
   });
 
   console.log('\nERRORS:', errs.length);
