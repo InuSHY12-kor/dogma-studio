@@ -1,7 +1,7 @@
 {
   "name": "dogma-studio",
   "productName": "Dogma Studio",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Plasmid and DNA sequence editor for Windows and Android: maps, sequence editing, restriction analysis, features, primers and simulated gels.",
   "main": "main.js",
   "author": "Dogma Studio",
