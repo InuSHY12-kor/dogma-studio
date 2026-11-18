@@ -3,6 +3,7 @@
 
     python3 tools/rebase-cuts.py check     compare the program's table with REBASE
     python3 tools/rebase-cuts.py lines     print every usable enzyme as "name site top bot"
+    python3 tools/rebase-cuts.py trade     the same, for catalogue names REBASE has not heard of
 
 REBASE is the reference list of restriction enzymes and their cut positions. Its own
 server sends a broken certificate chain, so this reads the same data from the copy
@@ -64,9 +65,92 @@ def table():
     return rows
 
 
+COMP = str.maketrans('ACGTRYSWKMBDHVN', 'TGCAYRSWMKVHDBN')
+
+
+def rc(site):
+    return site.translate(COMP)[::-1]
+
+
+def catalogue():
+    """Every name a supplier lists, with the recognition sequence it publishes."""
+    import json
+    import os
+    import re
+    path = os.path.join(os.path.dirname(__file__), '..', 'app', 'enzyme-db.js')
+    out = {}
+    for line in open(path, encoding='utf8'):
+        line = line.strip().rstrip(',')
+        if not line.startswith('{"name":') or '"enzymes":' not in line:
+            continue
+        for e in json.loads(line)['enzymes']:
+            if e.get('site'):
+                out.setdefault(e['name'], e['site'])
+    return out
+
+
+def trade():
+    """Cut positions for the old trade names.
+
+    A catalogue still sells enzymes under names REBASE no longer lists — SstII for
+    SacII, AatI for StuI. The catalogue says what each one recognises, and that is
+    enough to place its cut, but only where it is not in doubt: every enzyme REBASE
+    knows that reads the same sequence has to agree on where it falls. Four enzymes
+    read GGCGCC and cut it in four different places, so a name that only says GGCGCC
+    could be any of them and is left out. Nicking enzymes are left out too — they
+    break one strand, which a cut position cannot describe.
+    """
+    import re
+    reb = usable()
+    ours = table()
+    bysite = {}
+    for name, (site, top, bot) in reb.items():
+        bysite.setdefault(site, {}).setdefault((top, bot), []).append(name)
+
+    from_name = re.compile(r'^(FastDigest®?|Anza™|QuickCut™|EZ-CleanCut™|Fast\s*Digest|FuniCut™|SureCut™|WarmStart®?|Speedy)\s+', re.I)
+
+    def base(n):
+        n = from_name.sub('', n.strip())
+        n = re.sub(r'\s*[-\u2013]?\s*HF®?\b', '', n, flags=re.I)
+        n = re.sub(r'\s*-?v\d+$', '', n, flags=re.I)
+        return n.replace('®', '').replace('™', '').strip()
+
+    wanted = {}
+    for listed, site in catalogue().items():
+        n = base(listed)
+        if n in ours or n in reb:
+            continue
+        wanted.setdefault(n, site)
+
+    out, unsure, unknown = [], [], []
+    for name in sorted(wanted, key=str.lower):
+        site = wanted[name]
+        if name.startswith(('Nt.', 'Nb.')):
+            unsure.append((name, site, 'nicks one strand'))
+            continue
+        table_for = bysite.get(site) or bysite.get(rc(site))
+        key = site if site in bysite else rc(site)
+        if not table_for:
+            unknown.append((name, site))
+        elif len(table_for) > 1:
+            unsure.append((name, site, 'read %d different ways' % len(table_for)))
+        else:
+            (top, bot), who = next(iter(table_for.items()))
+            out.append((name, key, top, bot, who[0]))
+    return out, unsure, unknown
+
+
 def main():
     what = sys.argv[1] if len(sys.argv) > 1 else 'check'
     reb = usable()
+    if what == 'trade':
+        out, unsure, unknown = trade()
+        for name, site, top, bot, like in out:
+            print('%s %s %d %d    # cuts as %s does' % (name, site, top, bot, like))
+        print('\n# left out, in doubt: %s' % ', '.join('%s (%s)' % (n, why) for n, _, why in unsure), file=sys.stderr)
+        print('# left out, REBASE does not read that sequence: %s'
+              % ', '.join(n for n, _ in unknown), file=sys.stderr)
+        return
     if what == 'lines':
         for name in sorted(reb, key=str.lower):
             site, top, bot = reb[name]
