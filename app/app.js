@@ -23,13 +23,13 @@
   const SVG_CSS = `
 svg .bb { fill: none; stroke: var(--bb); stroke-width: 1.2; }
 svg .tick { stroke: var(--faint); stroke-width: 1; }
-svg .tickl { fill: var(--faint); font-size: calc(10px * var(--ui-scale)); font-family: var(--f-ui); }
+svg .tickl { fill: #6b7280; font-size: calc(10px * var(--ui-scale)); font-family: var(--f-ui); }
 svg .feat { stroke: rgba(0, 0, 0, .38); stroke-width: .8; cursor: pointer; }
 svg .feat:hover { stroke: #000; stroke-width: 1.6; }
-svg .ftxt { fill: #111; font-weight: 600; font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); pointer-events: none; }
-svg .lbl { font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); fill: var(--ink); cursor: pointer; }
-svg .lbl.e { fill: #3a3f4b; }
-svg .lbl.e.u { font-weight: 600; }
+svg .ftxt { fill: #0b0d12; font-weight: 700; font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); pointer-events: none; paint-order: stroke; }
+svg .lbl { font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); fill: #10141d; font-weight: 500; cursor: pointer; }
+svg .lbl.e { fill: #2a2f3a; }
+svg .lbl.e.u { font-weight: 800; fill: #000; }
 svg .intron { fill: none; stroke: #8d95a3; stroke-width: 1.4px; stroke-dasharray: 5 4; }
 svg .gcbg { fill: #f4f6f8; }
 svg .gcline { fill: none; stroke: #45506280; stroke-width: 1px; }
@@ -38,7 +38,6 @@ svg .gcax { font-size: calc(9px * var(--ui-scale)); fill: #8d95a3; }
 svg .cleave { stroke: #11306e; stroke-width: 1.6px; }
 svg .lbl.e.hl { fill: #6b4b00; font-weight: 700; paint-order: stroke; stroke: #ffd24d; stroke-width: 7px; stroke-linejoin: round; }
 svg .lbl.e.bl { fill: #157a3c; }
-svg .lbl.e.u { font-weight: 700; }
 svg .lbl.e.hov { fill: var(--accent); font-weight: 700; }
 svg .lbl.e.bl.hov { fill: #0f6b33; }
 svg .ecut.hov { stroke: var(--accent); stroke-width: 2.2; }
@@ -388,14 +387,49 @@ svg .lbl.p.hov { font-weight: 700; }
       if (o.showFeatType && it.type) t += ' \u00b7 ' + it.type;
       if (o.showFeatLen) t += ' (' + fmt(DNA.rlen(it, n)) + ' bp)';
     }
+    /* A primer's label carries where it sits, the same way an enzyme's does. The text
+     * laid out has to be the text drawn, or the layout leaves room for a shorter label
+     * than the one that turns up and the names collide. */
+    if (it.kind === 'p' && o.showLocations) {
+      t += ' (' + fmt(Math.min(it.start, it.end) + 1) + ' .. ' + fmt(Math.max(it.start, it.end)) + ')';
+    }
     return t;
   }
+
+  /* How wide a label really is. Guessing from the character count is what let the
+   * labels overlap: a guess is wrong by a different amount for every string, and by
+   * more as the interface size grows. This measures the text in the very font it is
+   * drawn in, through a canvas kept for the purpose. */
+  const TEXT_W = new Map();
+  let textCtx = null;
+  function textWidth(str, px, weight) {
+    const size = px * uiScale();
+    const font = (weight || 400) + ' ' + size.toFixed(2) + 'px "Segoe UI", Arial, sans-serif';
+    const key = font + '\u0000' + str;
+    const had = TEXT_W.get(key);
+    if (had !== undefined) return had;
+    if (!textCtx) textCtx = document.createElement('canvas').getContext('2d');
+    textCtx.font = font;
+    const w = textCtx.measureText(str).width;
+    if (TEXT_W.size > 8000) TEXT_W.clear();
+    TEXT_W.set(key, w);
+    return w;
+  }
+  // the sizes the map's stylesheet gives each kind of label
+  const lblW = t => textWidth(t, 10.5, 400);
+  const enzW = t => textWidth(t, 10.5, 600);
+  const primW = t => textWidth(t, 10, 400);
+  const featW = t => textWidth(t, 11, 700);
+  /* Text lands on whole pixels. At a fraction of one a horizontal stem is shared
+   * between two rows of pixels and the letter looks soft; this is most of why the map
+   * read blurry. */
+  const px = v => Math.round(v);
   function collectItems(d, A) {
     const items = [], o = d.opts;
-    if (o.showFeat) for (const f of d.features) {
-      if (f.hidden) continue;
-      items.push({ kind: 'f', key: 'f:' + f.id, ref: f, start: f.start, end: f.end, strand: f.strand, name: f.name, color: f.color, type: f.type, segs: f.segs, priority: !!f.priority, cleave: f.cleave });
-    }
+    if (o.showFeat) d.features.forEach((f, born) => {
+      if (f.hidden) return;
+      items.push({ kind: 'f', key: 'f:' + f.id, ref: f, start: f.start, end: f.end, strand: f.strand, name: f.name, color: f.color, type: f.type, segs: f.segs, priority: !!f.priority, cleave: f.cleave, born, stack: f.stack, translated: !!f.translated });
+    });
     if (o.showPrimers) for (const p of d.primers) {
       if (p.hidden) continue;
       (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? PRIMER_COL : PRIMER_SOFT), type: 'primer', full: b.full, ann: b.annealed }));
@@ -415,11 +449,54 @@ svg .lbl.p.hov { font-weight: 700; }
     for (let i = 1; i < ex.length; i++) if (ex[i].start > ex[i - 1].end) introns.push({ start: ex[i - 1].end, end: ex[i].start });
     return { exons: ex, introns };
   }
+  /* Which feature is drawn nearest the sequence, and which is pushed out behind it.
+   * An order the user set themselves comes first. Otherwise the longest one that shows
+   * its amino acids goes closest, then the rest from longest to shortest, and two of
+   * the same length keep the order they were made in. A feature marked "prioritise
+   * display" still goes ahead of everything, as it always did. */
+  function featOrder(a, b, n) {
+    const mine = x => (x.stack === undefined || x.stack === null ? Infinity : x.stack);
+    return (b.priority ? 1 : 0) - (a.priority ? 1 : 0)
+      || mine(a) - mine(b)
+      || (b.translated ? 1 : 0) - (a.translated ? 1 : 0)
+      || DNA.rlen(b, n) - DNA.rlen(a, n)
+      || (a.born || 0) - (b.born || 0);
+  }
+
+  /* Where a feature stands in the stack. Nothing is numbered until the user moves
+   * something: then the feature they moved is given a place of its own and the rest
+   * keep the order the automatic rule gave them, so one nudge does not reshuffle
+   * everything else. */
+  function stackMove(f, dir) {
+    const d = D(); if (!d || !f) return;
+    const n = d.seq.length;
+    const shown = collectItems(d, analyze(d)).filter(x => x.kind === 'f');
+    const order = shown.slice().sort((a, b) => featOrder(a, b, n));
+    const at = order.findIndex(x => x.ref === f);
+    if (at < 0) return;
+    const to = at + (dir < 0 ? -1 : 1);
+    if (to < 0 || to >= order.length) { toast(dir < 0 ? 'Already nearest the sequence' : 'Already the outermost'); return; }
+    const moved = order.slice();
+    moved.splice(to, 0, moved.splice(at, 1)[0]);
+    moved.forEach((x, i) => { x.ref.stack = i; });
+    commit(d, `Reordered ${f.name || 'feature'}`);
+    d.cache = null;
+    renderAll(true);
+    toast(`“${f.name}” moved ${dir < 0 ? 'nearer the sequence' : 'further out'}`);
+  }
+  function stackReset() {
+    const d = D(); if (!d) return;
+    if (!d.features.some(f => f.stack !== undefined && f.stack !== null)) { toast('The order is already the automatic one.'); return; }
+    for (const f of d.features) delete f.stack;
+    commit(d, 'Reset the feature order');
+    d.cache = null;
+    renderAll(true);
+    toast('Features stack by length again');
+  }
+
   function assignLanes(list, n) {
     const lanes = [];
-    // longest first, except that a feature marked "prioritise display" is placed first
-    // so it ends up above the larger features it overlaps.
-    const sorted = list.slice().sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0) || DNA.rlen(b, n) - DNA.rlen(a, n));
+    const sorted = list.slice().sort((a, b) => featOrder(a, b, n));
     for (const it of sorted) {
       let k = 0;
       while (lanes[k] && lanes[k].some(o => DNA.overlaps(o, it, n))) k++;
@@ -720,6 +797,13 @@ svg .lbl.p.hov { font-weight: 700; }
         { label: 'Edit Feature…', dis: !has || !targetFeature(d), act: () => dlgFeature(targetFeature(d)) },
         { label: 'Edit Features…', dis: !has, act: dlgEditFeatures },
         { label: 'Remove Feature', dis: !has || !targetFeature(d), act: () => removeFeature(targetFeature(d).id) },
+        '-',
+        { label: 'Stacking Order', items: [
+          { label: 'Move Nearer the Sequence', dis: !has || !targetFeature(d), act: () => stackMove(targetFeature(d), -1) },
+          { label: 'Move Further Out', dis: !has || !targetFeature(d), act: () => stackMove(targetFeature(d), 1) },
+          '-',
+          { label: 'Stack by Length Again', dis: !has, act: stackReset }
+        ] },
         '-',
         { label: 'Create Feature Segment…', dis: !has || !sl, act: dlgMakeSegment },
         { label: 'Delete Feature Segment…', dis: !has || !sl, act: dlgDeleteSegment },
@@ -2710,7 +2794,10 @@ svg .lbl.p.hov { font-weight: 700; }
     const d = D(), A = analyze(d);
     // On a small screen the drawing is wider than the window and the pane pans over it:
     // a map squeezed into 412 px is a circle the size of a coin.
-    const W = Math.max(narrow() ? 620 : 420, wrap.clientWidth), H = Math.max(narrow() ? 560 : 380, wrap.clientHeight);
+    /* The strip of icons floats over the right-hand edge, so the drawing stops short
+     * of it rather than running labels underneath. */
+    const W = Math.max(narrow() ? 620 : 420, wrap.clientWidth - sideStripReserve()),
+      H = Math.max(narrow() ? 560 : 380, wrap.clientHeight);
     // A focused view is always linear: it shows one stretch of the sequence.
     const svg = (d.opts.mapMode === 'circular' && !focusOf(d)) ? drawCircular(d, A, W * S.zoom, H * S.zoom) : drawLinear(d, A, W * S.zoom);
     wrap.innerHTML = svg;
@@ -3078,18 +3165,21 @@ svg .lbl.p.hov { font-weight: 700; }
     const nPF = pFwd.reduce((m2, p) => Math.max(m2, p.lane + 1), 0);
     const nPR = pRev.reduce((m2, p) => Math.max(m2, p.lane + 1), 0);
     const pBand = nPF ? nPF * 9 + 8 : 0;
-    const inBand = nPR ? nPR * 9 + 6 : 0;
     const R = Math.max(70, Math.min(W / 2 - (narrow() ? 120 : 175), H / 2 - 60) - pBand);
     const rot = (o.mapRotate || 0) / 360 * TAU;
     const ang = bp => bp / n * TAU - Math.PI / 2 + rot;
     const P = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
     const fmtP = p => p[0].toFixed(1) + ',' + p[1].toFixed(1);
-    const fR = k => R - inBand - k * (laneW + laneGap);
+    /* Features ride against the backbone and primers lie outside them: the forward ones
+     * beyond the two lines, the reverse ones inside the feature lanes rather than
+     * between them and the backbone. */
+    const fR = k => R - 10 - k * (laneW + laneGap);
     const innerF = fR(Math.max(nF, 1) - 1) - laneW / 2;
-    const oR = k => innerF - 7 - k * 8;
-    const innerAll = nO ? oR(nO - 1) - 4 : innerF - 2;
-    const pR = k => R + 8 + k * 9;          // forward: outside the backbone
-    const pRin = k => R - 8 - k * 9;        // reverse: inside it
+    const pR = k => R + 8 + k * 9;                        // forward: outside the backbone
+    const pRin = k => Math.max(14, innerF - 8 - k * 9);   // reverse: inside the features
+    const innerP = nPR ? pRin(nPR - 1) - 5 : innerF;
+    const oR = k => Math.max(10, innerP - 7 - k * 8);
+    const innerAll = nO ? oR(nO - 1) - 4 : innerP - 2;
     const outer = nPF ? pR(nPF - 1) + 4 : R + laneW / 2 + 2;
     const Rl = outer + 30;
     const g = [];
@@ -3101,7 +3191,7 @@ svg .lbl.p.hov { font-weight: 700; }
     for (let t = step; o.showRuler && t < n; t += step) {
       const a = ang(t);
       g.push(`<line class="tick" x1="${fmtP(P(tr, a)).replace(',', '" y1="')}" x2="${fmtP(P(tr - 5, a)).replace(',', '" y2="')}"/>`);
-      if (tr > 70) { const q = P(tr - 15, a); g.push(`<text class="tickl" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" text-anchor="middle" dy=".35em">${fmt(t)}</text>`); }
+      if (tr > 70) { const q = P(tr - 15, a); g.push(`<text class="tickl" x="${px(q[0])}" y="${px(q[1])}" text-anchor="middle" dy=".35em">${fmt(t)}</text>`); }
     }
     if (o.showGC) {
       const gd = gcData(d), band = 26;
@@ -3235,7 +3325,7 @@ svg .lbl.p.hov { font-weight: 700; }
       const e1 = P(l.r0 + 1, l.a), e2 = P(Rl - 10, l.a);
       const tag = l.enz ? ` data-enz="${esc(l.enz)}"` : (l.prim ? ` data-prim="${l.prim}"` : '');
       leads.push(`<polyline class="lead"${tag} points="${fmtP(e1)} ${fmtP(e2)} ${(l.side === 0 ? tx - 3 : tx + 3).toFixed(1)},${l.ty.toFixed(1)}"/>`);
-      texts.push(`<text class="lbl ${l.cls}${o.labelBg ? ' bg' : ''}" x="${tx.toFixed(1)}" y="${l.ty.toFixed(1)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
+      texts.push(`<text class="lbl ${l.cls}${o.labelBg ? ' bg' : ''}" x="${px(tx)}" y="${px(l.ty)}" dy=".35em" text-anchor="${l.side === 0 ? 'start' : 'end'}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
     }
     // every leader line first, then every label, so no line is drawn across a name
     g.push(leads.join(''), texts.join(''));
@@ -3262,9 +3352,10 @@ svg .lbl.p.hov { font-weight: 700; }
     const pxLanes = (list, withLabel) => {
       const ext = it => {
         let lo = Infinity, hi = -Infinity;
+        const txt = mapLabel(it, d.opts, n);
+        const tw = (it.kind === 'p' ? primW(txt) : featW(txt)) + 10 * uiScale();
         for (const [a, b] of DNA.segs(it, n)) {
           let x1 = X(a), x2 = X(b);
-          const tw = mapLabel(it, d.opts, n).length * 6.3 + 10;
           if (withLabel && x2 - x1 < tw) { const c = (x1 + x2) / 2; x1 = Math.min(x1, c - tw / 2); x2 = Math.max(x2, c + tw / 2); }
           lo = Math.min(lo, x1); hi = Math.max(hi, x2);
         }
@@ -3282,7 +3373,9 @@ svg .lbl.p.hov { font-weight: 700; }
     const pFwd = prims.filter(p => p.strand !== -1), pRev = prims.filter(p => p.strand === -1);
     let nF = pxLanes(feats, true), nO = pxLanes(orfs, false);
     const nPF = pxLanes(pFwd, true), nPR = pxLanes(pRev, true);
-    const PH = 16 * uiScale();           // one primer row: the bar and its name
+    /* A primer row holds the bar, the hook and head that stand four pixels off it, a
+     * gap, and the name above. Anything less and a name rests on the row above's hook. */
+    const PH = 28 * uiScale();
     const fwdBand = nPF * PH, revBand = nPR * PH;
     if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
     const enz = shownEnz(d, A);
@@ -3296,12 +3389,15 @@ svg .lbl.p.hov { font-weight: 700; }
     elabels.sort((a, b) => a.x - b.x);
     const rowEnd = [];
     for (const l of elabels) {
-      const wd = l.text.length * 6.1 + 6;
+      const wd = enzW(l.text) + 6 * uiScale();
       let r = 0; while (rowEnd[r] !== undefined && rowEnd[r] > l.x - 2) r++;
       rowEnd[r] = l.x + wd; l.row = r;
     }
     const nRows = rowEnd.length;
-    const top = 26;
+    /* The name and size of the sequence are written across the top. The enzyme rows
+     * start below the whole of it, so a cut label cannot land on the heading. */
+    const headH = px(14 * uiScale() + 2) + Math.ceil(9 * uiScale()) + 7;
+    const top = Math.max(26, headH);
     const baseY = top + nRows * 14 + 22 + fwdBand;
     const g = [];
     const elabelTexts = [];
@@ -3309,7 +3405,7 @@ svg .lbl.p.hov { font-weight: 700; }
       const y = top + (nRows - 1 - l.row) * 14;
       const tag = ` data-enz="${esc(l.enz)}"`;
       g.push(`<line class="lead"${tag} x1="${l.x.toFixed(1)}" y1="${baseY - 7}" x2="${l.x.toFixed(1)}" y2="${y + 4}"/>`);
-      elabelTexts.push(`<text class="lbl ${l.cls}" x="${(l.x + 2).toFixed(1)}" y="${y}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
+      elabelTexts.push(`<text class="lbl ${l.cls}" x="${px((l.x + 2))}" y="${y}" data-k="${l.k}"${tag}>${esc(l.text)}</text>`);
       g.push(`<line class="ecut"${tag} x1="${l.x.toFixed(1)}" y1="${baseY - 6}" x2="${l.x.toFixed(1)}" y2="${baseY + 6}"/>`);
     }
     // the names go on top of every tick and leader line
@@ -3336,8 +3432,8 @@ svg .lbl.p.hov { font-weight: 700; }
         <g class="gchi" fill="#c43c3c">${above}</g><g class="gclo" fill="#2563c9">${below}</g>
         <path class="gcline" d="${line}"/>
         <line class="gcmid" x1="${m}" y1="${yv(mid).toFixed(1)}" x2="${m + w}" y2="${yv(mid).toFixed(1)}"/>
-        <text class="tickl gcax" x="${m - 4}" y="${(yTop + 8).toFixed(1)}" text-anchor="end">${hi}%</text>
-        <text class="tickl gcax" x="${m - 4}" y="${(yTop + H2).toFixed(1)}" text-anchor="end">${lo}%</text>
+        <text class="tickl gcax" x="${m - 4}" y="${px((yTop + 8))}" text-anchor="end">${hi}%</text>
+        <text class="tickl gcax" x="${m - 4}" y="${px((yTop + H2))}" text-anchor="end">${lo}%</text>
         <title>GC content, ${gd.win} base window · midpoint ${mid.toFixed(1)}%</title></g>`);
     }
     g.push(`<line class="bb" x1="${m}" y1="${baseY - 2}" x2="${m + w}" y2="${baseY - 2}"/><line class="bb" x1="${m}" y1="${baseY + 2}" x2="${m + w}" y2="${baseY + 2}"/>`);
@@ -3356,17 +3452,20 @@ svg .lbl.p.hov { font-weight: 700; }
           <line class="primhook" x1="${tail.toFixed(1)}" y1="${(yy - 4).toFixed(1)}" x2="${tail.toFixed(1)}" y2="${(yy + 4).toFixed(1)}" stroke="${col}"/>
           <path class="primhead" d="M${head.toFixed(1)},${yy} L${(head - dir * hd).toFixed(1)},${(yy - 3.2).toFixed(1)} L${(head - dir * hd).toFixed(1)},${(yy + 3.2).toFixed(1)} Z" fill="${col}"/>
           <rect x="${Math.min(x1, x2).toFixed(1)}" y="${yy - 5}" width="${Math.abs(x2 - x1).toFixed(1)}" height="10" fill="transparent"/></g>`);
-        g.push(`<text class="lbl p" x="${((x1 + x2) / 2).toFixed(1)}" y="${(above ? yy - 7 : yy + 13).toFixed(1)}" text-anchor="middle" fill="${col}" data-k="${it.key}" data-prim="${it.ref.id}">${esc(it.name)}${o.showLocations ? ` (${fmt(Math.min(it.start, it.end) + 1)} .. ${fmt(Math.max(it.start, it.end))})` : ''}</text>`);
+        /* The hook and the arrow head stand four pixels off the line, so the name is
+         * set clear of them rather than resting on the point. */
+        g.push(`<text class="lbl p" x="${px((x1 + x2) / 2)}" y="${px(above ? yy - 12 * uiScale() : yy + 19 * uiScale())}" text-anchor="middle" fill="${col}" data-k="${it.key}" data-prim="${it.ref.id}">${esc(mapLabel(it, o, n))}</text>`);
       }
     };
     for (const it of pFwd) primBar(it, baseY - 9 - (nPF - 1 - it.lane) * PH, true);
-    for (const it of pRev) primBar(it, baseY + 5 + it.lane * PH, false);
-    const rulerY = baseY + 4 + revBand;
+    /* The ruler keeps its place against the backbone, the features come next, and the
+     * primers that bind the bottom strand go outside them. */
+    const rulerY = baseY + 8;
     const step = niceStep(vLen / Math.max(4, Math.floor(w / 90)));
     for (let k = 0; o.showRuler && k <= vLen; k += step) {
       const t = fo ? ((v0 + k) % n) + 1 : k;
       const x = X(fo ? v0 + k : k);
-      g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${rulerY}" x2="${x.toFixed(1)}" y2="${rulerY + 5}"/><text class="tickl" x="${x.toFixed(1)}" y="${rulerY + 16}" text-anchor="middle">${d.numFrom ? fmt((t || 1) - 1 + d.numFrom) : fmt(t || 1)}</text>`);
+      g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${rulerY}" x2="${x.toFixed(1)}" y2="${rulerY + 5}"/><text class="tickl" x="${px(x)}" y="${rulerY + 16}" text-anchor="middle">${d.numFrom ? fmt((t || 1) - 1 + d.numFrom) : fmt(t || 1)}</text>`);
     }
     let y = rulerY + 28;
     const laneH = 30;
@@ -3395,8 +3494,8 @@ svg .lbl.p.hov { font-weight: 700; }
           const fits = x2 - x1 - hd > tw;
           const inside = o.labelMode === 'inside' ? (x2 - x1 > txt.length * 4) : (o.labelMode === 'outside' ? false : fits);
           if (it.kind === 'f' && (o.showFeatLabels === false || (o.labelMode === 'inside' && !inside))) { /* no name here */ }
-          else if (it.kind === 'f' && inside) g.push(`<text class="ftxt" x="${((x1 + x2) / 2).toFixed(1)}" y="${ym}" dy=".35em" text-anchor="middle">${esc(txt)}</text>`);
-          else g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}${o.labelBg ? ' bg' : ''}" x="${((x1 + x2) / 2).toFixed(1)}" y="${y2 + 11}" text-anchor="middle" data-k="${it.key}">${esc(txt)}</text>`);
+          else if (it.kind === 'f' && inside) g.push(`<text class="ftxt" x="${px(((x1 + x2) / 2))}" y="${ym}" dy=".35em" text-anchor="middle">${esc(txt)}</text>`);
+          else g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}${o.labelBg ? ' bg' : ''}" x="${px(((x1 + x2) / 2))}" y="${y2 + 11}" text-anchor="middle" data-k="${it.key}">${esc(txt)}</text>`);
         }
       }
     };
@@ -3404,8 +3503,14 @@ svg .lbl.p.hov { font-weight: 700; }
     y += Math.max(nF, 0) * laneH;
     for (const it of orfs) bar(it, y + it.lane * 10, 5, false);
     y += nO * 10;
+    if (nPR) {
+      y += 6;
+      for (const it of pRev) primBar(it, y + 5 + it.lane * PH, false);
+      y += revBand;
+    }
     const H = Math.max(y + 20, 200);
-    g.push(`<text class="ctr1" x="${m}" y="16" style="font-size:14px">${esc(d.name)}</text><text class="ctr2" x="${m + d.name.length * 8.6 + 10}" y="16" style="font-size:12px">${fo ? `${fmt(v0 + 1)}–${fmt(fo.end)} of ${fmt(n)} bp · focused` : `${fmt(n)} bp · ${d.circular ? 'circular (shown linear)' : 'linear'}`}</text>`);
+    const headY = px(14 * uiScale() + 2);
+    g.push(`<text class="ctr1" x="${px(m)}" y="${headY}" style="font-size:calc(14px * var(--ui-scale))">${esc(d.name)}</text><text class="ctr2" x="${px(m + textWidth(d.name, 14, 700) + 10 * uiScale())}" y="${headY}" style="font-size:calc(12px * var(--ui-scale))">${fo ? `${fmt(v0 + 1)}–${fmt(fo.end)} of ${fmt(n)} bp · focused` : `${fmt(n)} bp · ${d.circular ? 'circular (shown linear)' : 'linear'}`}</text>`);
     S.mapGeom = { type: 'l', m, w, n, X, y1: baseY - 12, y2: H - 6, v0, vLen };
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><rect width="${W}" height="${H}" style="fill:var(--canvas)" data-bg="1"/><g id="sellayer"></g>${g.join('')}</svg>`;
   }
@@ -3762,6 +3867,7 @@ svg .lbl.p.hov { font-weight: 700; }
     /* Every height on a row is a multiple of the interface size, so turning the size
      * down packs more bases into the window instead of drawing the same rows smaller. */
     const US = uiScale();
+    const rowW = G + bpr * CW;        // how far a row may write before it runs off
     const NT_H = 17 * US, RULER_H = compact ? 0 : 15 * US, NUM_H = 13 * US, AA_H = 15 * US;
     const fo = focusOf(d);
     const rowFrom = fo ? Math.floor(fo.start / bpr) * bpr : 0;
@@ -3780,7 +3886,9 @@ svg .lbl.p.hov { font-weight: 700; }
       const nL = lineEnd.length, enzH = nL ? nL * 14 * US + 6 * US : 3 * US;
       /* Primers binding the top strand sit above it, the ones binding the bottom strand
        * below, each in as many rows as it takes not to overlap a neighbour. */
-      const PRH = 26 * US;
+      /* A primer row carries the box of bases, its name, and a gap between the two:
+       * the name used to be flush against the box and its descenders were clipped. */
+      const PRH = 34 * US;
       const myPrims = compact ? [] : primerItems.flatMap(it => {
         const pieces = [];
         let off = 0;                                   // how many bases of the primer come before this piece
@@ -3845,19 +3953,25 @@ svg .lbl.p.hov { font-weight: 700; }
             style="left:${(hook === ' hookR' ? x - 1 + w + 1 : x - 1 - AW).toFixed(1)}px;top:${top}px;width:${AW.toFixed(1)}px;color:${col}"></div>`;
         return `<div class="primbox${hook}" data-k="${q.it.key}" data-prim="${q.it.ref.id}" title="${esc(q.it.name)} \u00b7 ${fmt(Math.min(q.it.start, q.it.end) + 1)}..${fmt(Math.max(q.it.start, q.it.end))} \u00b7 ${q.it.strand === -1 ? 'binds the bottom strand' : 'binds the top strand'}"
           style="left:${x - 1}px;top:${top}px;width:${w}px;color:${col};border-color:${col}">${esc(txt)}</div>${arrow}
-          <div class="primname" data-k="${q.it.key}" data-prim="${q.it.ref.id}" style="left:${x}px;top:${above ? top - 11 : top + 16}px;color:${col}">${esc(q.it.name)}</div>`;
+          <div class="primname" data-k="${q.it.key}" data-prim="${q.it.ref.id}" style="left:${x}px;top:${above ? top - 15 * US - 2 : top + 17 * US + 2 + 4 * US}px;color:${col}">${esc(q.it.name)}</div>`;
       };
       for (const q of pFwd) parts.push(primBox(q, 4 + enzH + (nPF - 1 - q.lane) * PRH + 12, true));
-      for (const q of pRev) parts.push(primBox(q, strandBottom + 6 + q.lane * PRH, false));
-      y = strandBottom + (nPR ? nPR * PRH + 6 : 0);
-      // a clear gap between the strands and the features below them
-      y += 8;
+      /* Features belong against the strands and primers outside them, so the reverse
+       * primers are held back until the feature lanes below have taken their room. */
+      y = strandBottom + 8;
       // --- features, each translated one carrying its own residue numbering above it
-      const rsegs = compact ? [] : segsAll.filter(s => s.a < re && s.b > rs).map(s => ({ ...s, x1: Math.max(s.a, rs), x2: Math.min(s.b, re) })).sort((p, q) => p.x1 - q.x1 || (q.x2 - q.x1) - (p.x2 - p.x1));
-      const laneEnd = [], laneTrans = [];
+      const rsegs = compact ? [] : segsAll.filter(s => s.a < re && s.b > rs).map(s => ({ ...s, x1: Math.max(s.a, rs), x2: Math.min(s.b, re) }))
+        .sort((p, q) => featOrder(p.it, q.it, n) || p.x1 - q.x1 || (q.x2 - q.x1) - (p.x2 - p.x1));
+      /* Lanes are filled in the order the features are to be stacked, not left to
+       * right, so each lane keeps the stretches already in it and a newcomer takes the
+       * first lane that nothing in it runs into. */
+      const laneEnd = [], laneTrans = [], laneSegs = [];
       for (const s of rsegs) {
-        let l = 0; while (laneEnd[l] !== undefined && laneEnd[l] > s.x1) l++;
-        laneEnd[l] = s.x2; s.lane = l;
+        let l = 0;
+        while (laneSegs[l] && laneSegs[l].some(o2 => o2.x1 < s.x2 && s.x1 < o2.x2)) l++;
+        (laneSegs[l] = laneSegs[l] || []).push(s);
+        laneEnd[l] = Math.max(laneEnd[l] === undefined ? -Infinity : laneEnd[l], s.x2);
+        s.lane = l;
         if (o.showTrans && ((s.it.kind === 'f' && s.it.ref && s.it.ref.translated) || s.it.kind === 'o')) laneTrans[l] = true;
       }
       const laneBar = [], laneAA = [], laneNum = [];
@@ -3873,9 +3987,27 @@ svg .lbl.p.hov { font-weight: 700; }
         let clip = '';
         if (s.tipR && s.x2 === s.b) clip = 'clip-path:polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%);';
         else if (s.tipL && s.x1 === s.a) clip = 'clip-path:polygon(8px 0,100% 0,100% 100%,8px 100%,0 50%);';
-        const label = w > s.it.name.length * 6.4 + 16 ? esc(s.it.name) : '';
+        /* The name goes inside the bar when it fits there and outside when it does not,
+         * following the same Internal / External setting the map obeys. Only "internal
+         * labels only" lets a name be cut off by its own bar. */
+        const nm = s.it.kind === 'o' ? '' : (s.it.name || '');
+        const mode = o.labelMode || 'auto';
+        const roomIn = w - 10 * US;
+        const fitsIn = nm && featW(nm) <= roomIn;
+        const showName = nm && o.showFeatLabels !== false;
+        const inside = showName && (mode === 'inside' ? true : (mode === 'outside' ? false : fitsIn));
+        const label = inside ? esc(nm) : '';
         const h = (s.it.kind === 'o' ? 8 : 14) * US;
         parts.push(`<div class="fbar${s.it.kind === 'o' ? ' orf' : ''}${inkLight(s.it.color) ? ' ink-light' : ''}" data-k="${s.it.key}" title="${esc(s.it.name)} ${fmt(s.it.start + 1)}..${fmt(s.it.end)}" style="left:${x}px;top:${laneBar[s.lane]}px;width:${w}px;height:${h}px;background:${s.it.color};${clip}${s.tipL && s.x1 === s.a ? 'padding-left:10px;' : ''}">${s.it.kind === 'o' ? '' : label}</div>`);
+        /* A name that will not fit is written beside the bar instead of vanishing. It is
+         * placed on whichever side has room, and never over the next feature along. */
+        if (showName && !inside) {
+          const tw = featW(nm);
+          const right = x + w + 4 * US;
+          const fitsRight = right + tw < rowW;
+          const lx = fitsRight ? right : Math.max(G, x - 4 * US - tw);
+          parts.push(`<div class="fname${inkLight(s.it.color) ? '' : ''}" data-k="${s.it.key}" title="${esc(nm)}" style="left:${lx}px;top:${laneBar[s.lane]}px;height:${h}px;line-height:${h}px;color:${s.it.color}">${esc(nm)}</div>`);
+        }
         keyLane[s.it.key] = s.lane;
       }
       for (const iv of rIntrons) {
@@ -3910,6 +4042,12 @@ svg .lbl.p.hov { font-weight: 700; }
         const x = G + (a.mid - rs) * CW - CW;
         parts.push(`<div class="aa${a.aa === '*' ? ' st' : (a.aa === 'M' ? ' m' : '')}${a.forced ? ' forced' : ''}" data-aa="${a.cs},${a.ce}" data-aak="${esc(a.key || '')}" style="left:${x}px;top:${laneAA[l]}px;width:${CW * 3}px" title="${esc(a.forced ? 'non-ATG start translated as methionine \u00b7 ' : '')}${esc(aaTip(a.aa, a.res))}">${esc(aaTxt(a.aa))}</div>`);
         if (a.res % 5 === 0) parts.push(`<div class="aanum" style="left:${x - CW * 1.5}px;top:${laneNum[l]}px;width:${CW * 6}px">${a.res}</div>`);
+      }
+      // the primers that bind the bottom strand, outside everything the features took
+      if (nPR) {
+        y += 4;
+        for (const q of pRev) parts.push(primBox(q, y + q.lane * PRH, false));
+        y += nPR * PRH;
       }
       // reading-frame rows, drawn below the features
       if (frameRows.length && !compact) {
@@ -5751,8 +5889,8 @@ svg .lbl.p.hov { font-weight: 700; }
             ${segState.map((g, i) => {
             const x = (g.start - lo) / span * W, w2 = Math.max(2, (g.end - g.start) / span * W);
             return `<rect x="${x.toFixed(1)}" y="6" width="${w2.toFixed(1)}" height="16" fill="${g.color || $('#fc').value}" stroke="${i === segPick ? '#2563c9' : 'rgba(0,0,0,.3)'}" stroke-width="${i === segPick ? 2 : 0.8}"/>
-              <text x="${(x + w2 / 2).toFixed(1)}" y="18" font-size="9" text-anchor="middle" fill="#1c2230">${esc((g.name || '').slice(0, 14))}</text>
-              <text x="${x.toFixed(1)}" y="31" font-size="8" fill="#8d95a3">${i + 1}</text>`;
+              <text x="${px((x + w2 / 2))}" y="18" font-size="9" text-anchor="middle" fill="#1c2230">${esc((g.name || '').slice(0, 14))}</text>
+              <text x="${px(x)}" y="31" font-size="8" fill="#8d95a3">${i + 1}</text>`;
           }).join('')}
             <text x="0" y="5" font-size="8" fill="#8d95a3">${fmt(lo + 1)}</text>
             <text x="${W}" y="5" font-size="8" fill="#8d95a3" text-anchor="end">${fmt(hi)}</text>
@@ -6228,7 +6366,7 @@ svg .lbl.p.hov { font-weight: 700; }
         const op = 0.35 + 0.65 * Math.min(1, b.amt / maxAmt);
         const yy = y(b.size);
         g += `<rect x="${x + 2}" y="${(yy - 2.2).toFixed(1)}" width="60" height="4.4" fill="#f5f8ff" opacity="${op.toFixed(2)}" filter="url(#glow)" rx="1"><title>${fmt(b.size)} bp${b.note ? ' · ' + b.note : ''}</title></rect>`;
-        if (ln.ladder) g += `<text x="${x - 6}" y="${(yy + 3.5).toFixed(1)}" fill="#a8b0be" font-size="10" text-anchor="end">${b.size >= 1000 ? (b.size / 1000) + ' kb' : b.size + ' bp'}</text>`;
+        if (ln.ladder) g += `<text x="${x - 6}" y="${px((yy + 3.5))}" fill="#a8b0be" font-size="10" text-anchor="end">${b.size >= 1000 ? (b.size / 1000) + ' kb' : b.size + ' bp'}</text>`;
       }
     });
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif">${g}</svg>`;
@@ -7997,7 +8135,7 @@ svg .lbl.p.hov { font-weight: 700; }
         if (y > top + gelH - 6) continue;
         if (y - lastY < 11) continue;
         lastY = y;
-        parts.push(`<text x="${left - 16}" y="${(y + 3.5).toFixed(1)}" fill="#9aa3b2" font-size="10" text-anchor="end">${b.size >= 1000 ? (b.size / 1000) + ' kb' : b.size + ' bp'}</text>`);
+        parts.push(`<text x="${left - 16}" y="${px((y + 3.5))}" fill="#9aa3b2" font-size="10" text-anchor="end">${b.size >= 1000 ? (b.size / 1000) + ' kb' : b.size + ' bp'}</text>`);
         parts.push(`<line x1="${left - 13}" y1="${y.toFixed(1)}" x2="${left - 9}" y2="${y.toFixed(1)}" stroke="#4a5262"/>`);
       }
     }
@@ -8006,9 +8144,9 @@ svg .lbl.p.hov { font-weight: 700; }
       parts.push(`<rect x="${(cx - bw / 2).toFixed(1)}" y="${wellY - 9}" width="${bw}" height="7" fill="#2b3040" rx="1"/>`);
       const d2 = data[i];
       const head = d2.label || '—';
-      parts.push(`<text x="${cx.toFixed(1)}" y="26" fill="#d6dbe5" font-size="11" text-anchor="middle" font-weight="600">${esc(head.length > Math.floor(laneW / 6) ? head.slice(0, Math.floor(laneW / 6) - 1) + '…' : head)}</text>`);
-      if (d2.sub) parts.push(`<text x="${cx.toFixed(1)}" y="40" fill="#8e97a8" font-size="9.5" text-anchor="middle">${esc(d2.sub.length > Math.floor(laneW / 5) ? d2.sub.slice(0, Math.floor(laneW / 5) - 1) + '…' : d2.sub)}</text>`);
-      parts.push(`<text x="${cx.toFixed(1)}" y="${H - 10}" fill="#6f7889" font-size="10" text-anchor="middle">${i + 1}</text>`);
+      parts.push(`<text x="${px(cx)}" y="26" fill="#d6dbe5" font-size="11" text-anchor="middle" font-weight="600">${esc(head.length > Math.floor(laneW / 6) ? head.slice(0, Math.floor(laneW / 6) - 1) + '…' : head)}</text>`);
+      if (d2.sub) parts.push(`<text x="${px(cx)}" y="40" fill="#8e97a8" font-size="9.5" text-anchor="middle">${esc(d2.sub.length > Math.floor(laneW / 5) ? d2.sub.slice(0, Math.floor(laneW / 5) - 1) + '…' : d2.sub)}</text>`);
+      parts.push(`<text x="${px(cx)}" y="${H - 10}" fill="#6f7889" font-size="10" text-anchor="middle">${i + 1}</text>`);
       if (!d2.bands.length) return;
       // bands close enough to overlap are drawn as one, which is what a real gel shows
       const placed = [];
@@ -9085,7 +9223,7 @@ svg .lbl.p.hov { font-weight: 700; }
     }).join('');
     const ticks = [];
     const step = niceStep(n / 8);
-    for (let t = 0; t < n; t += step) ticks.push(`<line x1="${x(t).toFixed(1)}" y1="${base}" x2="${x(t).toFixed(1)}" y2="${base + 4}" stroke="#8d95a3"/><text x="${x(t).toFixed(1)}" y="${base + 15}" font-size="10" fill="#8d95a3" text-anchor="middle">${t + 1}</text>`);
+    for (let t = 0; t < n; t += step) ticks.push(`<line x1="${x(t).toFixed(1)}" y1="${base}" x2="${x(t).toFixed(1)}" y2="${base + 4}" stroke="#8d95a3"/><text x="${px(x(t))}" y="${base + 15}" font-size="10" fill="#8d95a3" text-anchor="middle">${t + 1}</text>`);
     const paired = new Array(n).fill(false);
     for (const [i, j] of res.pairs) { paired[i] = true; paired[j] = true; }
     const dots = n <= 400 ? res.seq.split('').map((c, i) => `<circle cx="${x(i).toFixed(1)}" cy="${base}" r="1.6" fill="${paired[i] ? '#2563c9' : '#c3c9d3'}"/>`).join('') : '';
@@ -9135,10 +9273,10 @@ svg .lbl.p.hov { font-weight: 700; }
     const zero = y(0);
     const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
     const area = `M${m},${zero} L${pts.split(' ').join(' L')} L${(m + w).toFixed(1)},${zero} Z`;
-    const ticks = [-4, -2, 0, 2, 4].map(v => `<line x1="${m}" y1="${y(v).toFixed(1)}" x2="${(m + w).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${v === 0 ? '#9aa2ae' : '#e8ebef'}"/><text x="${m - 5}" y="${(y(v) + 3.5).toFixed(1)}" font-size="10" fill="#8d95a3" text-anchor="end">${v}</text>`).join('');
+    const ticks = [-4, -2, 0, 2, 4].map(v => `<line x1="${m}" y1="${y(v).toFixed(1)}" x2="${(m + w).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${v === 0 ? '#9aa2ae' : '#e8ebef'}"/><text x="${m - 5}" y="${px((y(v) + 3.5))}" font-size="10" fill="#8d95a3" text-anchor="end">${v}</text>`).join('');
     const step = niceStep(vals.length / 7);
     const xt = [];
-    for (let t = 0; t < vals.length; t += step) xt.push(`<text x="${x(t).toFixed(1)}" y="${H - 6}" font-size="10" fill="#8d95a3" text-anchor="middle">${t + 1}</text>`);
+    for (let t = 0; t < vals.length; t += step) xt.push(`<text x="${px(x(t))}" y="${H - 6}" font-size="10" fill="#8d95a3" text-anchor="middle">${t + 1}</text>`);
     return `<svg width="${m + w + 16}" height="${H}" viewBox="0 0 ${m + w + 16} ${H}">${ticks}
       <clipPath id="hcUp"><rect x="${m}" y="${top}" width="${w}" height="${(zero - top).toFixed(1)}"/></clipPath>
       <clipPath id="hcDn"><rect x="${m}" y="${zero.toFixed(1)}" width="${w}" height="${(bot - zero).toFixed(1)}"/></clipPath>
@@ -9155,12 +9293,12 @@ svg .lbl.p.hov { font-weight: 700; }
     const y = c => bot - (c - lo) / span * (bot - top);
     const pts = curve.map(c => `${x(c.pH).toFixed(1)},${y(c.charge).toFixed(1)}`).join(' ');
     const zero = y(0);
-    const xt = [0, 2, 4, 6, 8, 10, 12, 14].map(p => `<text x="${x(p).toFixed(1)}" y="${H - 6}" font-size="10" fill="#8d95a3" text-anchor="middle">${p}</text>`).join('');
+    const xt = [0, 2, 4, 6, 8, 10, 12, 14].map(p => `<text x="${px(x(p))}" y="${H - 6}" font-size="10" fill="#8d95a3" text-anchor="middle">${p}</text>`).join('');
     return `<svg width="${m + w + 16}" height="${H}" viewBox="0 0 ${m + w + 16} ${H}">
       <line x1="${m}" y1="${zero.toFixed(1)}" x2="${(m + w).toFixed(1)}" y2="${zero.toFixed(1)}" stroke="#9aa2ae"/>
-      <text x="${m - 5}" y="${(zero + 3.5).toFixed(1)}" font-size="10" fill="#8d95a3" text-anchor="end">0</text>
+      <text x="${m - 5}" y="${px((zero + 3.5))}" font-size="10" fill="#8d95a3" text-anchor="end">0</text>
       <line x1="${x(pI).toFixed(1)}" y1="${top}" x2="${x(pI).toFixed(1)}" y2="${bot}" stroke="#c43c3c" stroke-dasharray="3 2"/>
-      <text x="${(x(pI) + 4).toFixed(1)}" y="${top + 9}" font-size="10" fill="#c43c3c">pI ${pI.toFixed(2)}</text>
+      <text x="${px((x(pI) + 4))}" y="${top + 9}" font-size="10" fill="#c43c3c">pI ${pI.toFixed(2)}</text>
       <polyline points="${pts}" fill="none" stroke="#2563c9" stroke-width="1.4"/>${xt}
       <text x="${m}" y="${top - 2}" font-size="10" fill="#8d95a3">net charge vs pH</text></svg>`;
   }
@@ -9595,5 +9733,5 @@ svg .lbl.p.hov { font-weight: 700; }
     if (it.dis) throw new Error('Disabled: ' + itemLabel);
     return it.act();
   }
-  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings, checkUnknownTypes, loadContent, setUiScale, uiScale, stepUiScale };
+  window.__gc = { S, DNA, addDoc, setView, setSel, renderAll, menuAct, addTrace, D, buildPrintHTML, get SET() { return SET; }, saveSettings, checkUnknownTypes, loadContent, setUiScale, uiScale, stepUiScale, stackMove, stackReset };
 })();

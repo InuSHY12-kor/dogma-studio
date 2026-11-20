@@ -134,14 +134,14 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .seqscroll:focus .caret-el { animation: none; } }
 .srow { position: relative; border-bottom: 1px solid #eef0f3; }
 .srow .num { position: absolute; left: 0; width: 60px; text-align: right; color: var(--faint); font-size: calc(11px * var(--ui-scale)); font-family: var(--f-mono); }
-.srow .nt { position: absolute; white-space: pre; font-size: calc(13.5px * var(--ui-scale)); line-height: calc(17px * var(--ui-scale)); font-family: var(--f-mono); color: #000; letter-spacing: 0; -webkit-font-smoothing: antialiased; }
+.srow .nt { position: absolute; white-space: pre; font-size: calc(13.5px * var(--ui-scale)); line-height: calc(17px * var(--ui-scale)); font-family: var(--f-mono); color: #000; font-weight: 500; letter-spacing: 0; }
 .srow .nt.b { color: #000; }
-.srow .tick { position: absolute; white-space: pre; font-size: calc(13.5px * var(--ui-scale)); line-height: calc(15px * var(--ui-scale)); font-family: var(--f-mono); color: #7b8492; -webkit-font-smoothing: antialiased; }
+.srow .tick { position: absolute; white-space: pre; font-size: calc(13.5px * var(--ui-scale)); line-height: calc(15px * var(--ui-scale)); font-family: var(--f-mono); color: #7b8492; }
 .srow .aanum { position: absolute; font-size: calc(11px * var(--ui-scale)); line-height: calc(13px * var(--ui-scale)); font-family: var(--f-mono); color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
 .srow .ruler { position: absolute; height: calc(5px * var(--ui-scale)); }
-.srow .enz { position: absolute; font-size: calc(11px * var(--ui-scale)); line-height: calc(14px * var(--ui-scale)); font-family: var(--f-ui); color: #2b303a; white-space: nowrap; cursor: pointer; }
+.srow .enz { position: absolute; font-size: calc(11px * var(--ui-scale)); line-height: calc(14px * var(--ui-scale)); font-family: var(--f-ui); color: #1b2029; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .srow .enz:hover { color: var(--accent); text-decoration: underline; }
-.srow .enz.u { font-weight: 600; }
+.srow .enz.u { font-weight: 800; color: #000; }
 .srow .enz.hl { background: #ffd24d; color: #4a3500; font-weight: 700; border-radius: 2px; padding: 0 2px; }
 .inl.dis { opacity: .55; }
 .grid tr.on > td { background: #fff6d8; }
@@ -173,7 +173,7 @@ button { cursor: pointer; }
 .enztip .note { display: none; }
 /* A feature bar carries its name in whichever of black or white can be read on its
    own colour, rather than always in white with a shadow behind it. */
-.srow .fbar { position: absolute; height: calc(14px * var(--ui-scale)); font-weight: 600; font-size: calc(10.5px * var(--ui-scale)); line-height: calc(14px * var(--ui-scale)); font-family: var(--f-ui); color: #1c2230; text-align: center; white-space: nowrap; overflow: hidden; padding: 0 4px; cursor: pointer; border: 1px solid rgba(0, 0, 0, .25); }
+.srow .fbar { position: absolute; height: calc(14px * var(--ui-scale)); font-weight: 700; font-size: calc(10.5px * var(--ui-scale)); line-height: calc(14px * var(--ui-scale)); font-family: var(--f-ui); color: #1c2230; text-align: center; white-space: nowrap; overflow: hidden; padding: 0 4px; cursor: pointer; border: 1px solid rgba(0, 0, 0, .25); }
 .srow .fbar.ink-light { color: #fff; }
 
 /* A primer is not a feature: it is a box of its own bases, in its own colour, beside
@@ -182,7 +182,7 @@ button { cursor: pointer; }
    that, so each of its letters stands over the base it binds. */
 .srow .primbox { position: absolute; height: calc(17px * var(--ui-scale)); font-size: calc(13.5px * var(--ui-scale)); line-height: calc(17px * var(--ui-scale)); font-family: var(--f-mono); white-space: pre; overflow: hidden;
   border: 1px solid currentColor; border-radius: 2px; background: rgba(255, 255, 255, .92); cursor: pointer;
-  letter-spacing: 0; box-sizing: content-box; -webkit-font-smoothing: antialiased; }
+  letter-spacing: 0; box-sizing: content-box; }
 /* The 3' end comes to a point, so which way a primer reads is plain at a glance: the
    box gives up its border on that side and a solid triangle of the primer's own colour
    carries on from it. */
@@ -197,7 +197,7 @@ button { cursor: pointer; }
 .srow .aaband { position: absolute; height: calc(17px * var(--ui-scale)); border: 1px solid; border-radius: 2px; pointer-events: none; }
 .srow .fbar.orf { text-shadow: none; }
 .srow .fbar:hover { border-color: #000; }
-.srow .aa { position: absolute; font-size: calc(12.5px * var(--ui-scale)); line-height: calc(15px * var(--ui-scale)); font-family: var(--f-mono); text-align: center; color: #15181f; -webkit-font-smoothing: antialiased; }
+.srow .aa { position: absolute; font-size: calc(12.5px * var(--ui-scale)); line-height: calc(15px * var(--ui-scale)); font-family: var(--f-mono); text-align: center; color: #0b0d12; font-weight: 500; }
 .srow .aa.st { color: var(--danger); font-weight: 700; }
 .srow .aa.m { color: #1a7f37; font-weight: 700; }
 .srow .selov { position: absolute; background: var(--sel); pointer-events: none; }
@@ -699,7 +699,7 @@ body.toolwin .win { height: 100vh; }
 .fbchk { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-soft); font-size: calc(12px * var(--ui-scale)); }
 .fbmapwrap { border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--canvas); }
 .fbmaphead { display: flex; justify-content: flex-end; }
-svg.imap text.ftxt { font-size: calc(10px * var(--ui-scale)); fill: #1c2230; }
+svg.imap text.ftxt { font-size: calc(10px * var(--ui-scale)); fill: #0b0d12; font-weight: 700; }
 svg.imap [data-pick] { cursor: pointer; }
 svg.imap [data-pick]:hover { opacity: .78; }
 svg.imap line.bb { stroke: #2f3644; stroke-width: 1.2; }
@@ -710,9 +710,9 @@ svg.imap line.seledge { stroke: var(--accent); stroke-width: 2; }
 svg.imap text.sellbl { fill: var(--accent); font-size: calc(10.5px * var(--ui-scale)); font-weight: 700; }
 svg.imap line.ecut { stroke: #4a5160; stroke-width: 1.1; }
 svg.imap line.lead { stroke: #c3c9d3; stroke-width: .8; }
-svg.imap text.lbl { font-size: calc(10.5px * var(--ui-scale)); fill: #1c2230; }
+svg.imap text.lbl { font-size: calc(10.5px * var(--ui-scale)); fill: #10141d; font-weight: 500; }
 svg.imap text.lbl.p { fill: var(--primer); font-size: calc(10px * var(--ui-scale)); }
-svg.imap text.lbl.e.u { font-weight: 700; }
+svg.imap text.lbl.e.u { font-weight: 800; fill: #000; }
 svg.imap text.lbl.e.bl { fill: var(--blunt); }
 svg.imap text.lbl.e.hov { fill: var(--accent); font-weight: 700; text-decoration: underline; }
 svg.imap line.ecut.hov, svg.imap line.lead.hov { stroke: var(--accent); stroke-width: 2; }
@@ -791,3 +791,8 @@ table.esgrid td.esa { text-align: center; font-variant-numeric: tabular-nums; }
 table.esgrid td.esa.best { background: #fff3b0; font-weight: 600; }
 table.esgrid tbody tr:nth-child(odd) td { background: #fdf6e8; }
 table.esgrid tbody tr:nth-child(odd) td.esa.best { background: #fff3b0; }
+
+/* A feature's name when it will not fit inside its own bar: set beside it, in the
+   feature's colour, so the bar is still read as the feature and the name as its name. */
+.srow .fname { position: absolute; white-space: nowrap; font-weight: 700;
+  font-size: calc(10.5px * var(--ui-scale)); font-family: var(--f-ui); pointer-events: none; }

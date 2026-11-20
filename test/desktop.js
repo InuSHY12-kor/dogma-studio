@@ -497,6 +497,160 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
     console.log(`     every listed enzyme has its suppliers; ${r.unlisted.length} of ours the catalogue does not list (${r.unlisted.join(', ')})`);
   });
 
+  await step('no label on the map lands on another', async () => {
+    // a crowded sequence, so the labels have to compete for room
+    await p.evaluate(() => {
+      const d = window.__gc.D(), n = d.seq.length;
+      d.features = Array.from({ length: 24 }, (_, i) => ({
+        id: 'sf' + i, name: 'a feature with a long name ' + (i + 1), type: i % 3 ? 'misc_feature' : 'CDS',
+        start: Math.round(n * i / 24), end: Math.round(n * (i + 0.7) / 24) % n,
+        strand: i % 2 ? 1 : -1, color: '#6b8ed6', translated: i % 3 === 0
+      }));
+      d.primers = Array.from({ length: 18 }, (_, i) => {
+        const at = Math.round(n * i / 18);
+        const part = window.DNA.sub(d.seq, at, at + 20);
+        // every third one reads off the bottom strand, so both bands are exercised
+        return { id: 'sp' + i, name: 'screening primer number ' + (i + 1),
+          seq: i % 3 === 2 ? window.DNA.rc(part) : part };
+      });
+      d.opts.showLocations = true;
+      d.cache = null;
+      window.__gc.setView('map');
+    });
+    for (const shape of ['circular', 'linear']) {
+      await p.evaluate(m => { window.__gc.D().opts.mapMode = m; window.__gc.renderAll(true); }, shape);
+      await p.waitForTimeout(800);
+      const r = await p.evaluate(() => {
+        const svg = document.querySelector('#view .mapwrap svg') || document.querySelector('#view svg');
+        const t = [...svg.querySelectorAll('text')]
+          .map(e => { const b = e.getBoundingClientRect(); return { s: e.textContent.trim(), x: b.x, y: b.y, w: b.width, h: b.height }; })
+          .filter(e => e.w > 0.5 && e.h > 0.5);
+        const hit = [];
+        for (let i = 0; i < t.length; i++) for (let j = i + 1; j < t.length; j++) {
+          const a = t[i], c = t[j];
+          if (Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x) > 1 &&
+              Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y) > 1) hit.push(`"${a.s}" over "${c.s}"`);
+        }
+        return { texts: t.length, hit };
+      });
+      if (r.hit.length) throw new Error(shape + ': ' + r.hit.length + ' overlapping, e.g. ' + r.hit.slice(0, 3).join('; '));
+      console.log(`     ${shape}: ${r.texts} labels, none touching`);
+    }
+  });
+
+  await step('features lie against the sequence and primers outside them', async () => {
+    await p.evaluate(() => { window.__gc.setView('seq'); window.__gc.renderAll(true); });
+    await p.waitForTimeout(800);
+    const r = await p.evaluate(() => {
+      const out = [];
+      for (const row of document.querySelectorAll('.srow')) {
+        const base = row.getBoundingClientRect().top;
+        const low = sel => {
+          let v = null;
+          for (const e of row.querySelectorAll(sel)) { const t = e.getBoundingClientRect().top - base; if (v === null || t < v) v = t; }
+          return v;
+        };
+        const strand = low('.nt'), feat = low('.fbar');
+        let rev = null;
+        for (const e of row.querySelectorAll('.primbox')) {
+          const t = e.getBoundingClientRect().top - base;
+          if (strand !== null && t > strand && (rev === null || t < rev)) rev = t;
+        }
+        if (feat !== null && rev !== null) out.push({ feat, rev });
+      }
+      return out;
+    });
+    if (!r.length) throw new Error('no row held both a feature and a bottom-strand primer');
+    const bad = r.filter(x => x.feat >= x.rev);
+    if (bad.length) throw new Error(bad.length + ' rows put a primer nearer the sequence than a feature');
+    console.log(`     ${r.length} rows, the feature nearer in every one`);
+  });
+
+  await step('a name too wide for its feature is written beside it', async () => {
+    await p.evaluate(() => {
+      const d = window.__gc.D();
+      d.features = [{ id: 'tiny', name: 'a name far wider than its feature', type: 'misc_feature',
+        start: 320, end: 328, strand: 1, color: '#c45b9b' }];
+      d.cache = null;
+    });
+    const read = async mode => {
+      await p.evaluate(m => { window.__gc.D().opts.labelMode = m; window.__gc.renderAll(true); }, mode);
+      await p.waitForTimeout(600);
+      return p.evaluate(() => {
+        const bar = [...document.querySelectorAll('.fbar')].find(e => (e.getAttribute('title') || '').includes('a name far wider'));
+        const out = [...document.querySelectorAll('.fname')].find(e => e.textContent.includes('a name far wider'));
+        return { inBar: bar ? bar.textContent.trim() : null, beside: !!out };
+      });
+    };
+    const auto = await read('auto'), inside = await read('inside'), outside = await read('outside');
+    if (auto.inBar || !auto.beside) throw new Error('auto should put it beside the bar: ' + JSON.stringify(auto));
+    if (!inside.inBar || inside.beside) throw new Error('internal only should keep it in the bar: ' + JSON.stringify(inside));
+    if (outside.inBar || !outside.beside) throw new Error('external only should put it beside: ' + JSON.stringify(outside));
+    await p.evaluate(() => { window.__gc.D().opts.labelMode = 'auto'; });
+    console.log('     inside, beside and clipped all follow the setting');
+  });
+
+  await step('a primer name keeps clear of its own box', async () => {
+    await p.evaluate(() => { const d = window.__gc.D(); d.features = []; d.cache = null; });
+    for (const sc of [0.8, 1, 1.25]) {
+      await p.evaluate(x => window.__gc.setUiScale(x, true), sc);
+      await p.waitForTimeout(650);
+      const gaps = await p.evaluate(() => {
+        const out = [];
+        for (const nm of document.querySelectorAll('.primname')) {
+          const row = nm.closest('.srow');
+          const box = [...row.querySelectorAll('.primbox')].find(x => x.dataset.prim === nm.dataset.prim);
+          if (!box) continue;
+          const a = nm.getBoundingClientRect(), c = box.getBoundingClientRect();
+          out.push(a.top > c.top ? a.top - c.bottom : c.top - a.bottom);
+        }
+        return out;
+      });
+      if (!gaps.length) throw new Error('no primer name was drawn');
+      const tight = gaps.filter(g => g < 2);
+      if (tight.length) throw new Error(`at ${sc}, ${tight.length} names sit within 2px of their box`);
+    }
+    await p.evaluate(() => window.__gc.setUiScale(1, true));
+    await p.waitForTimeout(500);
+    console.log('     clear at 80%, 100% and 125%');
+  });
+
+  await step('the longest translated feature stacks nearest the sequence', async () => {
+    await p.evaluate(() => {
+      const d = window.__gc.D();
+      d.features = [
+        { id: 'a', name: 'short early', type: 'misc_feature', start: 100, end: 300, strand: 1, color: '#c45b9b' },
+        { id: 'b', name: 'long plain', type: 'misc_feature', start: 100, end: 900, strand: 1, color: '#4fa86a' },
+        { id: 'c', name: 'long translated', type: 'CDS', start: 100, end: 900, strand: 1, color: '#e8a33d', translated: true },
+        { id: 'd', name: 'short late', type: 'misc_feature', start: 100, end: 300, strand: 1, color: '#6b8ed6' }
+      ];
+      d.cache = null;
+      window.__gc.renderAll(true);
+    });
+    await p.waitForTimeout(700);
+    const order = () => p.evaluate(() => {
+      const row = [...document.querySelectorAll('.srow')].find(r => r.querySelectorAll('.fbar').length > 2);
+      return row ? [...row.querySelectorAll('.fbar')]
+        .map(e => ({ t: (e.getAttribute('title') || '').replace(/ \d.*$/, ''), y: e.getBoundingClientRect().top }))
+        .sort((a, b) => a.y - b.y).map(x => x.t) : [];
+    });
+    const want = ['long translated', 'long plain', 'short early', 'short late'];
+    const got = await order();
+    if (got.join('|') !== want.join('|')) throw new Error('default order is ' + got.join(' -> '));
+    await p.evaluate(() => {
+      const d = window.__gc.D(), f = d.features.find(x => x.id === 'd');
+      for (let i = 0; i < 3; i++) window.__gc.stackMove(f, -1);
+    });
+    await p.waitForTimeout(700);
+    const moved = await order();
+    if (moved[0] !== 'short late') throw new Error('moving it nearer did nothing: ' + moved.join(' -> '));
+    await p.evaluate(() => window.__gc.stackReset());
+    await p.waitForTimeout(700);
+    const back = await order();
+    if (back.join('|') !== want.join('|')) throw new Error('resetting did not restore the order: ' + back.join(' -> '));
+    console.log('     ' + want.join(' -> ') + ', and a move sticks until reset');
+  });
+
   console.log('\nERRORS:', errs.length);
   errs.forEach(e => console.log('  ' + e));
   await b.close();
