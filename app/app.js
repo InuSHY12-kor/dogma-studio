@@ -24,8 +24,10 @@
 svg .bb { fill: none; stroke: var(--bb); stroke-width: 1.2; }
 svg .tick { stroke: var(--faint); stroke-width: 1; }
 svg .tickl { fill: #6b7280; font-size: calc(10px * var(--ui-scale)); font-family: var(--f-ui); }
-svg .feat { stroke: rgba(0, 0, 0, .38); stroke-width: .8; cursor: pointer; }
-svg .feat:hover { stroke: #000; stroke-width: 1.6; }
+/* Every feature is outlined in black. A pale one — white, or close to it — is
+   otherwise invisible against the canvas. */
+svg .feat { stroke: #16181d; stroke-width: 1; cursor: pointer; }
+svg .feat:hover { stroke: #000; stroke-width: 2; }
 svg .ftxt { fill: #0b0d12; font-weight: 700; font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); pointer-events: none; paint-order: stroke; }
 svg .lbl { font-size: calc(11px * var(--ui-scale)); font-family: var(--f-ui); fill: #10141d; font-weight: 500; cursor: pointer; }
 svg .lbl.e { fill: #2a2f3a; }
@@ -54,9 +56,9 @@ svg .selarea { fill: var(--sel); stroke: var(--selline); stroke-width: .8; point
 svg .caret { stroke: var(--selline); stroke-width: 1.5; pointer-events: none; }
 svg .orf { stroke: none; cursor: pointer; }
 svg .prim { cursor: pointer; }
-svg .primline { stroke-width: 1.6; }
-svg .primhook { stroke-width: 1.6; }
-svg .prim:hover .primline, svg .prim:hover .primhook { stroke-width: 2.6; }
+svg .primarw { stroke: none; }
+svg .prim:hover .primarw { filter: brightness(1.25); }
+svg .plead { stroke-width: .8; opacity: .55; }
 svg .lbl.p { fill: var(--primer); font-size: calc(10.5px * var(--ui-scale)); }
 svg .lbl.p.hov { font-weight: 700; }
 `;
@@ -432,7 +434,7 @@ svg .lbl.p.hov { font-weight: 700; }
     });
     if (o.showPrimers) for (const p of d.primers) {
       if (p.hidden) continue;
-      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || (b.full ? PRIMER_COL : PRIMER_SOFT), type: 'primer', full: b.full, ann: b.annealed }));
+      (A.psites[p.id] || []).forEach((b, i) => items.push({ kind: 'p', key: 'p:' + p.id + ':' + i, ref: p, start: b.start, end: b.end, strand: b.strand, name: p.name, color: p.color || PRIMER_COL, type: 'primer', full: b.full, ann: b.annealed }));
     }
     if (o.showORFs && o.transMode === 'orfs') A.orfs.forEach((r, i) => items.push({
       kind: 'o', key: 'o:' + i, ref: r, start: r.start, end: r.end, strand: r.strand,
@@ -784,7 +786,7 @@ svg .lbl.p.hov { font-weight: 700; }
           { label: 'Text Only', chk: SET.toolbarStyle === 'text', act: () => { SET.toolbarStyle = 'text'; saveSettings(); applyChrome(); } },
           { label: 'Use Small Size', chk: !!SET.toolbarSmall, act: () => { SET.toolbarSmall = !SET.toolbarSmall; saveSettings(); applyChrome(); } }
         ] },
-        { label: 'Interface Size', items: [
+        { label: 'Map and Sequence Size', items: [
           { label: 'Larger', key: 'Ctrl++', act: () => stepUiScale(1) },
           { label: 'Smaller', key: 'Ctrl+-', act: () => stepUiScale(-1) },
           { label: 'Reset', key: 'Ctrl+0', act: () => setUiScale(1) },
@@ -2596,6 +2598,8 @@ svg .lbl.p.hov { font-weight: 700; }
     }
     // a size saved by an older version was a plain font size; it becomes a scale
     if (SET.fontSize && !SET.uiScale) { SET.uiScale = SET.fontSize / UI_BASE; delete SET.fontSize; }
+    document.body.style.fontSize = '';
+    document.documentElement.style.removeProperty('--ui-size');
     applyUiScale();
     renderMenuState();
   }
@@ -2630,10 +2634,11 @@ svg .lbl.p.hov { font-weight: 700; }
   const UI_SCALES = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6];
   const uiScale = () => SET.uiScale || 1;
   function applyUiScale() {
-    const f = uiScale();
-    document.documentElement.style.setProperty('--ui-scale', String(f));
-    document.documentElement.style.setProperty('--ui-size', (UI_BASE * f).toFixed(2) + 'px');
-    document.body.style.fontSize = (UI_BASE * f).toFixed(2) + 'px';
+    /* Only what belongs to the sequence follows this: the map's enzyme, feature and
+     * primer labels and the bases, bars and boxes of the sequence view. The menus,
+     * tabs, toolbar, status bar and dialogs keep the size the system gives them —
+     * growing those costs room without showing anything more. */
+    document.documentElement.style.setProperty('--ui-scale', String(uiScale()));
   }
   function setUiScale(f, quiet) {
     SET.uiScale = Math.max(UI_SCALES[0], Math.min(UI_SCALES[UI_SCALES.length - 1], f));
@@ -2641,7 +2646,7 @@ svg .lbl.p.hov { font-weight: 700; }
     saveSettings();
     measureCW();
     renderAll(true);
-    if (!quiet) toast('Interface size ' + Math.round(uiScale() * 100) + '%');
+    if (!quiet) toast('Map and sequence drawn at ' + Math.round(uiScale() * 100) + '%');
   }
   function stepUiScale(dir) {
     const f = uiScale();
@@ -3330,7 +3335,7 @@ svg .lbl.p.hov { font-weight: 700; }
     // every leader line first, then every label, so no line is drawn across a name
     g.push(leads.join(''), texts.join(''));
     // center
-    g.push(`<text class="ctr1" x="${cx}" y="${cy - 4}" text-anchor="middle">${esc(d.name)}</text><text class="ctr2" x="${cx}" y="${cy + 16}" text-anchor="middle">${fmt(n)} bp</text>`);
+    g.push(`<text class="ctr1" x="${px(cx)}" y="${px(cy - 4 * uiScale())}" text-anchor="middle">${esc(d.name)}</text><text class="ctr2" x="${px(cx)}" y="${px(cy + 16 * uiScale())}" text-anchor="middle">${fmt(n)} bp</text>`);
     S.mapGeom = { type: 'c', cx, cy, n, r1: Math.max(8, innerAll - 24), r2: Rl - 14, R, ang, rot };
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><defs>${defs}</defs><rect width="${W}" height="${H}" style="fill:var(--canvas)" data-bg="1"/><g id="sellayer"></g>${g.join('')}</svg>`;
   }
@@ -3349,7 +3354,8 @@ svg .lbl.p.hov { font-weight: 700; }
       return m + rel / vLen * w;
     };
     // lanes by pixel extent, so labels drawn under short bars never collide
-    const pxLanes = (list, withLabel) => {
+    const pxLanes = (list, withLabel, field) => {
+      const put = (it, k) => { it[field || 'lane'] = k; };
       const ext = it => {
         let lo = Infinity, hi = -Infinity;
         const txt = mapLabel(it, d.opts, n);
@@ -3365,19 +3371,40 @@ svg .lbl.p.hov { font-weight: 700; }
       for (const it of list.slice().sort((p, q) => (q.priority ? 1 : 0) - (p.priority ? 1 : 0) || p.start - q.start)) {
         const [lo, hi] = ext(it);
         let k = 0; while (lanes[k] !== undefined && lanes[k] > lo - 4) k++;
-        lanes[k] = hi; it.lane = k;
+        lanes[k] = hi; put(it, k);
       }
       return lanes.length;
     };
     const o = d.opts;
     const pFwd = prims.filter(p => p.strand !== -1), pRev = prims.filter(p => p.strand === -1);
-    let nF = pxLanes(feats, true), nO = pxLanes(orfs, false);
-    const nPF = pxLanes(pFwd, true), nPR = pxLanes(pRev, true);
+    /* Two passes again: the bars are packed by where the features are, so a short one
+     * stays on the first row rather than being pushed out by a long name, and the names
+     * get rows of their own. */
+    const nFa = pxLanes(feats, false, 'alane');
+    /* A name that fits inside its own bar needs no row of its own. Only the ones that
+     * must be written below are given rows, and those rows sit under every bar. */
+    for (const it of feats) {
+      const txt = mapLabel(it, o, n);
+      let widest = 0;
+      for (const [a2, b2] of DNA.segs(it, n)) widest = Math.max(widest, X(b2) - X(a2));
+      const roomy = widest - 9 * uiScale() > featW(txt) + 8 * uiScale();
+      it.outside = o.showFeatLabels !== false &&
+        (o.labelMode === 'outside' ? true : (o.labelMode === 'inside' ? false : !roomy));
+    }
+    const outs = feats.filter(f => f.outside);
+    let nF = pxLanes(outs, true, 'lane');
+    for (const it of feats) if (!it.outside) it.lane = -1;
+    const nO = pxLanes(orfs, false, 'lane');
+    /* Two passes. The arrows are laid out by where the primers actually sit, so one
+     * that runs into nothing stays against the backbone instead of floating up with
+     * its name; the names get their own rows, which need room for the text. */
+    const nPFa = pxLanes(pFwd, false, 'alane'), nPRa = pxLanes(pRev, false, 'alane');
+    const nPF = pxLanes(pFwd, true, 'lane'), nPR = pxLanes(pRev, true, 'lane');
     /* A primer row holds the bar, the hook and head that stand four pixels off it, a
      * gap, and the name above. Anything less and a name rests on the row above's hook. */
     const PH = 28 * uiScale();
     const fwdBand = nPF * PH, revBand = nPR * PH;
-    if (o.featOnLine) { for (const f of feats) f.lane = 0; nF = 1; }
+    if (o.featOnLine) { for (const f of feats) { f.lane = 0; f.alane = 0; } nF = 1; }
     const enz = shownEnz(d, A);
     // enzyme label rows
     const elabels = [];
@@ -3441,23 +3468,32 @@ svg .lbl.p.hov { font-weight: 700; }
      * so they are never read as an enzyme or a feature. */
     /* A primer is drawn as a line that starts with a hook and ends in an arrow — the
      * shape an oligo is drawn with — so it is never read as a feature arrow. */
-    const primBar = (it, yy, above) => {
+    /* A primer is one clean arrow: a shaft the length of the primer, coming to a point
+     * at the 3' end, with nothing standing off the back of it. The arrow sits as close
+     * to the backbone as the primers around it allow; its name may be further out, and
+     * a hairline joins the two when they are apart. */
+    const primBar = (it, yy, yName, above) => {
       for (const [a, b] of DNA.segs(it, n)) {
         const x1 = X(a), x2 = X(b), rev = it.strand === -1;
         const tail = rev ? x2 : x1, head = rev ? x1 : x2;     // 5′ end to 3′ end
-        const dir = head >= tail ? 1 : -1, hd = Math.min(7, Math.abs(head - tail) * 0.6);
+        const dir = head >= tail ? 1 : -1;
+        const hd = Math.min(8 * uiScale(), Math.abs(head - tail) * 0.6);
+        const hw = 3.6 * uiScale(), sw = 1.7 * uiScale();     // head half-height, shaft
         const col = it.color || PRIMER_COL;
-        g.push(`<g class="prim" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(Math.min(it.start, it.end) + 1)}..${fmt(Math.max(it.start, it.end))} (${rev ? 'reverse' : 'forward'})</title>
-          <line class="primline" x1="${tail.toFixed(1)}" y1="${yy}" x2="${head.toFixed(1)}" y2="${yy}" stroke="${col}"/>
-          <line class="primhook" x1="${tail.toFixed(1)}" y1="${(yy - 4).toFixed(1)}" x2="${tail.toFixed(1)}" y2="${(yy + 4).toFixed(1)}" stroke="${col}"/>
-          <path class="primhead" d="M${head.toFixed(1)},${yy} L${(head - dir * hd).toFixed(1)},${(yy - 3.2).toFixed(1)} L${(head - dir * hd).toFixed(1)},${(yy + 3.2).toFixed(1)} Z" fill="${col}"/>
-          <rect x="${Math.min(x1, x2).toFixed(1)}" y="${yy - 5}" width="${Math.abs(x2 - x1).toFixed(1)}" height="10" fill="transparent"/></g>`);
-        /* The hook and the arrow head stand four pixels off the line, so the name is
-         * set clear of them rather than resting on the point. */
-        g.push(`<text class="lbl p" x="${px((x1 + x2) / 2)}" y="${px(above ? yy - 12 * uiScale() : yy + 19 * uiScale())}" text-anchor="middle" fill="${col}" data-k="${it.key}" data-prim="${it.ref.id}">${esc(mapLabel(it, o, n))}</text>`);
+        const back = head - dir * hd;
+        const shape = `M${tail.toFixed(1)},${(yy - sw).toFixed(1)} L${back.toFixed(1)},${(yy - sw).toFixed(1)} L${back.toFixed(1)},${(yy - hw).toFixed(1)} L${head.toFixed(1)},${yy} L${back.toFixed(1)},${(yy + hw).toFixed(1)} L${back.toFixed(1)},${(yy + sw).toFixed(1)} L${tail.toFixed(1)},${(yy + sw).toFixed(1)} Z`;
+        g.push(`<g class="prim" data-k="${it.key}" data-prim="${it.ref.id}"><title>Primer ${esc(it.name)} ${fmt(Math.min(it.start, it.end) + 1)}..${fmt(Math.max(it.start, it.end))} (${rev ? 'reverse' : 'forward'}${it.full === false ? ', part of it annealed' : ''})</title>
+          <path class="primarw" d="${shape}" fill="${col}"/>
+          <rect x="${Math.min(x1, x2).toFixed(1)}" y="${(yy - 5 * uiScale()).toFixed(1)}" width="${Math.abs(x2 - x1).toFixed(1)}" height="${(10 * uiScale()).toFixed(1)}" fill="transparent"/></g>`);
+        const ty = px(above ? yName - 6 * uiScale() : yName + 12 * uiScale());
+        const cx2 = px((x1 + x2) / 2);
+        if (Math.abs(yName - yy) > 1) {
+          g.push(`<line class="plead" x1="${cx2}" y1="${px(yy + (above ? -hw : hw))}" x2="${cx2}" y2="${px(above ? ty + 3 : ty - 9 * uiScale())}" stroke="${col}"/>`);
+        }
+        g.push(`<text class="lbl p" x="${cx2}" y="${ty}" text-anchor="middle" fill="${col}" data-k="${it.key}" data-prim="${it.ref.id}">${esc(mapLabel(it, o, n))}</text>`);
       }
     };
-    for (const it of pFwd) primBar(it, baseY - 9 - (nPF - 1 - it.lane) * PH, true);
+    for (const it of pFwd) primBar(it, baseY - 9 * uiScale() - (nPFa - 1 - it.alane) * 11 * uiScale(), baseY - 9 * uiScale() - (nPF - 1 - it.lane) * PH, true);
     /* The ruler keeps its place against the backbone, the features come next, and the
      * primers that bind the bottom strand go outside them. */
     const rulerY = baseY + 8;
@@ -3467,9 +3503,9 @@ svg .lbl.p.hov { font-weight: 700; }
       const x = X(fo ? v0 + k : k);
       g.push(`<line class="tick" x1="${x.toFixed(1)}" y1="${rulerY}" x2="${x.toFixed(1)}" y2="${rulerY + 5}"/><text class="tickl" x="${px(x)}" y="${rulerY + 16}" text-anchor="middle">${d.numFrom ? fmt((t || 1) - 1 + d.numFrom) : fmt(t || 1)}</text>`);
     }
-    let y = rulerY + 28;
-    const laneH = 30;
-    const bar = (it, yy, h, labelBelow) => {
+    let y = rulerY + 28 * uiScale();
+    const laneH = 30 * uiScale();
+    const bar = (it, yy, h, labelBelow, yLabel) => {
       const ex = exonsOf(it, n);
       // the dashed line that marks each intron, drawn before the exon blocks
       for (const iv of ex.introns) g.push(`<line class="intron" x1="${X(iv.start).toFixed(1)}" y1="${(yy + h / 2).toFixed(1)}" x2="${X(iv.end).toFixed(1)}" y2="${(yy + h / 2).toFixed(1)}"/>`);
@@ -3490,28 +3526,43 @@ svg .lbl.p.hov { font-weight: 700; }
         const widest = pieces.reduce((best, pc) => (X(pc[1]) - X(pc[0])) > (X(best[1]) - X(best[0])) ? pc : best, pieces[0]);
         if (labelBelow !== false && (pieces.length === 1 || (a === widest[0] && b === widest[1]))) {
           const txt = mapLabel(it, o, n);
-          const tw = txt.length * 6.3 + 8;
+          const tw = (it.kind === 'p' ? primW(txt) : featW(txt)) + 8 * uiScale();
           const fits = x2 - x1 - hd > tw;
           const inside = o.labelMode === 'inside' ? (x2 - x1 > txt.length * 4) : (o.labelMode === 'outside' ? false : fits);
           if (it.kind === 'f' && (o.showFeatLabels === false || (o.labelMode === 'inside' && !inside))) { /* no name here */ }
           else if (it.kind === 'f' && inside) g.push(`<text class="ftxt" x="${px(((x1 + x2) / 2))}" y="${ym}" dy=".35em" text-anchor="middle">${esc(txt)}</text>`);
-          else g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}${o.labelBg ? ' bg' : ''}" x="${px(((x1 + x2) / 2))}" y="${y2 + 11}" text-anchor="middle" data-k="${it.key}">${esc(txt)}</text>`);
+          else {
+            const ly = px((yLabel === undefined ? y2 : yLabel) + 11 * uiScale());
+            const cx3 = px((x1 + x2) / 2);
+            // a hairline ties a name to its bar when the two are on different rows
+            if (yLabel !== undefined && yLabel > y2 + 1) g.push(`<line class="plead" x1="${cx3}" y1="${px(y2)}" x2="${cx3}" y2="${px(ly - 9 * uiScale())}" stroke="${it.color || '#8d95a3'}"/>`);
+            g.push(`<text class="lbl ${it.kind === 'f' ? 'f' : 'p'}${o.labelBg ? ' bg' : ''}" x="${cx3}" y="${ly}" text-anchor="middle" data-k="${it.key}">${esc(txt)}</text>`);
+          }
         }
       }
     };
-    for (const it of feats) bar(it, y + it.lane * laneH, 15);
-    y += Math.max(nF, 0) * laneH;
-    for (const it of orfs) bar(it, y + it.lane * 10, 5, false);
-    y += nO * 10;
+    const barH = 15 * uiScale();
+    const rowH = barH + 4 * uiScale();
+    const labelTop = y + Math.max(nFa, 1) * rowH + 2 * uiScale();
+    for (const it of feats) {
+      bar(it, y + it.alane * rowH, barH, true, it.lane >= 0 ? labelTop + it.lane * (15 * uiScale()) : undefined);
+    }
+    y = labelTop + Math.max(nF, 0) * 15 * uiScale();
+    for (const it of orfs) bar(it, y + it.lane * 10 * uiScale(), 5 * uiScale(), false);
+    y += nO * 10 * uiScale();
     if (nPR) {
+      /* The arrows stay against the backbone; only the names come out here. */
+      const revTop = baseY + 9 * uiScale();
       y += 6;
-      for (const it of pRev) primBar(it, y + 5 + it.lane * PH, false);
+      for (const it of pRev) primBar(it, revTop + it.alane * 11 * uiScale(), y + 5 + it.lane * PH, false);
       y += revBand;
     }
     const H = Math.max(y + 20, 200);
     const headY = px(14 * uiScale() + 2);
     g.push(`<text class="ctr1" x="${px(m)}" y="${headY}" style="font-size:calc(14px * var(--ui-scale))">${esc(d.name)}</text><text class="ctr2" x="${px(m + textWidth(d.name, 14, 700) + 10 * uiScale())}" y="${headY}" style="font-size:calc(12px * var(--ui-scale))">${fo ? `${fmt(v0 + 1)}–${fmt(fo.end)} of ${fmt(n)} bp · focused` : `${fmt(n)} bp · ${d.circular ? 'circular (shown linear)' : 'linear'}`}</text>`);
-    S.mapGeom = { type: 'l', m, w, n, X, y1: baseY - 12, y2: H - 6, v0, vLen };
+    /* A selection belongs to the sequence, so it is drawn as a band across the two
+     * backbone lines rather than a column down the whole picture. */
+    S.mapGeom = { type: 'l', m, w, n, X, y1: baseY - 11 * uiScale(), y2: baseY + 11 * uiScale(), v0, vLen };
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><rect width="${W}" height="${H}" style="fill:var(--canvas)" data-bg="1"/><g id="sellayer"></g>${g.join('')}</svg>`;
   }
 

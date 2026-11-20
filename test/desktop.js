@@ -349,7 +349,7 @@ const INDEX = 'file://' + path.join(__dirname, '..', 'app', 'index.html');
                groups: [...el.querySelectorAll('.it.has-sub')].map(x => x.textContent.trim()) };
     });
     if (m.bottom > m.win) throw new Error('it runs off the bottom: ' + JSON.stringify(m));
-    for (const g of ['Map', 'Sequence', 'Show', 'Colours', 'Window', 'Interface Size']) {
+    for (const g of ['Map', 'Sequence', 'Show', 'Colours', 'Window', 'Map and Sequence Size']) {
       if (!m.groups.includes(g)) throw new Error('no ' + g + ' group: ' + m.groups.join(', '));
     }
     await p.keyboard.press('Escape');
